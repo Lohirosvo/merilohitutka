@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Merilohitutka – paluuikkuna</title>
+<style>
+  :root { --tausta:#0f1a24; --pinta:#18283a; --teksti:#eef3f7; --himmea:#9fb3c4;
+          --vihrea:#1f8a4c; --keltainen:#c99a06; --punainen:#c0392b; --harmaa:#56677a; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         background:var(--tausta); color:var(--teksti); font-size:17px; line-height:1.4; }
+  main { max-width:560px; margin:0 auto; padding:12px; }
+  h1 { font-size:18px; margin:4px 0 10px; color:var(--himmea); font-weight:600; }
+  .tila { border-radius:14px; padding:16px; margin-bottom:12px; background:var(--harmaa); }
+  .tila.vihrea { background:var(--vihrea); } .tila.keltainen { background:var(--keltainen); color:#111; }
+  .tila.punainen { background:var(--punainen); }
+  .tila .otsikko { font-size:30px; font-weight:800; letter-spacing:.5px; }
+  .tila .lahto { font-size:22px; font-weight:700; margin-top:6px; }
+  .tila ul { margin:8px 0 0; padding-left:20px; font-size:15px; }
+  .kortti { background:var(--pinta); border-radius:12px; padding:12px 14px; margin-bottom:10px; }
+  .kortti h2 { font-size:15px; margin:0 0 6px; color:var(--himmea); font-weight:600; text-transform:uppercase; letter-spacing:.5px; }
+  .rivi { display:flex; justify-content:space-between; gap:8px; padding:3px 0; }
+  .rivi span:last-child { font-weight:700; text-align:right; }
+  .yli { color:#ff8a7a; }
+  table { width:100%; border-collapse:collapse; font-size:15px; }
+  td, th { padding:3px 4px; text-align:right; } th { color:var(--himmea); font-weight:600; }
+  td:first-child, th:first-child { text-align:left; }
+  button { font-size:17px; padding:10px 16px; border-radius:10px; border:0; background:#2f6fa3; color:#fff; font-weight:700; }
+  .pieni { font-size:13px; color:var(--himmea); }
+  details summary { cursor:pointer; color:var(--himmea); font-weight:600; padding:6px 0; }
+  label { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:4px 0; font-size:15px; }
+  input { width:110px; font-size:16px; padding:6px; border-radius:6px; border:1px solid #3a5068; background:#0f1a24; color:var(--teksti); }
+  input.leve { width:200px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Merilohitutka · paluuikkuna → <span id="kohdeNimi">Köpmanholmen</span></h1>
+
+  <section id="tila" class="tila">
+    <div class="otsikko" id="tilaOtsikko">Haetaan…</div>
+    <div class="lahto" id="tilaLahto"></div>
+    <ul id="tilaSyyt"></ul>
+  </section>
+
+  <section class="kortti">
+    <h2>Paluu</h2>
+    <div class="rivi"><span>Matka (suora × kerroin)</span><span id="matka">–</span></div>
+    <div class="rivi"><span id="lblNouseva">Nouseva tuuli</span><span id="pNouseva">–</span></div>
+    <div class="rivi"><span id="lblKova">Kova keli</span><span id="pKova">–</span></div>
+    <div class="rivi"><span id="lblTyyni">Tyyni</span><span id="pTyyni">–</span></div>
+    <div class="rivi"><span>GPS</span><span id="gps">odotetaan…</span></div>
+  </section>
+
+  <section class="kortti">
+    <h2>Ennuste</h2>
+    <div class="rivi"><span>Raja ylittyy</span><span id="ylitys">–</span></div>
+    <div class="pieni" id="ennusteLahde"></div>
+    <table id="ennusteTaulu"><thead><tr><th>Klo</th><th>Keski</th><th>Puuska</th><th>Suunta</th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <section class="kortti" id="asemat">
+    <h2>Asemat (havainto)</h2>
+    <div id="asemaLista" class="pieni">Haetaan…</div>
+  </section>
+
+  <section class="kortti">
+    <button id="paivita">Päivitä nyt</button>
+    <span class="pieni" id="paivitetty"></span>
+  </section>
+
+  <section class="kortti">
+    <details>
+      <summary>Asetukset</summary>
+      <div id="asetukset"></div>
+      <button id="tallenna" style="margin-top:8px">Tallenna</button>
+      <button id="palauta" style="margin-top:8px;background:#56677a">Oletukset</button>
+    </details>
+  </section>
+
+  <p class="pieni">Havainnot ja ennuste: Ilmatieteen laitos, avoin data (CC BY 4.0). Ennusteen ylityshetki on interpoloitu tuntiarvojen välistä. Matka on suora viiva × reittikerroin, ei todellinen reitti.</p>
+</main>
+
+<script src="malli.js"></script>
+<script src="fmi.js"></script>
+<script>
+'use strict';
+const KENTAT = [
+  ['rajaKeskituuli', 'Keskituuliraja (m/s)'], ['rajaPuuska', 'Puuskaraja (m/s)'],
+  ['nopeusNouseva', 'Paluunopeus, nouseva tuuli (km/h)'], ['nopeusKova', 'Paluunopeus, kova keli (km/h)'],
+  ['nopeusTyyni', 'Paluunopeus, tyyni (km/h)'], ['reittikerroin', 'Reittikerroin (× suora)'],
+  ['marginaaliMin', 'Marginaali (min)'], ['esivaroitusMin', 'Esivaroitus (min)'],
+  ['alakanttiEro', 'Ennuste alakanttiin, ero (m/s)'], ['nakyvyysRaja', 'Näkyvyysraja Tankar (m)'],
+  ['kohdeNimi', 'Kohde', 'teksti'], ['kohdeLat', 'Kohde lat'], ['kohdeLon', 'Kohde lon'],
+  ['asema1', 'Asema 1', 'teksti'], ['asema2', 'Asema 2', 'teksti']
+];
+
+function lueTallennettu(avain) { try { return JSON.parse(localStorage.getItem(avain)); } catch (e) { return null; } }
+function tallennaPaikalliseen(avain, arvo) { try { localStorage.setItem(avain, JSON.stringify(arvo)); } catch (e) {} }
+
+let asetukset = Object.assign({}, Malli.OLETUKSET,
+  { asema1: Malli.OLETUKSET.asemat[0], asema2: Malli.OLETUKSET.asemat[1] },
+  lueTallennettu('mlt_asetukset') || {});
+let sijainti = lueTallennettu('mlt_sijainti');
+let sijaintiTarkkuus = null;
+let havainnot = [];
+let ennuste = [];
+let ennusteLahde = '';
+let virheet = [];
+let edellinenTila = null;
+
+const $ = id => document.getElementById(id);
+const klo = d => d ? d.toLocaleTimeString('fi-FI', { hour: '2-digit', minute: '2-digit' }) : '–';
+const min = m => isFinite(m) ? (m < 90 ? Math.round(m) + ' min' : (m / 60).toFixed(1).replace('.', ',') + ' h') : '–';
+const luku = (v, d = 1) => isFinite(v) ? v.toFixed(d).replace('.', ',') : '–';
+
+function piirraAsetukset() {
+  $('asetukset').innerHTML = KENTAT.map(([k, nimi, tyyppi]) =>
+    `<label>${nimi}<input id="as_${k}" class="${tyyppi ? 'leve' : ''}" ${tyyppi ? '' : 'inputmode="decimal"'} value="${asetukset[k]}"></label>`
+  ).join('');
+}
+
+function lueAsetukset() {
+  for (const [k, , tyyppi] of KENTAT) {
+    const v = $('as_' + k).value.trim();
+    asetukset[k] = tyyppi ? v : parseFloat(v.replace(',', '.'));
+  }
+  asetukset.asemat = [asetukset.asema1, asetukset.asema2].filter(Boolean);
+  tallennaPaikalliseen('mlt_asetukset', asetukset);
+}
+
+function piirra() {
+  const nyt = new Date();
+  const t = Malli.arvioi({ nyt, sijainti, asetukset, havainnot, ennuste });
+  const otsikot = { vihrea: 'Kalastus jatkuu', keltainen: 'Valmistaudu lähtöön', punainen: 'LÄHDE NYT', tuntematon: 'Ei tietoa' };
+  $('tila').className = 'tila ' + t.tila;
+  $('tilaOtsikko').textContent = otsikot[t.tila];
+  $('tilaLahto').textContent = t.lahtoViimeistaan
+    ? (t.minuuttiaLahtoon > 0 ? `Lähde viimeistään klo ${klo(t.lahtoViimeistaan)} (${min(t.minuuttiaLahtoon)})` : `Viimeinen lähtöhetki oli klo ${klo(t.lahtoViimeistaan)}`)
+    : (t.ylitys ? '' : (ennuste.length ? `Raja ei ylity ennusteessa (${ennuste.length} h)` : ''));
+  $('tilaSyyt').innerHTML = t.syyt.concat(virheet).map(s => `<li>${s}</li>`).join('');
+
+  $('kohdeNimi').textContent = asetukset.kohdeNimi;
+  $('matka').textContent = isFinite(t.matkaKm) ? `${luku(t.matkaKm)} km (${luku(t.matkaSuoraKm)} × ${luku(asetukset.reittikerroin)})` : '–';
+  $('lblNouseva').textContent = `Nouseva tuuli ${asetukset.nopeusNouseva} km/h`;
+  $('lblKova').textContent = `Kova keli ${asetukset.nopeusKova} km/h`;
+  $('lblTyyni').textContent = `Tyyni ${asetukset.nopeusTyyni} km/h`;
+  $('pNouseva').textContent = min(t.paluu.nouseva);
+  $('pKova').textContent = min(t.paluu.kova);
+  $('pTyyni').textContent = min(t.paluu.tyyni);
+  $('gps').textContent = sijainti ? `${sijainti.lat.toFixed(4)}, ${sijainti.lon.toFixed(4)}${sijaintiTarkkuus != null ? ' ±' + Math.round(sijaintiTarkkuus) + ' m' : ' (tallennettu)'}` : 'ei sijaintia';
+
+  $('ylitys').textContent = t.ylitys ? `klo ${klo(t.ylitys)} (${t.ylitysSyy})` : (ennuste.length ? 'ei ennustejaksolla' : '–');
+  $('ennusteLahde').textContent = ennusteLahde;
+  const tulevat = ennuste.filter(r => r.t >= new Date(nyt.getTime() - 3600000)).slice(0, 12);
+  $('ennusteTaulu').querySelector('tbody').innerHTML = tulevat.map(r => `<tr>
+    <td>${klo(r.t)}</td>
+    <td class="${r.ws >= asetukset.rajaKeskituuli ? 'yli' : ''}">${luku(r.ws)}</td>
+    <td class="${r.wg >= asetukset.rajaPuuska ? 'yli' : ''}">${luku(r.wg)}</td>
+    <td>${isFinite(r.wd) ? Math.round(r.wd) + '°' : '–'}</td></tr>`).join('');
+
+  $('asemaLista').innerHTML = havainnot.length ? havainnot.map(h => `
+    <div class="rivi"><span>${h.nimi} <span class="pieni">klo ${klo(h.aika)}</span></span>
+    <span><span class="${h.ws >= asetukset.rajaKeskituuli ? 'yli' : ''}">${luku(h.ws)}</span> /
+    <span class="${h.wg >= asetukset.rajaPuuska ? 'yli' : ''}">${luku(h.wg)}</span> m/s
+    ${isFinite(h.wd) ? Math.round(h.wd) + '°' : ''}${isFinite(h.vis) ? ' · näk. ' + (h.vis >= 10000 ? Math.round(h.vis / 1000) + ' km' : Math.round(h.vis) + ' m') : ''}</span></div>
+    <div class="pieni">aseman sijainti ${luku(h.lat, 3)}, ${luku(h.lon, 3)}</div>`).join('') : 'Ei havaintoja';
+
+  if (t.tila === 'punainen' && edellinenTila !== 'punainen' && navigator.vibrate) navigator.vibrate([400, 200, 400, 200, 400]);
+  edellinenTila = t.tila;
+}
+
+let haussa = false, uusiHaku = false;
+async function paivita() {
+  if (haussa) { uusiHaku = true; return; }  // ei päällekkäisiä hakuja
+  haussa = true;
+  try { await haeKaikki(); } finally {
+    haussa = false;
+    if (uusiHaku) { uusiHaku = false; paivita(); }
+  }
+}
+
+async function haeKaikki() {
+  const nyt = new Date();
+  virheet = [];
+  $('paivitetty').textContent = ' haetaan…';
+  const asemaHaut = asetukset.asemat.map(n => FMI.haeHavainnot(n, nyt).catch(e => { virheet.push(n + ': ' + e.message); return null; }));
+  const pisteet = [[asetukset.kohdeLat, asetukset.kohdeLon]];
+  if (sijainti) pisteet.push([sijainti.lat, sijainti.lon]);
+  const ennusteHaut = pisteet.map(([la, lo]) => FMI.haeEnnuste(la, lo, nyt).catch(e => { virheet.push(e.message); return null; }));
+  const [h, e] = await Promise.all([Promise.all(asemaHaut), Promise.all(ennusteHaut)]);
+  const uudetHavainnot = h.filter(Boolean);
+  const ok = e.filter(Boolean);
+  if (uudetHavainnot.length) havainnot = uudetHavainnot;
+  if (ok.length) {
+    ennuste = ok.map(x => x.rivit).reduce((a, b) => Malli.yhdistaEnnusteet(a, b));
+    ennusteLahde = 'Lähde: ' + ok[0].lahde + (ok[0].puuska ? '' : ' – puuskaa ei saatu, vain keskituuli') +
+      (ok.length > 1 ? ' · suurempi arvo kohteesta ja omasta sijainnista' : ' · kohteen piste');
+  }
+  tallennaPaikalliseen('mlt_data', { aika: nyt, havainnot, ennuste });
+  $('paivitetty').textContent = ' päivitetty klo ' + klo(nyt) + (virheet.length ? ' (osa haoista epäonnistui)' : '');
+  piirra();
+}
+
+function palautaVanhaData() {
+  const d = lueTallennettu('mlt_data');
+  if (!d) return;
+  havainnot = (d.havainnot || []).map(h => Object.assign(h, { aika: h.aika ? new Date(h.aika) : null }));
+  ennuste = (d.ennuste || []).map(r => Object.assign(r, { t: new Date(r.t) }));
+  ennusteLahde = 'Tallennettu data klo ' + klo(new Date(d.aika));
+}
+
+function kaynnistaGps() {
+  if (!navigator.geolocation) return;
+  let ensimmainen = true;
+  navigator.geolocation.watchPosition(p => {
+    sijainti = { lat: p.coords.latitude, lon: p.coords.longitude };
+    sijaintiTarkkuus = p.coords.accuracy;
+    tallennaPaikalliseen('mlt_sijainti', sijainti);
+    if (ensimmainen) { ensimmainen = false; paivita(); } // ennuste myös omaan sijaintiin heti
+    piirra();
+  }, () => piirra(), { enableHighAccuracy: true, maximumAge: 30000, timeout: 30000 });
+}
+
+$('paivita').addEventListener('click', paivita);
+$('tallenna').addEventListener('click', () => { lueAsetukset(); piirra(); paivita(); });
+$('palauta').addEventListener('click', () => {
+  asetukset = Object.assign({}, Malli.OLETUKSET, { asema1: Malli.OLETUKSET.asemat[0], asema2: Malli.OLETUKSET.asemat[1] });
+  tallennaPaikalliseen('mlt_asetukset', asetukset); piirraAsetukset(); piirra();
+});
+
+piirraAsetukset();
+palautaVanhaData();
+piirra();
+kaynnistaGps();
+paivita();
+setInterval(paivita, 10 * 60000);  // uusi data 10 min välein
+setInterval(piirra, 30000);        // tila päivittyy ajan kuluessa
+</script>
+</body>
+</html>
