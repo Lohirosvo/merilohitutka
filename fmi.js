@@ -88,9 +88,44 @@
     return tulos;
   }
 
-  /** asema: fmisid-numero (esim. "101661") tai aseman nimi (esim. "Pietarsaari Kallan"). */
+  function etaisyysKm(a, b, c, d) {
+    const r = x => x * Math.PI / 180;
+    const h = Math.sin(r(c - a) / 2) ** 2 + Math.cos(r(a)) * Math.cos(r(c)) * Math.sin(r(d - b) / 2) ** 2;
+    return 12742 * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+
+  /** "Nimi@lat,lon": haetaan alueen asemat ja valitaan pisteen lähin, jolla on tuulihavainto. */
+  async function haeLahinAsema(nimi, lat, lon, nyt) {
+    const d = 0.12, dl = 0.3; // noin ±13 km pohjois-etelä, ±15 km itä-länsi
+    const rivit = await hae({
+      storedquery_id: 'fmi::observations::weather::simple',
+      bbox: [lon - dl, lat - d, lon + dl, lat + d].map(x => x.toFixed(3)).join(','),
+      parameters: 'ws_10min,wg_10min,wd_10min,vis',
+      starttime: isoAika(new Date(nyt.getTime() - 3 * 3600000))
+    }, WFS_FIN);
+    const asemat = new Map(); // sijainti -> rivit
+    for (const r of rivit) {
+      const k = r.lat.toFixed(4) + ',' + r.lon.toFixed(4);
+      if (!asemat.has(k)) asemat.set(k, []);
+      asemat.get(k).push(r);
+    }
+    let paras = null;
+    for (const ryhma of asemat.values()) {
+      if (!ryhma.some(r => r.param === 'ws_10min' && isFinite(r.arvo))) continue;
+      const e = etaisyysKm(lat, lon, ryhma[0].lat, ryhma[0].lon);
+      if (!paras || e < paras.e) paras = { e, ryhma };
+    }
+    if (!paras) throw new Error('alueelta ei löytynyt tuuliasemaa');
+    const h = viimeisimmat(nimi, paras.ryhma);
+    h.etaisyysArviosta = paras.e;
+    return h;
+  }
+
+  /** asema: fmisid-numero ("101661"), aseman nimi, tai "Nimi@lat,lon" (lähin asema pisteestä). */
   async function haeHavainnot(asema, nyt) {
     asema = String(asema).trim();
+    const piste = asema.match(/^(.*)@\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*$/);
+    if (piste) return haeLahinAsema(piste[1].trim() || 'Asema', parseFloat(piste[2]), parseFloat(piste[3]), nyt);
     const onNumero = /^\d+$/.test(asema);
     const nimi = onNumero ? (ASEMANIMET[asema] ? ASEMANIMET[asema] + ' (' + asema + ')' : 'Asema ' + asema) : asema;
     const params = {
@@ -145,7 +180,7 @@
     throw new Error('Ennustetta ei saatu. ' + virheet.join(' | '));
   }
 
-  const FMI = { jasennaSimple, aikasarjaksi, viimeisimmat, haeHavainnot, haeEnnuste, isoAika };
+  const FMI = { haeLahinAsema, jasennaSimple, aikasarjaksi, viimeisimmat, haeHavainnot, haeEnnuste, isoAika };
   if (typeof module !== 'undefined' && module.exports) module.exports = FMI;
   else root.FMI = FMI;
 })(typeof window !== 'undefined' ? window : this);

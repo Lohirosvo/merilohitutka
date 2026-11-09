@@ -21,7 +21,9 @@
     nakyvyysRaja: 1000,    // m: Tankarin näkyvyys alle tämän -> keltainen
     havaintoVanhaMin: 60,  // havaintoa vanhempi kuin tämä ei ratkaise tilaa
     alueSadeKm: 50,        // kauempana kohteesta (esim. kotona) paluuikkunaa ei lasketa
-    asemat: ['Pietarsaari Kallan', '101661']  // nimi tai FMI:n asemanumero (101661 = Kokkola Tankar)
+    // Asema: FMI:n asemanumero (101661 = Kokkola Tankar, varmistettu sijainnista) tai "Nimi@lat,lon" = lähin asema pisteestä.
+    // Kallanin piste on arvio (laskettu etäisyyksistä Kokkolaan ja Uusikaarlepyyhyn), asemanumeroa ei löytynyt.
+    asemat: ['Pietarsaari Kallan@63.745,22.53', '101661']
   };
 
   function rad(d) { return d * Math.PI / 180; }
@@ -184,6 +186,7 @@
       tulos.syyt.push('Ei GPS-sijaintia: paluuaikaa ei voi laskea');
     }
     tulos.tila = !tiedossa ? 'tuntematon' : ['vihrea', 'keltainen', 'punainen'][taso];
+    if (tulos.kaukana) tulos.tila = 'kaukana'; // yli alueen säteen: ei hälytyksiä, syyt näytetään tietona
     return tulos;
   }
 

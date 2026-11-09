@@ -15,6 +15,7 @@
   .tila { border-radius:14px; padding:16px; margin-bottom:12px; background:var(--harmaa); }
   .tila.vihrea { background:var(--vihrea); } .tila.keltainen { background:var(--keltainen); color:#111; }
   .tila.punainen { background:var(--punainen); }
+  .tila.kaukana { background:#2b3e52; }
   .tila .otsikko { font-size:30px; font-weight:800; letter-spacing:.5px; }
   .tila .lahto { font-size:22px; font-weight:700; margin-top:6px; }
   .tila ul { margin:8px 0 0; padding-left:20px; font-size:15px; }
@@ -82,8 +83,8 @@
   <p class="pieni">Havainnot ja ennuste: Ilmatieteen laitos, avoin data (CC BY 4.0). Ennusteen ylityshetki on interpoloitu tuntiarvojen välistä. Matka on suora viiva × reittikerroin, ei todellinen reitti.</p>
 </main>
 
-<script src="malli.js?v=2"></script>
-<script src="fmi.js?v=2"></script>
+<script src="malli.js?v=3"></script>
+<script src="fmi.js?v=3"></script>
 <script>
 'use strict';
 const KENTAT = [
@@ -94,15 +95,19 @@ const KENTAT = [
   ['alakanttiEro', 'Ennuste alakanttiin, ero (m/s)'], ['nakyvyysRaja', 'Näkyvyysraja Tankar (m)'],
   ['kohdeNimi', 'Kohde', 'teksti'], ['kohdeLat', 'Kohde lat'], ['kohdeLon', 'Kohde lon'],
   ['alueSadeKm', 'Kalastusalue, säde kohteesta (km)'],
-  ['asema1', 'Asema 1 (nimi tai numero)', 'teksti'], ['asema2', 'Asema 2 (nimi tai numero)', 'teksti']
+  ['asema1', 'Asema 1 (numero tai Nimi@lat,lon)', 'teksti'], ['asema2', 'Asema 2 (numero tai Nimi@lat,lon)', 'teksti']
 ];
 
 function lueTallennettu(avain) { try { return JSON.parse(localStorage.getItem(avain)); } catch (e) { return null; } }
 function tallennaPaikalliseen(avain, arvo) { try { localStorage.setItem(avain, JSON.stringify(arvo)); } catch (e) {} }
 
+const tallennetut = lueTallennettu('mlt_asetukset') || {};
+// v1/v2: Kallan nimellä ja Tankar nimellä eivät toimi FMI:ssä -> vaihdetaan uusiin oletuksiin
+if (tallennetut.asema1 === 'Pietarsaari Kallan') tallennetut.asema1 = Malli.OLETUKSET.asemat[0];
+if (tallennetut.asema2 === 'Kokkola Tankar') tallennetut.asema2 = Malli.OLETUKSET.asemat[1];
+if (tallennetut.asema1) tallennetut.asemat = [tallennetut.asema1, tallennetut.asema2].filter(Boolean);
 let asetukset = Object.assign({}, Malli.OLETUKSET,
-  { asema1: Malli.OLETUKSET.asemat[0], asema2: Malli.OLETUKSET.asemat[1] },
-  lueTallennettu('mlt_asetukset') || {});
+  { asema1: Malli.OLETUKSET.asemat[0], asema2: Malli.OLETUKSET.asemat[1] }, tallennetut);
 let sijainti = lueTallennettu('mlt_sijainti');
 let sijaintiTarkkuus = null;
 let havainnot = [];
@@ -134,10 +139,11 @@ function lueAsetukset() {
 function piirra() {
   const nyt = new Date();
   const t = Malli.arvioi({ nyt, sijainti, asetukset, havainnot, ennuste });
-  const otsikot = { vihrea: 'Kalastus jatkuu', keltainen: 'Valmistaudu lähtöön', punainen: 'LÄHDE NYT', tuntematon: 'Ei tietoa' };
+  const otsikot = { vihrea: 'Kalastus jatkuu', keltainen: 'Valmistaudu lähtöön', punainen: 'LÄHDE NYT', tuntematon: 'Ei tietoa', kaukana: 'Ei hälytyksiä' };
   $('tila').className = 'tila ' + t.tila;
   $('tilaOtsikko').textContent = otsikot[t.tila];
-  $('tilaLahto').textContent = t.lahtoViimeistaan
+  $('tilaLahto').textContent = t.kaukana ? `Yli ${asetukset.alueSadeKm} km kohteesta – alla tiedot ilman hälytystä`
+    : t.lahtoViimeistaan
     ? (t.minuuttiaLahtoon > 0 ? `Lähde viimeistään klo ${klo(t.lahtoViimeistaan)} (${min(t.minuuttiaLahtoon)})` : `Viimeinen lähtöhetki oli klo ${klo(t.lahtoViimeistaan)}`)
     : (t.ylitys ? '' : (ennuste.length ? `Raja ei ylity ennusteessa (${ennuste.length} h)` : ''));
   $('tilaSyyt').innerHTML = t.syyt.concat(virheet).map(s => `<li>${s}</li>`).join('');
@@ -166,7 +172,7 @@ function piirra() {
     <span><span class="${h.ws >= asetukset.rajaKeskituuli ? 'yli' : ''}">${luku(h.ws)}</span> /
     <span class="${h.wg >= asetukset.rajaPuuska ? 'yli' : ''}">${luku(h.wg)}</span> m/s
     ${isFinite(h.wd) ? Math.round(h.wd) + '°' : ''}${isFinite(h.vis) ? ' · näk. ' + (h.vis >= 10000 ? Math.round(h.vis / 1000) + ' km' : Math.round(h.vis) + ' m') : ''}</span></div>
-    <div class="pieni">aseman sijainti ${luku(h.lat, 3)}, ${luku(h.lon, 3)}</div>`).join('') : 'Ei havaintoja';
+    <div class="pieni">aseman sijainti ${luku(h.lat, 3)}, ${luku(h.lon, 3)}${isFinite(h.etaisyysArviosta) ? ' · ' + luku(h.etaisyysArviosta) + ' km arviopisteestä' : ''}</div>`).join('') : 'Ei havaintoja';
 
   if (t.tila === 'punainen' && edellinenTila !== 'punainen' && navigator.vibrate) navigator.vibrate([400, 200, 400, 200, 400]);
   edellinenTila = t.tila;
