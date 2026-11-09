@@ -147,7 +147,8 @@ def hae_sst(nyt):
 
 def main(polku):
     nyt = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
-    tulos = {"luotu": iso(nyt), "alue": ALUE, "virheet": [],
+    # luotu = todellinen hakuhetki (näytetään käyttäjälle); nyt = tasatunti hakuikkunalle
+    tulos = {"luotu": iso(datetime.now(timezone.utc)), "alue": ALUE, "virheet": [],
              "lisenssi": "E.U. Copernicus Marine Service Information"}
     for nimi, hakija in (("phy", hae_phy), ("wav", hae_wav), ("sst", hae_sst)):
         try:
