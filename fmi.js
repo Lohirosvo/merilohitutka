@@ -6,12 +6,21 @@
   'use strict';
 
   const WFS = 'https://opendata.fmi.fi/wfs';
+  const WFS_FIN = 'https://opendata.fmi.fi/wfs/fin'; // suomenkieliset paikannimet (asemahaku nimellä)
 
-  // Ennustekyselyt kokeillaan järjestyksessä; ensimmäinen toimiva jää käyttöön.
+  // Asemanumerot (fmisid) näyttönimiksi.
+  const ASEMANIMET = { '101661': 'Kokkola Tankar' };
+
+  // Ennustekyselyt kokeillaan järjestyksessä. Ensimmäinen, josta saadaan myös puuska, valitaan.
+  // Jos mistään ei saada puuskaa, käytetään ensimmäistä, josta saatiin keskituuli.
+  const EDITED = 'fmi::forecast::edited::weather::scandinavia::point::simple';
+  const MEPS = 'fmi::forecast::meps::surface::point::simple';
   const ENNUSTEKYSELYT = [
-    { id: 'fmi::forecast::edited::weather::scandinavia::point::simple', param: 'WindSpeedMS,WindGust,WindDirection', nimi: 'IL toimitettu ennuste' },
-    { id: 'fmi::forecast::meps::surface::point::simple', param: 'WindSpeedMS,WindGust,WindDirection', nimi: 'MEPS-malli' },
-    { id: 'fmi::forecast::edited::weather::scandinavia::point::simple', param: 'WindSpeedMS,WindDirection', nimi: 'IL toimitettu ennuste (ilman puuskaa)' }
+    { id: EDITED, puuska: 'HourlyMaximumGust', nimi: 'IL toimitettu ennuste' },
+    { id: EDITED, puuska: 'WindGust', nimi: 'IL toimitettu ennuste' },
+    { id: MEPS, puuska: 'WindGust', nimi: 'MEPS-malli' },
+    { id: MEPS, puuska: 'HourlyMaximumGust', nimi: 'MEPS-malli' },
+    { id: EDITED, puuska: null, nimi: 'IL toimitettu ennuste' }
   ];
 
   function isoAika(d) { return d.toISOString().replace(/\.\d{3}Z$/, 'Z'); }
@@ -53,8 +62,8 @@
     return Array.from(map.values()).sort((a, b) => a.t - b.t);
   }
 
-  async function hae(params) {
-    const url = WFS + '?' + new URLSearchParams(Object.assign({
+  async function hae(params, osoite) {
+    const url = (osoite || WFS) + '?' + new URLSearchParams(Object.assign({
       service: 'WFS', version: '2.0.0', request: 'getFeature'
     }, params)).toString();
     const vastaus = await fetch(url);
@@ -79,45 +88,60 @@
     return tulos;
   }
 
-  async function haeHavainnot(asemaNimi, nyt) {
-    const rivit = await hae({
+  /** asema: fmisid-numero (esim. "101661") tai aseman nimi (esim. "Pietarsaari Kallan"). */
+  async function haeHavainnot(asema, nyt) {
+    asema = String(asema).trim();
+    const onNumero = /^\d+$/.test(asema);
+    const nimi = onNumero ? (ASEMANIMET[asema] ? ASEMANIMET[asema] + ' (' + asema + ')' : 'Asema ' + asema) : asema;
+    const params = {
       storedquery_id: 'fmi::observations::weather::simple',
-      place: asemaNimi,
       parameters: 'ws_10min,wg_10min,wd_10min,vis',
       starttime: isoAika(new Date(nyt.getTime() - 3 * 3600000))
-    });
-    if (!rivit.length) throw new Error(asemaNimi + ': ei havaintoja');
-    return viimeisimmat(asemaNimi, rivit);
+    };
+    if (onNumero) params.fmisid = asema; else params.place = asema;
+    let rivit;
+    try {
+      rivit = await hae(params, WFS_FIN);
+    } catch (e) {
+      if (onNumero) throw e;
+      rivit = await hae(params, WFS); // varalla oletuskieli
+    }
+    if (!rivit.length) throw new Error('ei havaintoja');
+    return viimeisimmat(nimi, rivit);
   }
 
   /** Piste-ennuste: {lahde, puuska: bool, rivit: [{t, ws, wg, wd}]} */
-  let toimiva = 0; // viimeksi toiminut kysely kokeillaan ensin
+  let toimiva = 0; // viimeksi puuskan antanut kysely kokeillaan ensin
 
   async function haeEnnuste(lat, lon, nyt) {
     const virheet = [];
+    let varalla = null; // ensimmäinen tulos, jossa keskituuli mutta ei puuskaa
     const jarjestys = ENNUSTEKYSELYT.slice(toimiva).concat(ENNUSTEKYSELYT.slice(0, toimiva));
     for (const k of jarjestys) {
+      if (varalla && !k.puuska) continue; // keskituuli on jo, pelkkää keskituulta ei tarvitse hakea uudelleen
       try {
         const rivit = await hae({
           storedquery_id: k.id,
           latlon: lat.toFixed(4) + ',' + lon.toFixed(4),
-          parameters: k.param,
+          parameters: ['WindSpeedMS', 'WindDirection'].concat(k.puuska ? [k.puuska] : []).join(','),
           timestep: '60',
           starttime: isoAika(new Date(nyt.getTime() - 3600000)),
           endtime: isoAika(new Date(nyt.getTime() + 24 * 3600000))
         });
         const sarja = aikasarjaksi(rivit).map(r => ({
-          t: r.t, ws: r.WindSpeedMS, wg: r.WindGust, wd: r.WindDirection
+          t: r.t, ws: r.WindSpeedMS, wg: k.puuska ? r[k.puuska] : NaN, wd: r.WindDirection
         })).filter(r => isFinite(r.ws));
-        if (sarja.length) {
+        if (!sarja.length) { virheet.push(k.nimi + ': tyhjä vastaus'); continue; }
+        if (sarja.some(r => isFinite(r.wg))) {
           toimiva = ENNUSTEKYSELYT.indexOf(k);
-          return { lahde: k.nimi, puuska: sarja.some(r => isFinite(r.wg)), rivit: sarja };
+          return { lahde: k.nimi + ' (puuska: ' + k.puuska + ')', puuska: true, rivit: sarja };
         }
-        virheet.push(k.nimi + ': tyhjä vastaus');
+        if (!varalla) varalla = { lahde: k.nimi, puuska: false, rivit: sarja };
       } catch (e) {
-        virheet.push(k.nimi + ': ' + e.message);
+        virheet.push(k.nimi + (k.puuska ? '/' + k.puuska : '') + ': ' + e.message);
       }
     }
+    if (varalla) return varalla;
     throw new Error('Ennustetta ei saatu. ' + virheet.join(' | '));
   }
 

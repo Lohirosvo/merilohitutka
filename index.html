@@ -82,8 +82,8 @@
   <p class="pieni">Havainnot ja ennuste: Ilmatieteen laitos, avoin data (CC BY 4.0). Ennusteen ylityshetki on interpoloitu tuntiarvojen välistä. Matka on suora viiva × reittikerroin, ei todellinen reitti.</p>
 </main>
 
-<script src="malli.js"></script>
-<script src="fmi.js"></script>
+<script src="malli.js?v=2"></script>
+<script src="fmi.js?v=2"></script>
 <script>
 'use strict';
 const KENTAT = [
@@ -93,7 +93,8 @@ const KENTAT = [
   ['marginaaliMin', 'Marginaali (min)'], ['esivaroitusMin', 'Esivaroitus (min)'],
   ['alakanttiEro', 'Ennuste alakanttiin, ero (m/s)'], ['nakyvyysRaja', 'Näkyvyysraja Tankar (m)'],
   ['kohdeNimi', 'Kohde', 'teksti'], ['kohdeLat', 'Kohde lat'], ['kohdeLon', 'Kohde lon'],
-  ['asema1', 'Asema 1', 'teksti'], ['asema2', 'Asema 2', 'teksti']
+  ['alueSadeKm', 'Kalastusalue, säde kohteesta (km)'],
+  ['asema1', 'Asema 1 (nimi tai numero)', 'teksti'], ['asema2', 'Asema 2 (nimi tai numero)', 'teksti']
 ];
 
 function lueTallennettu(avain) { try { return JSON.parse(localStorage.getItem(avain)); } catch (e) { return null; } }
@@ -187,7 +188,9 @@ async function haeKaikki() {
   $('paivitetty').textContent = ' haetaan…';
   const asemaHaut = asetukset.asemat.map(n => FMI.haeHavainnot(n, nyt).catch(e => { virheet.push(n + ': ' + e.message); return null; }));
   const pisteet = [[asetukset.kohdeLat, asetukset.kohdeLon]];
-  if (sijainti) pisteet.push([sijainti.lat, sijainti.lon]);
+  if (sijainti && Malli.etaisyysKm(sijainti.lat, sijainti.lon, asetukset.kohdeLat, asetukset.kohdeLon) <= asetukset.alueSadeKm) {
+    pisteet.push([sijainti.lat, sijainti.lon]); // oma sijainti vain kalastusalueella
+  }
   const ennusteHaut = pisteet.map(([la, lo]) => FMI.haeEnnuste(la, lo, nyt).catch(e => { virheet.push(e.message); return null; }));
   const [h, e] = await Promise.all([Promise.all(asemaHaut), Promise.all(ennusteHaut)]);
   const uudetHavainnot = h.filter(Boolean);

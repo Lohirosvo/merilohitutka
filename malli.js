@@ -20,7 +20,8 @@
     alakanttiEro: 2,       // m/s: asema mittaa näin paljon ennustetta enemmän -> keltainen
     nakyvyysRaja: 1000,    // m: Tankarin näkyvyys alle tämän -> keltainen
     havaintoVanhaMin: 60,  // havaintoa vanhempi kuin tämä ei ratkaise tilaa
-    asemat: ['Pietarsaari Kallan', 'Kokkola Tankar']
+    alueSadeKm: 50,        // kauempana kohteesta (esim. kotona) paluuikkunaa ei lasketa
+    asemat: ['Pietarsaari Kallan', '101661']  // nimi tai FMI:n asemanumero (101661 = Kokkola Tankar)
   };
 
   function rad(d) { return d * Math.PI / 180; }
@@ -112,7 +113,8 @@
       matkaSuoraKm: NaN, matkaKm: NaN,
       paluu: { nouseva: NaN, kova: NaN, tyyni: NaN },
       ylitys: null, ylitysSyy: null,
-      lahtoViimeistaan: null, minuuttiaLahtoon: NaN
+      lahtoViimeistaan: null, minuuttiaLahtoon: NaN,
+      kaukana: false
     };
     let taso = 0; // 0 vihreä, 1 keltainen, 2 punainen
     const nosta = (t, syy) => { taso = Math.max(taso, t); tulos.syyt.push(syy); };
@@ -124,6 +126,10 @@
       tulos.paluu.nouseva = aikaMin(tulos.matkaKm, a.nopeusNouseva);
       tulos.paluu.kova = aikaMin(tulos.matkaKm, a.nopeusKova);
       tulos.paluu.tyyni = aikaMin(tulos.matkaKm, a.nopeusTyyni);
+      if (tulos.matkaSuoraKm > a.alueSadeKm) {
+        tulos.kaukana = true;
+        tulos.syyt.push('Olet ' + Math.round(tulos.matkaSuoraKm) + ' km päässä kohteesta: paluuikkunaa ei lasketa');
+      }
     }
 
     // 2. Havainnot (Kallan, Tankar): raja ylittynyt nyt?
@@ -161,7 +167,7 @@
         }
       }
 
-      if (t && isFinite(tulos.paluu.nouseva)) {
+      if (t && isFinite(tulos.paluu.nouseva) && !tulos.kaukana) {
         const lahto = new Date(t.getTime() - (tulos.paluu.nouseva + a.marginaaliMin) * 60000);
         tulos.lahtoViimeistaan = lahto;
         tulos.minuuttiaLahtoon = (lahto - nyt) / 60000;
