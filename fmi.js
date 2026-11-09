@@ -161,7 +161,7 @@
           parameters: ['WindSpeedMS', 'WindDirection'].concat(k.puuska ? [k.puuska] : []).join(','),
           timestep: '60',
           starttime: isoAika(new Date(nyt.getTime() - 3600000)),
-          endtime: isoAika(new Date(nyt.getTime() + 24 * 3600000))
+          endtime: isoAika(new Date(nyt.getTime() + 48 * 3600000))
         });
         const sarja = aikasarjaksi(rivit).map(r => ({
           t: r.t, ws: r.WindSpeedMS, wg: k.puuska ? r[k.puuska] : NaN, wd: r.WindDirection

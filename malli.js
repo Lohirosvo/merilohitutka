@@ -22,8 +22,8 @@
     havaintoVanhaMin: 60,  // havaintoa vanhempi kuin tämä ei ratkaise tilaa
     alueSadeKm: 50,        // kauempana kohteesta (esim. kotona) paluuikkunaa ei lasketa
     // Asema: FMI:n asemanumero (101661 = Kokkola Tankar, varmistettu sijainnista) tai "Nimi@lat,lon" = lähin asema pisteestä.
-    // Kallanin piste on arvio (laskettu etäisyyksistä Kokkolaan ja Uusikaarlepyyhyn), asemanumeroa ei löytynyt.
-    asemat: ['Pietarsaari Kallan@63.745,22.53', '101661']
+    // Kallanin piste = majakan sijainti (Hannu 9.11.2026: 63°45'05.29" N, 22°31'21.95" E). Asemanumeroa ei löytynyt.
+    asemat: ['Pietarsaari Kallan@63.7515,22.5228', '101661']
   };
 
   function rad(d) { return d * Math.PI / 180; }
@@ -161,11 +161,11 @@
       if (t && t < nyt) t = new Date(nyt.getTime());
       tulos.ylitys = t; tulos.ylitysSyy = syy;
 
-      // Ennuste alakanttiin? Verrataan tuoreisiin havaintoihin.
-      const fWs = arvoHetkella(ennuste, 'ws', nyt);
+      // Ennuste alakanttiin? Verrataan aseman havaintoa ennusteeseen SAMASSA pisteessä (h.ennWs),
+      // ei kohteen saaristopisteeseen: avoin majakka-asema tuulee luonnostaan enemmän.
       for (const h of tuoreet) {
-        if (isFinite(fWs) && isFinite(h.ws) && h.ws - fWs >= a.alakanttiEro) {
-          nosta(1, h.nimi + ' mittaa ' + h.ws.toFixed(1) + ' m/s, ennuste nyt ' + fWs.toFixed(1) + ' m/s: ennuste alakanttiin');
+        if (isFinite(h.ennWs) && isFinite(h.ws) && h.ws - h.ennWs >= a.alakanttiEro) {
+          nosta(1, h.nimi + ' mittaa ' + h.ws.toFixed(1) + ' m/s, ennuste aseman kohdalla ' + h.ennWs.toFixed(1) + ' m/s: ennuste alakanttiin');
         }
       }
 
