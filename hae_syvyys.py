@@ -152,10 +152,10 @@ def koodaa(pts, origo):
     return out
 
 
-def syvyysarvo(ominaisuudet):
+def syvyysarvo(ominaisuudet, kentat=None):
     """Syvyys kohteen ominaisuuksista: ensin tunnetut nimet, sitten ainoa järkevä luku."""
     pienet = {str(k).lower(): v for k, v in ominaisuudet.items()}
-    for k in SYVYYS_KENTAT:
+    for k in (kentat or SYVYYS_KENTAT):
         if k in pienet:
             try:
                 return float(str(pienet[k]).replace(",", "."))
@@ -230,24 +230,27 @@ def valitse_taso(nimet):
     return None
 
 
-def jasenna_geojson(data):
-    """GeoJSON -> [(syvyys, [[(a, b), ...], ...], ominaisuudet)]"""
+def jasenna_geojson(data, kentat=None):
+    """GeoJSON -> [(syvyys, [[(a, b), ...], ...], ominaisuudet)]. Alueiden reunat palautetaan viivoina."""
     out = []
     for f in data.get("features", []):
         g = f.get("geometry") or {}
         ominaisuudet = f.get("properties") or {}
-        if g.get("type") == "LineString":
-            osat = [g.get("coordinates", [])]
-        elif g.get("type") == "MultiLineString":
-            osat = g.get("coordinates", [])
+        t, c = g.get("type"), g.get("coordinates", [])
+        if t == "LineString":
+            osat = [c]
+        elif t in ("MultiLineString", "Polygon"):
+            osat = c
+        elif t == "MultiPolygon":
+            osat = [rengas for monikulmio in c for rengas in monikulmio]
         else:
             continue
         osat = [[(float(p[0]), float(p[1])) for p in o if len(p) >= 2] for o in osat]
-        out.append((syvyysarvo(ominaisuudet), osat, ominaisuudet))
+        out.append((syvyysarvo(ominaisuudet, kentat), osat, ominaisuudet))
     return out
 
 
-def jasenna_gml(xml_teksti):
+def jasenna_gml(xml_teksti, kentat=None):
     """GML (2/3) -> sama muoto kuin jasenna_geojson. Ominaisuudet = kohteen lapsielementit, joissa pelkkä teksti."""
     juuri = ET.fromstring(xml_teksti)
     out = []
@@ -269,7 +272,7 @@ def jasenna_gml(xml_teksti):
                     pts = [tuple(float(x) for x in p.split(",")[:2]) for p in el.text.split()]
                     osat.append(pts)
             if osat:
-                out.append((syvyysarvo(ominaisuudet), osat, ominaisuudet))
+                out.append((syvyysarvo(ominaisuudet, kentat), osat, ominaisuudet))
     return out
 
 
@@ -283,7 +286,7 @@ def bbox_vaihtoehdot():
             f"{emin:.0f},{nmin:.0f},{emax:.0f},{nmax:.0f},EPSG:3067"]
 
 
-def hae_kohteet(osoite, versio, taso, muodot, loki):
+def hae_kohteet(osoite, versio, taso, muodot, loki, kentat=None):
     """Kaikki alueen kohteet sivuttain. Kokeillaan GeoJSONia ja GML:ää sekä bbox-muotoja."""
     json_muodot = [m for m in muodot if "json" in m.lower()] or ["application/json"]
     tulosmuodot = json_muodot[:1] + [None]   # None = palvelimen oletus (GML)
@@ -308,11 +311,11 @@ def hae_kohteet(osoite, versio, taso, muodot, loki):
                 teksti = sisalto.decode("utf-8", "replace")
                 try:
                     if teksti.lstrip().startswith("{"):
-                        kohteet = jasenna_geojson(json.loads(teksti))
+                        kohteet = jasenna_geojson(json.loads(teksti), kentat)
                     else:
                         if "ExceptionReport" in teksti[:2000] or "ServiceException" in teksti[:2000]:
                             raise ValueError("palvelimen virhe: " + re.sub(r"\s+", " ", teksti[:400]))
-                        kohteet = jasenna_gml(teksti)
+                        kohteet = jasenna_gml(teksti, kentat)
                 except Exception as e:  # noqa: BLE001
                     loki(f"  vastausta ei voitu jäsentää ({muoto or 'GML'}, {tyyppi}): {e}; alku: {teksti[:300]!r}")
                     break

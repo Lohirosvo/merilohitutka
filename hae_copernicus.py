@@ -1,4 +1,4 @@
-"""Merilohitutka – hae_copernicus.py (v8)
+"""Merilohitutka – hae_copernicus.py (v9)
 
 Hakee Copernicus Marinesta Uusikaarlepyy–Tankar-alueen meridatan koko ennustejaksolle (9 vrk,
 3 h välein) ja kirjoittaa sen sovellusta varten:
@@ -15,7 +15,8 @@ Jos fysiikkamallin haku epäonnistuu, edellisen ajon päivätiedostot ladataan j
 jotta vanha data säilyy.
 
 v8: ajaa ensin myös Traficomin syvyyskäyrien päivityksen (hae_syvyys.py, data/syvyys.json).
-Sen epäonnistuminen ei vaikuta Copernicus-hakuun.
+v9: lisäksi Väyläviraston väylät (hae_vaylat.py, data/vaylat.json) ja IL:n tuuliennuste kartan
+pisteisiin (hae_tuuli.py, päivätiedostoihin). Näiden epäonnistuminen ei vaikuta Copernicus-hakuun.
 
 Käyttö:  python hae_copernicus.py polku/data/meri.json
 """
@@ -103,7 +104,7 @@ def tiedostonimi(pvm):
     return "p_" + pvm.replace("-", "") + ".json"
 
 
-def rakenna(phy, wav, sst, luotu, virheet, syvyys=None):
+def rakenna(phy, wav, sst, luotu, virheet, syvyys=None, tuuli=None, vaylat=None):
     """Kokoaa hakemiston ja päivätiedostot.
     phy = dict(ajat, lat, lon, syvyydet, thetao[aika, syvyys, lat, lon], u[aika, lat, lon], v, dataset)
     wav = dict(ajat, lat, lon, hs[aika, lat, lon], suunta, dataset) tai None
@@ -114,6 +115,13 @@ def rakenna(phy, wav, sst, luotu, virheet, syvyys=None):
                  "kerroin": KERROIN, "paivat": []}
     if syvyys:
         hakemisto["syvyys"] = syvyys
+    if vaylat:
+        hakemisto["vaylat"] = vaylat
+    t_paivat = {}
+    if tuuli and tuuli.get("ajat"):
+        hakemisto["tuuli"] = {"pisteet": tuuli["pisteet"], "lahde": tuuli.get("lahde"),
+                              "alku": tuuli["ajat"][0], "loppu": tuuli["ajat"][-1]}
+        t_paivat = paivittain([np.datetime64(a.replace("Z", "")) for a in tuuli["ajat"]])
     hakemisto["phy"] = {"dataset": phy["dataset"], "lat": pyorista(phy["lat"], 4), "lon": pyorista(phy["lon"], 4),
                         "syvyydet": pyorista(phy["syvyydet"], 2)}
     if wav:
@@ -141,6 +149,10 @@ def rakenna(phy, wav, sst, luotu, virheet, syvyys=None):
             sis["wav"] = w
         if "ajat" not in sis:
             sis["ajat"] = w["ajat"] if iw else []
+        it = t_paivat.get(pvm, [])
+        if it:
+            sis["tuuli"] = {"ajat": [tuuli["ajat"][i] for i in it],
+                            **{k: [tuuli[k][i] for i in it] for k in ("ws", "wd", "wg")}}
         nimi = tiedostonimi(pvm)
         tiedostot[nimi] = sis
         hakemisto["paivat"].append({"pvm": pvm, "tiedosto": nimi, "ajat": sis["ajat"]})
@@ -266,7 +278,7 @@ def palauta_edelliset(kansio, vanha):
 def main(polku):
     kansio = os.path.dirname(polku) or "."
     vanha = lue_vanha(polku)  # julkaise.yml on ottanut edellisen meri.json:n talteen tähän
-    syvyys = None
+    syvyys = vaylat = tuuli = None
     try:  # Traficomin syvyyskäyrät (harvoin muuttuvat); virhe ei saa kaataa Copernicus-hakua
         import hae_syvyys
         alku = time.monotonic()
@@ -275,6 +287,14 @@ def main(polku):
     except Exception as e:  # noqa: BLE001
         traceback.print_exc()
         syvyys = {"tila": "virhe", "viesti": f"{e}"[:300]}
+    try:  # Väyläviraston väylät (harvoin muuttuvat)
+        import hae_vaylat
+        alku = time.monotonic()
+        vaylat = hae_vaylat.paivita(kansio, sivun_osoite())
+        print(f"väylät: {vaylat.get('tila')}, {time.monotonic() - alku:.0f} s")
+    except Exception as e:  # noqa: BLE001
+        traceback.print_exc()
+        vaylat = {"tila": "virhe", "viesti": f"{e}"[:300]}
     nyt = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
     luotu = iso(datetime.now(timezone.utc))  # todellinen hakuhetki (näytetään käyttäjälle)
     tulokset, virheet = {}, []
@@ -302,7 +322,18 @@ def main(polku):
     if sst is None and vanha and vanha.get("sst"):
         sst = vanha["sst"]
         virheet.append("sst: käytetään edellistä")
-    hakemisto, tiedostot = rakenna(tulokset["phy"], tulokset.get("wav"), sst, luotu, virheet, syvyys)
+    try:  # IL:n tuuliennuste kartan pisteisiin, sama aikajakso kuin Copernicuksella
+        import hae_tuuli
+        alku = time.monotonic()
+        a = tulokset["phy"]["ajat"]
+        tuuli, tvirhe = hae_tuuli.hae(iso(np.datetime64(a[0])), iso(np.datetime64(a[-1])))
+        if tvirhe:
+            virheet.append(f"tuuli: {tvirhe}")
+        print(f"tuuli: {'OK' if tuuli else 'VIRHE'}, {time.monotonic() - alku:.0f} s")
+    except Exception as e:  # noqa: BLE001
+        traceback.print_exc()
+        virheet.append(f"tuuli: {str(e)[:200]}")
+    hakemisto, tiedostot = rakenna(tulokset["phy"], tulokset.get("wav"), sst, luotu, virheet, syvyys, tuuli, vaylat)
     kirjoita(kansio, hakemisto, tiedostot)
 
 
