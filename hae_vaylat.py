@@ -1,4 +1,4 @@
-"""Merilohitutka – hae_vaylat.py (v12)
+"""Merilohitutka – hae_vaylat.py (v13: alue parametrina)
 
 Hakee Väyläviraston vesiväyläaineistosta (avoin WFS, CC BY 4.0) alueen navigointilinjat ja
 väyläalueet (reunat + kulkusyvyys) ja kirjoittaa ne tiedostoon data/vaylat.json.
@@ -52,7 +52,7 @@ def _koodaa_kaikki(kohteet, jarjestys, origo):
     return out
 
 
-def hae_vaylavirastolta(loki=print):
+def hae_vaylavirastolta(loki=print, alue=None):
     virheet = []
     for osoite in WFS:
         try:
@@ -68,14 +68,14 @@ def hae_vaylavirastolta(loki=print):
         if not linjat and not alueet:
             virheet.append(f"{osoite}: ei väylätasoja")
             continue
-        origo = (int(W.ALUE["lat_min"] * 10) / 10, int(W.ALUE["lon_min"] * 10) / 10)
+        origo = W.origo_alueelle(alue)
         tulos = {"muoto": 1, "versio": VERSIO, "luotu": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "lahde": LAHDE,
-                 "huom": HUOM, "lisenssi": "CC BY 4.0", "origo": list(origo), "kerroin": W.KERROIN,
+                 "huom": HUOM, "lisenssi": "CC BY 4.0", "origo": list(origo), "kerroin": W.KERROIN, "alue": alue or W.ALUE,
                  "syvyydet": "s = mitoitussyväys, h = haraussyvyys (Väyläviraston kentät mitoitussyvays, haraussyvyys)",
                  "linjat": [], "alueet": []}
         for tasot, avain in ((linjat, "linjat"), (alueet, "alueet")):
             for taso in tasot:
-                kohteet = W.hae_kohteet(osoite, versio, taso, muodot, loki, SYVYYS_KENTAT)
+                kohteet = W.hae_kohteet(osoite, versio, taso, muodot, loki, SYVYYS_KENTAT, alue)
                 if not kohteet:
                     loki(f"  {taso}: ei kohteita alueella")
                     continue
@@ -88,7 +88,7 @@ def hae_vaylavirastolta(loki=print):
     return None, " | ".join(virheet)[:500]
 
 
-def paivita(kansio, sivun_osoite, loki=print):
+def paivita(kansio, sivun_osoite, loki=print, alue=None):
     """Kirjoittaa kansio/vaylat.json. Palauttaa tilan meri.json:iin."""
     polku = os.path.join(kansio, "vaylat.json")
     vanha = None
@@ -98,6 +98,9 @@ def paivita(kansio, sivun_osoite, loki=print):
     except Exception as e:  # noqa: BLE001
         loki(f"väylät: edellistä vaylat.json:ia ei saatu ({e})")
     varalla = vanha
+    if vanha and alue and vanha.get("alue") not in (None, alue):
+        loki("väylät: edellinen tiedosto on eri alueelta – haetaan uudelleen")
+        vanha = varalla = None
     if vanha and vanha.get("versio", 1) < VERSIO:
         loki("väylät: edellinen tiedosto on vanhaa versiota – haetaan uudelleen")
         vanha = None
@@ -113,7 +116,7 @@ def paivita(kansio, sivun_osoite, loki=print):
             loki(f"väylät: käytetään edellistä ({ika} vrk vanha)")
             return {"tila": "ok", "luotu": vanha["luotu"]}
     try:
-        uusi, virhe = hae_vaylavirastolta(loki)
+        uusi, virhe = hae_vaylavirastolta(loki, alue)
     except Exception as e:  # noqa: BLE001
         uusi, virhe = None, f"odottamaton virhe: {e}"
     if uusi:

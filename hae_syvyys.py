@@ -1,4 +1,4 @@
-"""Merilohitutka – hae_syvyys.py (v12)
+"""Merilohitutka – hae_syvyys.py (v13: alue parametrina)
 
 Hakee Traficomin merikartan syvyyskäyrät (aineisto "Merikartan syvyystiedot") WFS-rajapinnasta
 Uusikaarlepyy–Tankar-alueelta ja kirjoittaa ne sovellukselle tiedostoon data/syvyys.json.
@@ -175,9 +175,14 @@ def syvyysarvo(ominaisuudet, kentat=None):
     return luvut[0] if len(luvut) == 1 else None
 
 
-def rakenna(viivat_syvyyksittain, luotu, taso):
+def origo_alueelle(alue=None):
+    a = alue or ALUE
+    return (math.floor(a["lat_min"] * 10) / 10, math.floor(a["lon_min"] * 10) / 10)
+
+
+def rakenna(viivat_syvyyksittain, luotu, taso, alue=None):
     """{syvyys: [[(lat, lon), ...], ...]} -> syvyys.json-sisältö."""
-    origo = (math.floor(ALUE["lat_min"] * 10) / 10, math.floor(ALUE["lon_min"] * 10) / 10)
+    origo = origo_alueelle(alue)
     kayrat, pisteita = {}, 0
     for syv in sorted(viivat_syvyyksittain):
         lista = []
@@ -190,7 +195,7 @@ def rakenna(viivat_syvyyksittain, luotu, taso):
                     pisteita += len(k) // 2
         if lista:
             kayrat[(f"{syv:g}")] = lista
-    return {"muoto": 1, "versio": VERSIO, "luotu": luotu, "lahde": LAHDE, "huom": HUOM, "taso": taso,
+    return {"muoto": 1, "versio": VERSIO, "luotu": luotu, "lahde": LAHDE, "huom": HUOM, "taso": taso, "alue": alue or ALUE,
             "lisenssi": "Traficomin avoin data (CC BY 4.0 / hydrografisen aineiston lisenssi), "
                         "https://www.traficom.fi/en/transport-system/geoinformationsmaterial/use-and-licences-data",
             "origo": list(origo), "kerroin": KERROIN, "pisteita": pisteita, "kayrat": kayrat}
@@ -277,8 +282,8 @@ def jasenna_gml(xml_teksti, kentat=None):
     return out
 
 
-def bbox_vaihtoehdot():
-    a = ALUE
+def bbox_vaihtoehdot(alue=None):
+    a = alue or ALUE
     kulmat = [tm35(la, lo) for la in (a["lat_min"], a["lat_max"]) for lo in (a["lon_min"], a["lon_max"])]
     emin, emax = min(k[0] for k in kulmat) - 1000, max(k[0] for k in kulmat) + 1000
     nmin, nmax = min(k[1] for k in kulmat) - 1000, max(k[1] for k in kulmat) + 1000
@@ -360,14 +365,14 @@ def _sivuttain(hae, ilmoitettu, sivu, loki):
     return kaikki
 
 
-def hae_kohteet(osoite, versio, taso, muodot, loki, kentat=None):
+def hae_kohteet(osoite, versio, taso, muodot, loki, kentat=None, alue=None):
     """Kaikki alueen kohteet. v11-lokin mukaan Traficomin palvelin palauttaa sivut ilman järjestystä
     eri järjestyksessä (3984 kohteesta 1134 tuli kahdesti, yhtä monta jäi saamatta). Siksi:
     1) ensimmäinen pyyntö kertoo kokonaismäärän, 2) kaikki yhdellä pyynnöllä, jos palvelin sallii,
     3) muuten sivut pysyvässä järjestyksessä (sortBy), 4) tarkistus: uniikkien määrä = ilmoitettu."""
     json_muodot = [m for m in muodot if "json" in m.lower()] or ["application/json"]
     tulosmuodot = json_muodot[:1] + [None]   # None = palvelimen oletus (GML)
-    for bbox in bbox_vaihtoehdot():
+    for bbox in bbox_vaihtoehdot(alue):
         for muoto in tulosmuodot:
             nimi = f"muoto {muoto or 'GML'}, bbox {bbox.rsplit(',', 1)[-1]}"
             hae = lambda alku, maara, j=None: _getfeature(osoite, versio, taso, bbox, muoto, kentat, maara, alku, j)  # noqa: E731
@@ -409,7 +414,7 @@ def hae_kohteet(osoite, versio, taso, muodot, loki, kentat=None):
     return []
 
 
-def hae_traficomista(loki=print):
+def hae_traficomista(loki=print, alue=None):
     """Palauttaa (syvyys.json-sisältö, None) tai (None, virheteksti)."""
     virheet = []
     for osoite in WFS:
@@ -427,7 +432,7 @@ def hae_traficomista(loki=print):
             virheet.append(f"{osoite}: ei syvyyskäyrätasoa")
             continue
         loki(f"  syvyyskäyrätaso: {taso}")
-        kohteet = hae_kohteet(osoite, versio, taso, muodot, loki)
+        kohteet = hae_kohteet(osoite, versio, taso, muodot, loki, None, alue)
         if not kohteet:
             virheet.append(f"{osoite}: {taso}: ei kohteita")
             continue
@@ -446,14 +451,14 @@ def hae_traficomista(loki=print):
             for o in osat:
                 if len(o) >= 2:
                     viivat.setdefault(syv, []).append(muunna(o, jarjestys))
-        tulos = rakenna(viivat, datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), taso)
+        tulos = rakenna(viivat, datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), taso, alue)
         loki(f"  syvyydet (m): {', '.join(tulos['kayrat'].keys())}; pisteitä yksinkertaistuksen jälkeen {tulos['pisteita']}")
         return tulos, None
     return None, " | ".join(virheet)[:500]
 
 
 # ---------------------------------------------------------------- käyttö hae_copernicus.py:stä
-def paivita(kansio, sivun_osoite, loki=print):
+def paivita(kansio, sivun_osoite, loki=print, alue=None):
     """Kirjoittaa kansio/syvyys.json. Palauttaa tilan meri.json:iin: {tila, luotu?, viesti?}."""
     polku = os.path.join(kansio, "syvyys.json")
     vanha = None
@@ -462,6 +467,9 @@ def paivita(kansio, sivun_osoite, loki=print):
             vanha = json.loads(r.read().decode("utf-8"))
     except Exception as e:  # noqa: BLE001
         loki(f"syvyys: edellistä syvyys.json:ia ei saatu ({e})")
+    if vanha and "kayrat" in vanha and alue and vanha.get("alue") not in (None, alue):
+        loki("syvyys: edellinen tiedosto on eri alueelta – haetaan uudelleen")
+        vanha = None
     if vanha and "kayrat" in vanha and vanha.get("versio", 1) < VERSIO:
         loki(f"syvyys: edellinen tiedosto on vanhaa versiota ({vanha.get('versio', 1)}) – haetaan uudelleen")
         vanha_kaytettavissa = vanha   # varalle, jos uusi haku epäonnistuu
@@ -480,7 +488,7 @@ def paivita(kansio, sivun_osoite, loki=print):
             loki(f"syvyys: käytetään edellistä ({ika} vrk vanha)")
             return {"tila": "ok", "luotu": vanha["luotu"]}
     try:
-        uusi, virhe = hae_traficomista(loki)
+        uusi, virhe = hae_traficomista(loki, alue)
     except Exception as e:  # noqa: BLE001
         uusi, virhe = None, f"odottamaton virhe: {e}"
     if uusi:

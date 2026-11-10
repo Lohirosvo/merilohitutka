@@ -1,4 +1,4 @@
-"""Merilohitutka – hae_tuuli.py (v9)
+"""Merilohitutka – hae_tuuli.py (v13: pisteet alueittain)
 
 Hakee Ilmatieteen laitoksen toimitetun ennusteen (fmi::forecast::edited::weather::scandinavia::point::simple)
 tuulen kiinteisiin pisteisiin merellä, 3 h välein koko Copernicus-jakson ajalle. Kartalle tuulinuolet.
@@ -69,9 +69,24 @@ def rakenna(rivit, pisteet):
     return {"ajat": ajat, **taulu}
 
 
-def hae(alku_iso, loppu_iso, loki=print, pyynto=None):
+def meripisteet(lat, lon, meri, tavoite=12):
+    """Ennustepisteet mallin meriruuduista tasaisena hilana. meri[i][j] = True, jos ruutu on merta.
+    Reunimmaiset rivit ja sarakkeet jätetään pois. Palauttaa [(lat, lon), ...]."""
+    ni, nj = len(lat), len(lon)
+    for askel in range(max(ni, nj) // 3, 0, -1):
+        pts = [(round(float(lat[i]), 3), round(float(lon[j]), 3))
+               for i in range(askel // 2 + 1, ni - 1, askel) for j in range(askel // 2 + 1, nj - 1, askel) if meri[i][j]]
+        if len(pts) >= tavoite or askel == 1:
+            if len(pts) > tavoite * 2:
+                pts = pts[::max(1, len(pts) // (tavoite * 2))]
+            return pts
+    return []
+
+
+def hae(alku_iso, loppu_iso, loki=print, pyynto=None, pisteet=None):
     """Palauttaa (tulos, None) tai (None, virhe). tulos = {pisteet, ajat, ws, wd, wg, lahde}."""
     pyynto = pyynto or _pyynto
+    PISTEET = [tuple(p) for p in (pisteet or globals()["PISTEET"])]
     perus = {"service": "WFS", "version": "2.0.0", "request": "getFeature", "storedquery_id": KYSELY,
              "parameters": ",".join(PARAMETRIT), "starttime": alku_iso, "endtime": loppu_iso, "timestep": "180"}
     rivit, virhe = [], None

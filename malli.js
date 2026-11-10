@@ -16,6 +16,7 @@
     nopeusTyyni: 35,       // km/h, Hannun 35–40 alapää
     reittikerroin: 1.2,    // suora viiva × kerroin = arvioitu reitin pituus (arvio, säädä)
     marginaaliMin: 0,      // Hannun valinta: ei marginaalia
+    tuuliEnnakkoMin: 60,   // muut alueet (v13): keltainen, kun ennusteen mukaan raja ylittyy tämän ajan sisällä
     esivaroitusMin: 30,    // keltainen näin monta min ennen viimeistä lähtöhetkeä (ei siirrä lähtöhetkeä)
     alakanttiEro: 2,       // m/s: asema mittaa näin paljon ennustetta enemmän -> keltainen
     nakyvyysRaja: 1000,    // m: Tankarin näkyvyys alle tämän -> keltainen
@@ -190,7 +191,61 @@
     return tulos;
   }
 
-  const Malli = { OLETUKSET, etaisyysKm, aikaMin, ylitysHetki, arvoHetkella, yhdistaEnnusteet, arvioi };
+  /**
+   * Tuulihälytys alueille, joilla ei ole paluuikkunaa (v13: Vaasa, Norrskär, Kaskinen–Kristiinankaupunki).
+   * Sama tuuliraja kuin Luodolla. Punainen: aseman tuore havainto tai ennuste nyt ylittää rajan.
+   * Keltainen: ennusteen mukaan raja ylittyy ennakkoajan sisällä, ennuste alakanttiin tai sumu (näkyvyys).
+   * syote: { nyt, asetukset, havainnot, ennuste } (sama muoto kuin arvioi). Palauttaa { tila, syyt, ylitys, ylitysSyy }.
+   */
+  function tuulihalytys(syote) {
+    const a = Object.assign({}, OLETUKSET, syote.asetukset || {});
+    const nyt = syote.nyt, ennakko = isFinite(a.tuuliEnnakkoMin) ? a.tuuliEnnakkoMin : 60;
+    const tulos = { tila: 'tuntematon', syyt: [], ylitys: null, ylitysSyy: null };
+    let taso = 0;
+    const nosta = (t, syy) => { taso = Math.max(taso, t); tulos.syyt.push(syy); };
+    const tuoreet = (syote.havainnot || []).filter(h => h && h.aika && (nyt - h.aika) / 60000 <= a.havaintoVanhaMin);
+    for (const h of syote.havainnot || []) {
+      if (h && h.aika && (nyt - h.aika) / 60000 > a.havaintoVanhaMin) tulos.syyt.push(h.nimi + ': havainto yli ' + a.havaintoVanhaMin + ' min vanha');
+    }
+    for (const h of tuoreet) {
+      if (h.ws >= a.rajaKeskituuli) nosta(2, h.nimi + ': keskituuli ' + h.ws.toFixed(1) + ' m/s ≥ ' + a.rajaKeskituuli);
+      if (h.wg >= a.rajaPuuska) nosta(2, h.nimi + ': puuska ' + h.wg.toFixed(1) + ' m/s ≥ ' + a.rajaPuuska);
+      if (isFinite(h.vis) && h.vis < a.nakyvyysRaja) nosta(1, h.nimi + ': näkyvyys ' + Math.round(h.vis) + ' m (sumu?)');
+      if (isFinite(h.ennWs) && isFinite(h.ws) && h.ws - h.ennWs >= a.alakanttiEro) {
+        nosta(1, h.nimi + ' mittaa ' + h.ws.toFixed(1) + ' m/s, ennuste aseman kohdalla ' + h.ennWs.toFixed(1) + ' m/s: ennuste alakanttiin');
+      }
+    }
+    const ennuste = (syote.ennuste || []).filter(r => r.t.getTime() >= nyt.getTime() - 3600000);
+    if (ennuste.length) {
+      const tWs = ylitysHetki(ennuste, 'ws', a.rajaKeskituuli), tWg = ylitysHetki(ennuste, 'wg', a.rajaPuuska);
+      let t = null, syy = null;
+      if (tWs && (!tWg || tWs <= tWg)) { t = tWs; syy = 'keskituuli ' + a.rajaKeskituuli + ' m/s'; }
+      else if (tWg) { t = tWg; syy = 'puuska ' + a.rajaPuuska + ' m/s'; }
+      tulos.ylitys = t; tulos.ylitysSyy = syy;
+      if (t) {
+        const min = (t - nyt) / 60000;
+        if (min <= 0) nosta(2, 'Ennusteen mukaan ' + syy + ' ylittyy nyt');
+        else if (min <= ennakko) nosta(1, 'Ennusteen mukaan ' + syy + ' ylittyy ' + Math.round(min) + ' min kuluttua');
+      }
+    } else {
+      tulos.syyt.push('Ennustetta ei saatu');
+    }
+    tulos.tila = !(ennuste.length || tuoreet.length) ? 'tuntematon' : ['vihrea', 'keltainen', 'punainen'][taso];
+    return tulos;
+  }
+
+  /** Alue, jonka rajojen sisällä (reunus marginaaliKm) piste on; ALUEET-taulukosta. */
+  function alueSijainnille(alueet, lat, lon, marginaaliKm) {
+    if (!alueet || !isFinite(lat) || !isFinite(lon)) return null;
+    const m = (marginaaliKm || 0) / 111;
+    for (const al of alueet) {
+      const r = al.rajat, mLon = m / Math.cos(lat * Math.PI / 180);
+      if (lat >= r.lat_min - m && lat <= r.lat_max + m && lon >= r.lon_min - mLon && lon <= r.lon_max + mLon) return al;
+    }
+    return null;
+  }
+
+  const Malli = { OLETUKSET, etaisyysKm, aikaMin, ylitysHetki, arvoHetkella, yhdistaEnnusteet, arvioi, tuulihalytys, alueSijainnille };
   if (typeof module !== 'undefined' && module.exports) module.exports = Malli;
   else root.Malli = Malli;
 })(typeof window !== 'undefined' ? window : this);
