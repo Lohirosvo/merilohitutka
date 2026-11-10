@@ -127,7 +127,7 @@
 
     <button class="iso" id="uistelu">▶ ALOITA UISTELU</button>
     <p class="pieni" id="edellinen"></p>
-    <button class="vihreanappi" id="avaaKartta">🧭 TILANNEKUVA – lohikerros, lämpö, virrat, aallot, 9 vrk</button>
+    <button class="vihreanappi" id="avaaKartta">🧭 TILANNEKUVA – lohikerros, syvyys, lämpö, virrat, aallot, 9 vrk</button>
   </section>
 
   <!-- ===== KARTTA (tilannekuva) ===== -->
@@ -142,6 +142,7 @@
     <div class="sirut" id="sirut">
       <button data-taso="lohi">Lohikerros</button>
       <span class="lohivali" id="lohiRivi"><input id="lohiMin" inputmode="decimal">–<input id="lohiMax" inputmode="decimal">°C</span>
+      <button data-taso="syvyys">Syvyys</button>
       <button data-taso="lampo">Lämpö</button>
       <button data-taso="virta">Virta</button>
       <button data-taso="aalto">Aalto</button>
@@ -205,6 +206,10 @@
     </div>
     <p class="pieni">Havainnot ja ennuste: Ilmatieteen laitos, avoin data (CC BY 4.0). Ylityshetki on interpoloitu tuntiarvojen välistä.
       Matka on suora viiva × reittikerroin, ei todellinen reitti. Nopeus on maan suhteen (GPS).</p>
+    <p class="pieni">Meridata: E.U. Copernicus Marine Service Information.</p>
+    <p class="pieni" id="syvyysLahde">Syvyyskäyrät: Lähde Liikenne- ja viestintävirasto Traficom, Merikartan syvyystiedot.
+      Ei navigointikäyttöön. Ei täytä virallisen merikartan vaatimuksia.
+      <a href="https://www.traficom.fi/en/transport-system/geoinformationsmaterial/use-and-licences-data" style="color:var(--syaani)">Lisenssi</a></p>
   </section>
 </main>
 
@@ -219,10 +224,10 @@
   <button data-v="v-raportit">⋯<br>RAPORTIT</button>
 </nav>
 
-<script src="malli.js?v=7"></script>
-<script src="fmi.js?v=7"></script>
-<script src="nopeus.js?v=7"></script>
-<script src="kartta.js?v=7"></script>
+<script src="malli.js?v=8"></script>
+<script src="fmi.js?v=8"></script>
+<script src="nopeus.js?v=8"></script>
+<script src="kartta.js?v=8"></script>
 <script>
 'use strict';
 // ---------- Apufunktiot ----------
@@ -535,7 +540,7 @@ async function siivoaVarasto(sailyta) {
     const c = await caches.open(VARASTO);
     for (const k of await c.keys()) {
       const u = new URL(k.url), nimi = 'data/' + u.pathname.split('/').pop() + u.search;
-      if (nimi !== 'data/meri.json' && !sailyta.has(nimi)) await c.delete(k);
+      if (nimi !== 'data/meri.json' && nimi !== 'data/syvyys.json' && !sailyta.has(nimi)) await c.delete(k);
     }
   } catch (e) {}
 }
@@ -559,6 +564,7 @@ async function lataaMeri() {
   const muuttui = !!uusi && (!meri || uusi.luotu !== meri.luotu);
   if (uusi) meri = uusi;
   piirraMeriTila();
+  lataaSyvyys();
   if (muuttui) {
     paivaMuisti.clear();
     if (meri.paivat) { siivoaVarasto(new Set(meri.paivat.map(paivaUrl))); esilataa(); }
@@ -568,6 +574,26 @@ async function lataaMeri() {
     }
   }
 }
+// Syvyyskäyrät (Traficom): haetaan verkosta vain, kun meri.json kertoo uudemmasta versiosta.
+let syvyys = null;
+async function lataaSyvyys() {
+  let j = await haeVarastosta('data/syvyys.json');
+  const uusin = meri && meri.syvyys && meri.syvyys.luotu;
+  if (!j || (uusin && j.luotu !== uusin)) {
+    try {
+      const r = await fetch('data/syvyys.json?l=' + encodeURIComponent(uusin || ''), { cache: 'no-cache' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      await tallennaVarastoon('data/syvyys.json', r.clone());
+      j = await r.json();
+    } catch (e) {}
+  }
+  if (!j || (syvyys && syvyys.luotu === j.luotu)) return;
+  syvyys = KarttaMalli.puraSyvyys(j);
+  $('syvyysLahde').firstChild.textContent = `Syvyyskäyrät: Lähde Liikenne- ja viestintävirasto Traficom, Merikartan syvyystiedot (haettu ${pvm(new Date(j.luotu))} ${new Date(j.luotu).getFullYear()}). Ei navigointikäyttöön. Ei täytä virallisen merikartan vaatimuksia. `;
+  piirraMeriTila();
+  if (kartta) { kartta.syvyys = syvyys; kartta.piirra(); }
+}
+
 function puraPaiva(p) {
   const k = meri.kerroin || 100;
   const jaa = x => Array.isArray(x) ? x.map(jaa) : (x === null ? null : x / k);
@@ -619,6 +645,8 @@ function piirraMeriTila() {
   if (meri.paivat && meri.paivat.length) osat.push(`ennuste ${pvmTeksti(meri.paivat[0].pvm)} – ${pvmTeksti(meri.paivat[meri.paivat.length - 1].pvm)}`);
   if (meri.phy && meri.phy.syvyydet) osat.push(`profiili ${luku(meri.phy.syvyydet[0], 1)}–${luku(meri.phy.syvyydet[meri.phy.syvyydet.length - 1], 1)} m, ${meri.phy.syvyydet.length} tasoa`);
   for (const k of ['phy', 'wav', 'sst']) if (!meri[k]) osat.push(k + ': puuttuu');
+  if (meri.syvyys && meri.syvyys.tila !== 'ok') osat.push('syvyys: ' + meri.syvyys.tila + (meri.syvyys.viesti ? ' (' + meri.syvyys.viesti + ')' : ''));
+  if (syvyys) osat.push(`Syvyyskäyrät: Traficom, Merikartan syvyystiedot (haettu ${pvm(new Date(syvyys.luotu))}). Ei navigointikäyttöön. Ei täytä virallisen merikartan vaatimuksia`);
   if (meri.virheet && meri.virheet.length) osat.push('virheet: ' + meri.virheet.join(' | '));
   osat.push('Todisteen taso: malli (lämpö, lohikerros, virta, aalto), satelliitti (SST). Ennusteen tarkkuus heikkenee loppua kohti. E.U. Copernicus Marine Service Information.');
   el.textContent = osat.join(' · ');
@@ -691,12 +719,23 @@ function lohiTeksti(lat, lon) {
   const ala = k.pohjaan ? (k.taysi ? `yli ${luku(syvin, 0)} m` : `pohjaan (~${luku(k.pohja + 0.5, 0)} m)`) : luku(k.ala) + ' m';
   return `Lohikerros ${vali}: ${luku(k.yla)} m – ${ala} (paksuus ${luku(k.paksuus)} m)`;
 }
+function etaisyys(m) { return m < 1000 ? Math.round(m / 10) * 10 + ' m' : luku(m / 1000) + ' km'; }
+function syvyysTeksti(lat, lon) {
+  if (!syvyys || !kartta || !kartta.tasot.syvyys) return null;
+  const l = KarttaMalli.lahinKayra(syvyys, lat, lon);
+  const k20 = KarttaMalli.lahinKayra(syvyys, lat, lon, 20, 10000);
+  const osat = [l ? `lähin syvyyskäyrä ${luku(l.syvyys, l.syvyys % 1 ? 1 : 0)} m (${etaisyys(l.m)})` : 'ei syvyyskäyrää 3 km:n sisällä'];
+  if (k20 && (!l || l.syvyys !== 20)) osat.push(`20 m käyrälle ${etaisyys(k20.m)}`);
+  return osat.join(', ');
+}
 function naytaPiste(lat, lon) {
   if (lat === null) { $('karttaTieto').textContent = 'Napauta karttaa: arvot pisteessä. Profiilin × sulkee sen.'; return; }
   if (!nakyma) { $('karttaTieto').textContent = 'Ei meridataa.'; return; }
   const n = nakyma, t = kartta.aika, osat = [];
   const lohi = lohiTeksti(lat, lon);
   if (lohi) osat.push(lohi);
+  const syv = syvyysTeksti(lat, lon);
+  if (syv) osat.push(syv);
   const L = KarttaMalli.lahinArvo(n.phy, 'lampo', t, lat, lon);
   if (isFinite(L)) osat.push('pinta ' + luku(L, 2) + ' °C');
   const S = KarttaMalli.lahinArvo(n.sst, 'lampo', 0, lat, lon);
@@ -743,11 +782,13 @@ function avaaKarttaNakyma() {
     kartta = new Kartta(c, { lat: tila.lat || 63.83, lon: tila.lon || 22.62, z: tila.z || 10.6, askel: asetukset.lampoAskel,
       lohiVali: [asetukset.lohiMin, asetukset.lohiMax], merkit: KIINTEAT_MERKIT, onNapautus: naytaPiste });
     if (tila.tasot) Object.assign(kartta.tasot, tila.tasot);
+    kartta.syvyys = syvyys;
     document.querySelectorAll('#sirut button').forEach(b => {
       b.classList.toggle('paalla', !!kartta.tasot[b.dataset.taso]);
       b.addEventListener('click', () => {
         kartta.tasot[b.dataset.taso] = !kartta.tasot[b.dataset.taso]; b.classList.toggle('paalla');
         piirraLohiRivi(); mitoitaKartta(); kartta.piirra(); tallennaKarttaTila();
+        if (kartta.valittu) naytaPiste(kartta.valittu[0], kartta.valittu[1]);
       });
     });
     c.addEventListener('pointerup', () => setTimeout(tallennaKarttaTila, 50));
@@ -796,6 +837,7 @@ piirra(); piirraUistelu(); piirraGps();
 if (uistelu) pidaNaytto();
 kaynnistaGps();
 haeVarastosta('data/meri.json').then(m => { if (m && !meri) { meri = m; piirraMeriTila(); if (kartta) valitsePaiva(valittuPvm, null); } });
+lataaSyvyys();
 paivita();
 setInterval(paivita, 10 * 60000);           // uusi data 10 min välein
 setInterval(() => { piirra(); }, 30000);    // tila päivittyy ajan kuluessa

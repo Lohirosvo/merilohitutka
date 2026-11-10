@@ -1,4 +1,4 @@
-"""Merilohitutka – hae_copernicus.py (v6)
+"""Merilohitutka – hae_copernicus.py (v8)
 
 Hakee Copernicus Marinesta Uusikaarlepyy–Tankar-alueen meridatan koko ennustejaksolle (9 vrk,
 3 h välein) ja kirjoittaa sen sovellusta varten:
@@ -14,11 +14,15 @@ COPERNICUSMARINE_SERVICE_USERNAME ja COPERNICUSMARINE_SERVICE_PASSWORD (GitHubin
 Jos fysiikkamallin haku epäonnistuu, edellisen ajon päivätiedostot ladataan julkaistulta sivulta,
 jotta vanha data säilyy.
 
+v8: ajaa ensin myös Traficomin syvyyskäyrien päivityksen (hae_syvyys.py, data/syvyys.json).
+Sen epäonnistuminen ei vaikuta Copernicus-hakuun.
+
 Käyttö:  python hae_copernicus.py polku/data/meri.json
 """
 import json
 import os
 import sys
+import time
 import traceback
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -99,7 +103,7 @@ def tiedostonimi(pvm):
     return "p_" + pvm.replace("-", "") + ".json"
 
 
-def rakenna(phy, wav, sst, luotu, virheet):
+def rakenna(phy, wav, sst, luotu, virheet, syvyys=None):
     """Kokoaa hakemiston ja päivätiedostot.
     phy = dict(ajat, lat, lon, syvyydet, thetao[aika, syvyys, lat, lon], u[aika, lat, lon], v, dataset)
     wav = dict(ajat, lat, lon, hs[aika, lat, lon], suunta, dataset) tai None
@@ -108,6 +112,8 @@ def rakenna(phy, wav, sst, luotu, virheet):
     hakemisto = {"muoto": 2, "luotu": luotu, "alue": ALUE, "virheet": list(virheet),
                  "lisenssi": "E.U. Copernicus Marine Service Information",
                  "kerroin": KERROIN, "paivat": []}
+    if syvyys:
+        hakemisto["syvyys"] = syvyys
     hakemisto["phy"] = {"dataset": phy["dataset"], "lat": pyorista(phy["lat"], 4), "lon": pyorista(phy["lon"], 4),
                         "syvyydet": pyorista(phy["syvyydet"], 2)}
     if wav:
@@ -260,16 +266,28 @@ def palauta_edelliset(kansio, vanha):
 def main(polku):
     kansio = os.path.dirname(polku) or "."
     vanha = lue_vanha(polku)  # julkaise.yml on ottanut edellisen meri.json:n talteen tähän
+    syvyys = None
+    try:  # Traficomin syvyyskäyrät (harvoin muuttuvat); virhe ei saa kaataa Copernicus-hakua
+        import hae_syvyys
+        alku = time.monotonic()
+        syvyys = hae_syvyys.paivita(kansio, sivun_osoite())
+        print(f"syvyys: {syvyys.get('tila')}, {time.monotonic() - alku:.0f} s")
+    except Exception as e:  # noqa: BLE001
+        traceback.print_exc()
+        syvyys = {"tila": "virhe", "viesti": f"{e}"[:300]}
     nyt = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
     luotu = iso(datetime.now(timezone.utc))  # todellinen hakuhetki (näytetään käyttäjälle)
     tulokset, virheet = {}, []
     for nimi, hakija in (("phy", hae_phy), ("wav", hae_wav), ("sst", hae_sst)):
+        alku = time.monotonic()
         try:
             tulokset[nimi] = hakija(nyt)
             t = tulokset[nimi]
             ajat = t["ajat"]
-            print(f"{nimi}: OK {t['dataset']}, {len(ajat)} aikaa ({iso(np.datetime64(ajat[0])) if len(ajat) else '-'}"
-                  f" … {iso(np.datetime64(ajat[-1])) if len(ajat) else '-'}), {len(t['lat'])}x{len(t['lon'])} ruutua")
+            nayta = (lambda a: a if isinstance(a, str) else iso(np.datetime64(a)))
+            vali = f"{nayta(ajat[0])} … {nayta(ajat[-1])}" if len(ajat) else "-"
+            print(f"{nimi}: OK {t['dataset']}, {len(ajat)} aikaa ({vali}), {len(t['lat'])}x{len(t['lon'])} ruutua, "
+                  f"{time.monotonic() - alku:.0f} s")
         except Exception as e:  # noqa: BLE001
             traceback.print_exc()
             virheet.append(f"{nimi}: {str(e)[:300]}")
@@ -284,7 +302,7 @@ def main(polku):
     if sst is None and vanha and vanha.get("sst"):
         sst = vanha["sst"]
         virheet.append("sst: käytetään edellistä")
-    hakemisto, tiedostot = rakenna(tulokset["phy"], tulokset.get("wav"), sst, luotu, virheet)
+    hakemisto, tiedostot = rakenna(tulokset["phy"], tulokset.get("wav"), sst, luotu, virheet, syvyys)
     kirjoita(kansio, hakemisto, tiedostot)
 
 
