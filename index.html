@@ -79,6 +79,7 @@
   .kartta-yla button { padding:7px 11px; font-size:18px; }
   .kartta-yla .aika { flex:1; text-align:center; font-size:17px; font-weight:700; line-height:1.15; min-width:0; }
   .kartta-yla .aika small { display:block; font-size:13px; color:var(--himmea); font-weight:400; }
+  .kartta-yla .aika, .kartta-yla .aika small { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .paivat, .sirut { display:flex; gap:6px; flex-wrap:nowrap; overflow-x:auto; padding:3px 6px 5px; scrollbar-width:none; }
   .paivat::-webkit-scrollbar, .sirut::-webkit-scrollbar { display:none; }
   .paivat button { flex:0 0 auto; padding:5px 10px; font-size:15px; border-radius:10px; color:var(--himmea); }
@@ -97,9 +98,9 @@
   .kartta-tieto[hidden], .datatila[hidden] { display:none; }
   /* Puhelin vaakasuunnassa: aika ja päivät samalle riville, pienemmät napit */
   @media (orientation: landscape) and (max-height: 540px) {
-    .kartta-ohjaimet { display:grid; grid-template-columns:minmax(300px, 42%) 1fr; align-items:center; }
+    .kartta-ohjaimet { display:grid; grid-template-columns:minmax(390px, 48%) 1fr; align-items:center; }
     .kartta-ohjaimet .sirut { grid-column:1 / -1; }
-    .kartta-yla button { padding:4px 9px; font-size:16px; }
+    .kartta-yla button { padding:4px 8px; font-size:16px; }
     .kartta-yla .aika { font-size:15px; } .kartta-yla .aika small { font-size:12px; }
     .karttanapit button { width:40px; height:40px; font-size:20px; }
     body.kartalla .alapalkki .kmh { font-size:24px; }
@@ -245,10 +246,10 @@
   <button data-v="v-raportit">⋯<br>RAPORTIT</button>
 </nav>
 
-<script src="malli.js?v=9"></script>
-<script src="fmi.js?v=9"></script>
-<script src="nopeus.js?v=9"></script>
-<script src="kartta.js?v=9"></script>
+<script src="malli.js?v=10"></script>
+<script src="fmi.js?v=10"></script>
+<script src="nopeus.js?v=10"></script>
+<script src="kartta.js?v=10"></script>
 <script>
 'use strict';
 // ---------- Apufunktiot ----------
@@ -752,7 +753,9 @@ function lohiTeksti(lat, lon) {
   if (!k) return null;
   const vali = `${luku(asetukset.lohiMin)}–${luku(asetukset.lohiMax)} °C`;
   const syvin = pr.syvyydet[pr.syvyydet.length - 1];
-  if (!k.loytyi) return `Lohikerros ${vali}: ei 0–${luku(syvin, 0)} m:ssä`;
+  // matalassa ruudussa raja on mallin pohja (2 km:n ruudun keskisyvyys), ei merikartan syvyys
+  if (!k.loytyi) return k.taysi ? `Lohikerros ${vali}: ei 0–${luku(syvin, 0)} m:ssä`
+    : `Lohikerros ${vali}: ei 0–${luku(k.pohja + 0.5, 0)} m:ssä (mallin pohja ~${luku(k.pohja + 0.5, 0)} m)`;
   const ala = k.pohjaan ? (k.taysi ? `yli ${luku(syvin, 0)} m` : `pohjaan (~${luku(k.pohja + 0.5, 0)} m)`) : luku(k.ala) + ' m';
   return `Lohikerros ${vali}: ${luku(k.yla)} m – ${ala} (paksuus ${luku(k.paksuus)} m)`;
 }

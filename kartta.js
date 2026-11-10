@@ -494,13 +494,14 @@
         for (const v of taso.viivat) {
           if (v.la1 < laA || v.la0 > laY || v.lo1 < loV || v.lo0 > loO) continue;
           const m = v.m;
-          let px = m[0] * s - ox, py = m[1] * s - oy, kuljettu = 120;   // numero n. 240 px välein viivaa pitkin
+          const vali = taso.syvyys === 20 || taso.syvyys === 6 ? 240 : 600;   // muiden käyrien numerot harvemmin
+          let px = m[0] * s - ox, py = m[1] * s - oy, kuljettu = vali / 2;
           g.moveTo(px, py);
           for (let k = 2; k < m.length; k += 2) {
             const x = m[k] * s - ox, y = m[k + 1] * s - oy;
             g.lineTo(x, y);
             kuljettu += Math.hypot(x - px, y - py); px = x; py = y;
-            if (kuljettu >= 240 && x > 20 && x < this.w - 70 && y > 24 && y < this.h - 24) { ehdokkaat.push([taso.syvyys, x, y, vari]); kuljettu = 0; }
+            if (kuljettu >= vali && x > 20 && x < this.w - 70 && y > this.ylaVara + 16 && y < this.h - this.alaVara - 24) { ehdokkaat.push([taso.syvyys, x, y, vari]); kuljettu = 0; }
           }
         }
         g.stroke();
@@ -509,13 +510,14 @@
       g.globalAlpha = 1; g.font = 'bold 11px sans-serif';
       const varattu = new Set(), tarkeys = d => d === 20 ? 0 : d === 6 ? 1 : 2;
       ehdokkaat.sort((a, b) => tarkeys(a[0]) - tarkeys(b[0]));
-      let nimetty = 0;
+      let nimetty = 0, muita = 0;
       for (const [d, x, y, vari] of ehdokkaat) {
-        if (nimetty >= 45) break;
-        if (tarkeys(d) === 2 && this.z < 11) continue;
-        const ruutu = Math.floor(x / 70) + ',' + Math.floor(y / 34);
-        if (varattu.has(ruutu)) continue;
-        varattu.add(ruutu); nimetty++;
+        if (nimetty >= 40) break;
+        const muu = tarkeys(d) === 2;
+        if (muu && (this.z < 11 || muita >= 10)) continue;   // muut käyrät: enintään 10 numeroa
+        const koko = muu ? 150 : 70, ruutu = Math.floor(x / koko) + ',' + Math.floor(y / (muu ? 80 : 34)) + (muu ? 'm' : '');
+        if (varattu.has(ruutu) || (muu && varattu.has(Math.floor(x / 70) + ',' + Math.floor(y / 34)))) continue;
+        varattu.add(ruutu); varattu.add(Math.floor(x / 70) + ',' + Math.floor(y / 34)); nimetty++; if (muu) muita++;
         const txt = String(d).replace('.', ',');
         g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,0.8)'; g.strokeText(txt, x + 2, y - 2);
         g.fillStyle = vari; g.fillText(txt, x + 2, y - 2);
