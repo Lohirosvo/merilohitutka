@@ -103,6 +103,59 @@
     return { nopeus: Math.hypot(u, v), suunta: (Math.atan2(u, v) * 180 / Math.PI + 360) % 360 };
   }
 
+  /**
+   * Lohikerros: millä syvyydellä lämpö on välillä tMin–tMax.
+   * arvot[k] = lämpö tasolla k (null = pohjan alla tai maa), syv[k] = tason keskisyvyys (m).
+   * Lämpö oletetaan pinnasta ylimpään tasoon vakioksi ja tasojen välillä lineaariseksi.
+   * Palauttaa null (maa) tai { loytyi, yla, ala, paksuus, pohja, taysi, pohjaan }:
+   *   yla/ala = ylin ja alin syvyys, jossa lämpö on välillä; paksuus = välillä olevien osien summa
+   *   pohja = syvin kelvollinen taso; taysi = kaikki haetut tasot kelvollisia (meri syvempi kuin profiili)
+   *   pohjaan = kerros ulottuu syvimpään kelvolliseen tasoon asti.
+   */
+  function kerros(arvot, syv, tMin, tMax) {
+    const p = [];
+    for (let k = 0; k < syv.length; k++) {
+      const v = arvot[k];
+      if (v === null || v === undefined || !isFinite(v)) break;
+      p.push([syv[k], v]);
+    }
+    if (!p.length) return null;
+    const pts = p[0][0] > 0 ? [[0, p[0][1]]].concat(p) : p;
+    const sis = v => v >= tMin - 1e-9 && v <= tMax + 1e-9;
+    let yla = null, ala = null, paksuus = 0;
+    for (let n = 0; n < pts.length - 1; n++) {
+      const [d1, t1] = pts[n], [d2, t2] = pts[n + 1];
+      let lo, hi;
+      if (Math.abs(t2 - t1) < 1e-12) { if (!sis(t1)) continue; lo = 0; hi = 1; }
+      else {
+        let s1 = (tMin - t1) / (t2 - t1), s2 = (tMax - t1) / (t2 - t1);
+        if (s1 > s2) [s1, s2] = [s2, s1];
+        lo = Math.max(0, s1); hi = Math.min(1, s2);
+      }
+      const a = d1 + lo * (d2 - d1), b = d1 + hi * (d2 - d1);
+      if (!(b - a > 1e-9)) continue;
+      if (yla === null || a < yla) yla = a;
+      if (ala === null || b > ala) ala = b;
+      paksuus += b - a;
+    }
+    const pohja = p[p.length - 1][0];
+    return { loytyi: yla !== null, yla, ala, paksuus, pohja, taysi: p.length === syv.length,
+             pohjaan: ala !== null && ala >= pohja - 1e-6 };
+  }
+  /** Kerroksen luokka kartan väriä varten: 'optimi' (alkaa 0–3 m), 'keski' (3–6 m), 'syva' (yli 6 m), 'ei'. */
+  function lohiLuokka(k) {
+    if (!k) return null;
+    if (!k.loytyi) return 'ei';
+    return k.yla <= 3 + 1e-9 ? 'optimi' : (k.yla <= 6 + 1e-9 ? 'keski' : 'syva');
+  }
+  /** Lähimmän ruudun lämpöprofiili ajanhetkellä t: { syvyydet, arvot, i, j } tai null. */
+  function profiiliPisteessa(phy, t, lat, lon) {
+    if (!phy || !phy.profiili || !phy.profiili[t] || !phy.syvyydet) return null;
+    const i = lahinIndeksi(phy.lat, lat), j = lahinIndeksi(phy.lon, lon);
+    if (Math.abs(phy.lat[i] - lat) > 0.05 || Math.abs(phy.lon[j] - lon) > 0.1) return null;
+    return { syvyydet: phy.syvyydet, arvot: phy.profiili[t].map(taso => taso[i][j]), i, j };
+  }
+
   // ------------------------------------------------------------ värit
   function lampoVari(v, min, max) {
     const f = max > min ? (v - min) / (max - min) : 0.5;
@@ -121,7 +174,8 @@
       this.c = canvas; this.ctx = canvas.getContext('2d');
       this.lat = opts.lat; this.lon = opts.lon; this.z = opts.z || 11;
       this.data = null; this.aika = 0; this.askel = opts.askel || 0.2;
-      this.tasot = { lampo: true, sst: false, virta: true, aalto: false, tausta: true };
+      this.lohiVali = opts.lohiVali || [6.6, 8.8];
+      this.tasot = { lampo: true, lohi: true, sst: false, virta: true, aalto: false, tausta: true };
       this.merkit = opts.merkit || []; this.oma = null; this.valittu = null;
       this.laatat = new Map(); this.onNapautus = opts.onNapautus || (() => {});
       this.osoittimet = new Map(); this.raahattu = false;
@@ -219,12 +273,89 @@
       const d = this.data;
       if (d) {
         if (this.tasot.aalto && d.wav) this._aalto();
+        if (this.tasot.lohi && d.phy && d.phy.profiili) this._lohi();
         if (this.tasot.lampo && d.phy) this._kayrat(d.phy, 'lampo', this.aika, false);
         if (this.tasot.sst && d.sst) this._kayrat(d.sst, 'lampo', 0, true);
         if (this.tasot.virta && d.phy) this._virta();
       }
       this._merkit();
       this._selite();
+      if (d && this.tasot.lohi && this.valittu) this._profiili();
+    }
+
+    /** Lohikerroksen luokat ruuduittain (välimuisti: sama data, aika ja lämpöväli). */
+    _lohiRuudut() {
+      const p = this.data.phy, t = this.aika, [a, b] = this.lohiVali;
+      const avain = t + '|' + a + '|' + b;
+      if (this._lohiV && this._lohiV.data === this.data && this._lohiV.avain === avain) return this._lohiV.ruudut;
+      const pr = p.profiili[t]; if (!pr) return null;
+      const ruudut = [];
+      for (let i = 0; i < p.lat.length; i++) {
+        const rivi = [];
+        for (let j = 0; j < p.lon.length; j++) rivi.push(lohiLuokka(kerros(pr.map(taso => taso[i][j]), p.syvyydet, a, b)));
+        ruudut.push(rivi);
+      }
+      this._lohiV = { data: this.data, avain, ruudut };
+      return ruudut;
+    }
+
+    _lohi() {
+      const p = this.data.phy, g = this.ctx, ruudut = this._lohiRuudut(); if (!ruudut) return;
+      const VARI = { optimi: 'rgba(60,220,120,0.30)', keski: 'rgba(240,210,60,0.26)', syva: 'rgba(255,140,40,0.26)', ei: 'rgba(150,160,170,0.12)' };
+      const dl = Math.abs(p.lat[1] - p.lat[0]) / 2, dn = Math.abs(p.lon[1] - p.lon[0]) / 2;
+      for (let i = 0; i < p.lat.length; i++) for (let j = 0; j < p.lon.length; j++) {
+        const l = ruudut[i][j]; if (!l) continue;
+        const [x1, y1] = this.ruutu(p.lat[i] + dl, p.lon[j] - dn), [x2, y2] = this.ruutu(p.lat[i] - dl, p.lon[j] + dn);
+        if (x2 < 0 || y2 < 0 || x1 > this.w || y1 > this.h) continue;
+        g.fillStyle = VARI[l]; g.fillRect(x1, y1, x2 - x1 + 0.6, y2 - y1 + 0.6);
+      }
+    }
+
+    /** Valitun pisteen lämpöprofiili pienenä kuvana vasempaan yläkulmaan. */
+    _profiili() {
+      const pr = profiiliPisteessa(this.data.phy, this.aika, this.valittu[0], this.valittu[1]);
+      if (!pr) return;
+      const pts = [];
+      for (let k = 0; k < pr.syvyydet.length; k++) { const v = pr.arvot[k]; if (v === null || !isFinite(v)) break; pts.push([pr.syvyydet[k], v]); }
+      if (!pts.length) return;
+      const [a, b] = this.lohiVali, k = kerros(pr.arvot, pr.syvyydet, a, b);
+      const g = this.ctx, X = 8, Y = 8, W = 132, H = 156;
+      const dMax = pr.syvyydet[pr.syvyydet.length - 1];
+      const arvot = pts.map(q => q[1]);
+      const tLo = Math.min(a, ...arvot) - 0.3, tHi = Math.max(b, ...arvot) + 0.3;
+      const px = { x0: X + 30, x1: X + W - 8, y0: Y + 22, y1: Y + H - 20 };
+      const xT = v => px.x0 + (v - tLo) / (tHi - tLo) * (px.x1 - px.x0);
+      const yD = d => px.y0 + d / dMax * (px.y1 - px.y0);
+      g.save();
+      g.fillStyle = 'rgba(5,15,28,0.88)'; g.fillRect(X, Y, W, H);
+      g.strokeStyle = 'rgba(255,255,255,0.25)'; g.strokeRect(X + 0.5, Y + 0.5, W - 1, H - 1);
+      g.font = 'bold 12px sans-serif'; g.fillStyle = '#e9f1f7'; g.fillText('Profiili (malli)', X + 6, Y + 15);
+      // lämpöväli
+      g.fillStyle = 'rgba(60,220,120,0.22)'; g.fillRect(xT(a), px.y0, xT(b) - xT(a), px.y1 - px.y0);
+      // 0–3 m optimi
+      g.strokeStyle = 'rgba(126,217,87,0.8)'; g.setLineDash([3, 3]); g.beginPath(); g.moveTo(px.x0, yD(3)); g.lineTo(px.x1, yD(3)); g.stroke(); g.setLineDash([]);
+      // syvyysakseli
+      g.font = '10px sans-serif'; g.fillStyle = '#8fa6ba';
+      for (const d of [0, 3, 6, 9, 12]) if (d <= dMax + 0.01) g.fillText(d + ' m', X + 3, yD(d) + 3);
+      g.fillText(tLo.toFixed(1).replace('.', ','), px.x0 - 6, px.y1 + 13);
+      g.fillText(tHi.toFixed(1).replace('.', ',') + ' °C', px.x1 - 34, px.y1 + 13);
+      // merenpohja
+      if (pts.length < pr.syvyydet.length) {
+        g.fillStyle = 'rgba(140,100,60,0.55)'; const yp = yD(pts[pts.length - 1][0] + 0.5);
+        g.fillRect(px.x0, yp, px.x1 - px.x0, px.y1 - yp);
+      }
+      // profiiliviiva
+      g.strokeStyle = '#ffffff'; g.lineWidth = 2; g.beginPath();
+      g.moveTo(xT(pts[0][1]), yD(0));
+      for (const [d, v] of pts) g.lineTo(xT(v), yD(d));
+      g.stroke();
+      g.fillStyle = '#ffffff'; for (const [d, v] of pts) { g.beginPath(); g.arc(xT(v), yD(d), 1.8, 0, Math.PI * 2); g.fill(); }
+      // kerroksen hakasulje oikealla
+      if (k && k.loytyi) {
+        g.strokeStyle = '#3cdc78'; g.lineWidth = 3; const xr = px.x1 + 4;
+        g.beginPath(); g.moveTo(xr - 3, yD(k.yla)); g.lineTo(xr, yD(k.yla)); g.lineTo(xr, yD(k.ala)); g.lineTo(xr - 3, yD(k.ala)); g.stroke();
+      }
+      g.restore();
     }
 
     _tausta() {
@@ -351,6 +482,11 @@
 
     _selite() {
       const g = this.ctx, rivit = [];
+      if (this.tasot.lohi && this.data && this.data.phy && this.data.phy.profiili) {
+        const v = this.lohiVali.map(x => x.toFixed(1).replace('.', ',')).join('–');
+        rivit.push(['Lohikerros ' + v + ' °C alkaa (malli):', '#7ed957']);
+        rivit.push(['vihreä 0–3 m · keltainen 3–6 · oranssi 6–12', '#7ed957']);
+      }
       if (this.tasot.lampo && this.data && this.data.phy) rivit.push(['Lämpö (malli) käyrät ' + this.askel.toString().replace('.', ',') + ' °C välein', '#ffb24a']);
       if (this.tasot.sst && this.data && this.data.sst) rivit.push(['Satelliittilämpö (katkoviiva)', '#fff']);
       if (this.tasot.virta && this.data && this.data.phy) rivit.push(['Virta: nuoli ≈ 0,25 m/s', '#78ebff']);
@@ -368,7 +504,8 @@
     }
   }
 
-  const KarttaMalli = { lonX, latY, xLon, yLat, kayra, tasot, arvovali, lahinIndeksi, lahinArvo, lahinAika, virta, akseliArvo };
+  const KarttaMalli = { lonX, latY, xLon, yLat, kayra, tasot, arvovali, lahinIndeksi, lahinArvo, lahinAika, virta, akseliArvo,
+                        kerros, lohiLuokka, profiiliPisteessa };
   if (typeof module !== 'undefined' && module.exports) module.exports = KarttaMalli;
   else { root.KarttaMalli = KarttaMalli; root.Kartta = Kartta; }
 })(typeof window !== 'undefined' ? window : this);
