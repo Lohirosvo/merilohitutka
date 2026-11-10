@@ -187,14 +187,18 @@
     }
     return { ll, m, la0, la1, lo0, lo1 };
   }
-  /** vaylat.json -> { luotu, linjat: [v], alueet: [v + { syvyys }] } */
+  /** vaylat.json -> { luotu, linjat: [v + { syvyys, haraus }], alueet: [sama] }
+   *  syvyys = mitoitussyväys, haraus = haraussyvyys (Väyläviraston kentät). Vanha muoto: linja pelkkä taulukko. */
   function puraVaylat(j) {
     if (!j || (!j.linjat && !j.alueet)) return null;
     const [olat, olon] = j.origo, k = j.kerroin || 100000;
-    const linjat = (j.linjat || []).filter(c => c.length >= 4).map(c => puraViiva(c, olat, olon, k));
-    const alueet = (j.alueet || []).filter(a => a.k && a.k.length >= 4)
-      .map(a => Object.assign(puraViiva(a.k, olat, olon, k), { syvyys: a.s === undefined ? null : a.s }));
-    return { luotu: j.luotu, lahde: j.lahde, linjat, alueet };
+    const pura = a => {
+      const koodi = Array.isArray(a) ? a : a.k;
+      if (!koodi || koodi.length < 4) return null;
+      return Object.assign(puraViiva(koodi, olat, olon, k), {
+        syvyys: Array.isArray(a) || a.s === undefined ? null : a.s, haraus: Array.isArray(a) || a.h === undefined ? null : a.h });
+    };
+    return { luotu: j.luotu, lahde: j.lahde, linjat: (j.linjat || []).map(pura).filter(Boolean), alueet: (j.alueet || []).map(pura).filter(Boolean) };
   }
   /** Lähin viiva listasta: { v, m } tai null. */
   function lahinViivoista(viivat, lat, lon, rajaM) {
@@ -219,9 +223,9 @@
     const a = lahinViivoista(V.alueet, lat, lon, rajaM || 1500), l = lahinViivoista(V.linjat, lat, lon, rajaM || 1500);
     if (!a && !l) return null;
     const paras = !a ? l : !l ? a : (a.m <= l.m ? a : l);
-    let syv = paras.v.syvyys === undefined ? null : paras.v.syvyys;
-    if (syv === null && a && a.m < 400) syv = a.v.syvyys;   // linja kulkee alueen sisällä: alueen kulkusyvyys
-    return { m: paras.m, syvyys: syv };
+    let syv = paras.v.syvyys === undefined ? null : paras.v.syvyys, haraus = paras.v.haraus === undefined ? null : paras.v.haraus;
+    if (syv === null && a && a.m < 400) { syv = a.v.syvyys; haraus = a.v.haraus; }   // linja alueen sisällä: alueen syvyydet
+    return { m: paras.m, syvyys: syv, haraus };
   }
 
   /** Lähin syvyyskäyrä pisteestä (enintään rajaM metriä): { syvyys, m } tai null. vainSyvyys rajaa yhteen syvyyteen. */
@@ -437,7 +441,7 @@
       g.setLineDash([]);
       if (this.z >= 10.5) {   // kulkusyvyydet
         g.font = 'bold 11px sans-serif'; let n = 0; const varattu = new Set();
-        for (const v of this.vaylat.alueet) {
+        for (const v of this.vaylat.alueet.concat(this.vaylat.linjat)) {
           if (n >= 20 || v.syvyys === null || !nakyy(v)) continue;
           const m = v.m, i = (m.length >> 2) * 2, x = m[i] * s - ox, y = m[i + 1] * s - oy;
           if (x < 20 || x > this.w - 60 || y < this.ylaVara + 10 || y > this.h - this.alaVara - 20) continue;
@@ -735,7 +739,7 @@
         rivit.push([['Tuuli (IL), nuoli myötätuuleen: m/s (puuska)', '#e8f4ff']]);
         rivit.push([['', '#e9f1f7'], ['<5', '#e9f1f7', '#e8f4ff'], ['5–8', '#e9f1f7', '#ffe066'], ['8–10', '#e9f1f7', '#ffa94d'], ['≥10 m/s', '#e9f1f7', '#ff5c5c']]);
       }
-      if (this.tasot.vaylat && this.vaylat) rivit.push([['Väylä (Väylävirasto), kulkusyvyys m', '#ffd166']]);
+      if (this.tasot.vaylat && this.vaylat) rivit.push([['Väylä (Väylävirasto), mitoitussyväys m', '#ffd166']]);
       if (this.tasot.lampo && d.phy) rivit.push([['Lämpö (malli) ' + f(this.askel) + ' °C välein', '#ffb24a']]);
       if (this.tasot.sst && d.sst) rivit.push([['Satelliitti: katkoviiva', '#ffffff']]);
       if (this.tasot.virta && d.phy) rivit.push([['Virta: nuoli ≈ 0,25 m/s', '#78ebff']]);

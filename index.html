@@ -246,10 +246,10 @@
   <button data-v="v-raportit">⋯<br>RAPORTIT</button>
 </nav>
 
-<script src="malli.js?v=10"></script>
-<script src="fmi.js?v=10"></script>
-<script src="nopeus.js?v=10"></script>
-<script src="kartta.js?v=10"></script>
+<script src="malli.js?v=12"></script>
+<script src="fmi.js?v=12"></script>
+<script src="nopeus.js?v=12"></script>
+<script src="kartta.js?v=12"></script>
 <script>
 'use strict';
 // ---------- Apufunktiot ----------
@@ -784,7 +784,10 @@ function vaylaTeksti(lat, lon) {
   if (!vaylat || !kartta.tasot.vaylat) return null;
   const l = KarttaMalli.lahinVayla(vaylat, lat, lon, 1500);
   if (!l) return null;
-  return `väylä ${etaisyys(l.m)}${l.syvyys !== null && l.syvyys !== undefined ? ' (kulkusyvyys ' + luku(l.syvyys, 1) + ' m)' : ''}`;
+  const s = [];
+  if (l.syvyys !== null && l.syvyys !== undefined) s.push('mitoitussyväys ' + luku(l.syvyys, 1) + ' m');
+  if (l.haraus !== null && l.haraus !== undefined) s.push('haraus ' + luku(l.haraus, 1) + ' m');
+  return `väylä ${etaisyys(l.m)}${s.length ? ' (' + s.join(', ') + ')' : ''}`;
 }
 function suljePiste() { $('karttaTieto').hidden = true; if (kartta) { kartta.valittu = null; kartta.piirra(); } mitoitaKartta(); }
 function naytaPiste(lat, lon) {

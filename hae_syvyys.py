@@ -1,4 +1,4 @@
-"""Merilohitutka – hae_syvyys.py (v11)
+"""Merilohitutka – hae_syvyys.py (v12)
 
 Hakee Traficomin merikartan syvyyskäyrät (aineisto "Merikartan syvyystiedot") WFS-rajapinnasta
 Uusikaarlepyy–Tankar-alueelta ja kirjoittaa ne sovellukselle tiedostoon data/syvyys.json.
@@ -29,7 +29,7 @@ TASON_AVAIMET = ["syvyyskayra", "syvyyskäyrä", "depcnt", "depth_contour", "dep
 SYVYYS_KENTAT = ["valdco", "syvyys", "syvyysarvo", "depth", "arvo", "value", "val"]
 SIVU = 2000              # kohteita per pyyntö
 MAX_SIVUT = 300
-VERSIO = 2               # v11: sivutus korjattu (palvelimen yläraja < SIVU katkaisi haun) -> vanha tiedosto haetaan uudelleen
+VERSIO = 3               # v12: sivut pysyvässä järjestyksessä (v11:ssä 1134/3984 käyrää jäi saamatta) -> vanha haetaan uudelleen
 TOLERANSSI_M = 6.0       # yksinkertaistus (Douglas–Peucker), metriä
 KERROIN = 100000         # koordinaatit 1e-5 asteen kokonaislukuina
 UUSINTA_VRK = 30
@@ -287,72 +287,125 @@ def bbox_vaihtoehdot():
             f"{emin:.0f},{nmin:.0f},{emax:.0f},{nmax:.0f},EPSG:3067"]
 
 
+def _uniikit(kohteet):
+    """Poistaa kaksoiskappaleet (sama syvyys, osien määrä, ensimmäisen osan alku, loppu ja pituus)."""
+    nahty, out = set(), []
+    for k in kohteet:
+        o = k[1][0] if k[1] else []
+        tunnus = (k[0], tuple(o[0]) if o else None, tuple(o[-1]) if o else None, len(o), len(k[1]))
+        if tunnus not in nahty:
+            nahty.add(tunnus)
+            out.append(k)
+    return out
+
+
+def _jarjestysavain(kohteet):
+    """Ominaisuus, jolla sivut saadaan pysyvään järjestykseen (esim. Traficomin IDENTIFIER)."""
+    ominaisuudet = kohteet[0][2] if kohteet else {}
+    for k in ["IDENTIFIER", "identifier", "id", "gid", "fid", "objectid", "OBJECTID"]:
+        if k in ominaisuudet:
+            return k
+    for k in ominaisuudet:
+        if str(k).lower().endswith("id"):
+            return k
+    return None
+
+
+def _getfeature(osoite, versio, taso, bbox, muoto, kentat, maara, alku=0, jarjestys=None):
+    """Yksi GetFeature-pyyntö -> (kohteet, palvelimen ilmoittama kokonaismäärä tai None)."""
+    v2 = versio.startswith("2")
+    p = {"service": "WFS", "version": versio, "request": "GetFeature", "bbox": bbox,
+         ("typeNames" if v2 else "typeName"): taso, ("count" if v2 else "maxFeatures"): maara}
+    if alku:
+        p["startIndex"] = alku
+    if jarjestys:
+        p["sortBy"] = f"{jarjestys} {'ASC' if v2 else 'A'}"
+    if muoto:
+        p["outputFormat"] = muoto
+    if "3067" not in bbox:
+        p["srsName"] = "EPSG:4326"
+    sisalto, tyyppi = _hae(osoite, p)
+    teksti = sisalto.decode("utf-8", "replace")
+    try:
+        if teksti.lstrip().startswith("{"):
+            data = json.loads(teksti)
+            ilm = data.get("numberMatched", data.get("totalFeatures"))
+            return jasenna_geojson(data, kentat), (ilm if isinstance(ilm, int) else None)
+        if "ExceptionReport" in teksti[:2000] or "ServiceException" in teksti[:2000]:
+            raise ValueError("palvelimen virhe: " + re.sub(r"\s+", " ", teksti[:400]))
+        m = re.search(r'numberMatched="(\d+)"', teksti[:3000])
+        return jasenna_gml(teksti, kentat), (int(m.group(1)) if m else None)
+    except ValueError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise ValueError(f"vastausta ei voitu jäsentää ({tyyppi}): {e}; alku: {teksti[:300]!r}")
+
+
+def _sivuttain(hae, ilmoitettu, sivu, loki):
+    """Sivut järjestyksessä. hae(alku, maara) -> (kohteet, _). Lopetus tyhjään sivuun tai ilmoitettuun määrään."""
+    kaikki, alku, eka = [], 0, None
+    for _ in range(MAX_SIVUT):
+        kohteet, _ = hae(alku, sivu)
+        if not kohteet:
+            break
+        tunniste = (kohteet[0][0], tuple(kohteet[0][1][0][:2]) if kohteet[0][1] and kohteet[0][1][0] else None)
+        if alku and tunniste == eka:
+            loki("  palvelin ei tue sivutusta (sama sivu toistui)")
+            break
+        eka = eka or tunniste
+        kaikki += kohteet
+        alku += len(kohteet)
+        if isinstance(ilmoitettu, int) and alku >= ilmoitettu:
+            break
+    return kaikki
+
+
 def hae_kohteet(osoite, versio, taso, muodot, loki, kentat=None):
-    """Kaikki alueen kohteet sivuttain. Kokeillaan GeoJSONia ja GML:ää sekä bbox-muotoja."""
+    """Kaikki alueen kohteet. v11-lokin mukaan Traficomin palvelin palauttaa sivut ilman järjestystä
+    eri järjestyksessä (3984 kohteesta 1134 tuli kahdesti, yhtä monta jäi saamatta). Siksi:
+    1) ensimmäinen pyyntö kertoo kokonaismäärän, 2) kaikki yhdellä pyynnöllä, jos palvelin sallii,
+    3) muuten sivut pysyvässä järjestyksessä (sortBy), 4) tarkistus: uniikkien määrä = ilmoitettu."""
     json_muodot = [m for m in muodot if "json" in m.lower()] or ["application/json"]
     tulosmuodot = json_muodot[:1] + [None]   # None = palvelimen oletus (GML)
     for bbox in bbox_vaihtoehdot():
         for muoto in tulosmuodot:
-            kaikki, alku, eka, ilmoitettu, eka_koko = [], 0, None, None, None
-            for sivu in range(MAX_SIVUT):
-                p = {"service": "WFS", "version": versio, "request": "GetFeature", "bbox": bbox,
-                     ("typeNames" if versio.startswith("2") else "typeName"): taso,
-                     ("count" if versio.startswith("2") else "maxFeatures"): SIVU}
-                if sivu:
-                    p["startIndex"] = alku
-                if muoto:
-                    p["outputFormat"] = muoto
-                if "3067" not in bbox:
-                    p["srsName"] = "EPSG:4326"
-                try:
-                    sisalto, tyyppi = _hae(osoite, p)
-                except Exception as e:  # noqa: BLE001
-                    loki(f"  GetFeature epäonnistui ({muoto or 'GML'}, bbox {bbox.rsplit(',', 1)[-1]}): {e}")
-                    break
-                teksti = sisalto.decode("utf-8", "replace")
-                try:
-                    if teksti.lstrip().startswith("{"):
-                        data = json.loads(teksti)
-                        kohteet = jasenna_geojson(data, kentat)
-                        if not sivu:
-                            ilmoitettu = data.get("numberMatched", data.get("totalFeatures"))
-                    else:
-                        if "ExceptionReport" in teksti[:2000] or "ServiceException" in teksti[:2000]:
-                            raise ValueError("palvelimen virhe: " + re.sub(r"\s+", " ", teksti[:400]))
-                        kohteet = jasenna_gml(teksti, kentat)
-                        m = re.search(r'numberMatched="(\d+)"', teksti[:3000])
-                        if not sivu and m:
-                            ilmoitettu = int(m.group(1))
-                except Exception as e:  # noqa: BLE001
-                    loki(f"  vastausta ei voitu jäsentää ({muoto or 'GML'}, {tyyppi}): {e}; alku: {teksti[:300]!r}")
-                    break
-                if not kohteet:
-                    break
-                tunniste = (kohteet[0][0], tuple(kohteet[0][1][0][:2]) if kohteet[0][1] and kohteet[0][1][0] else None)
-                if sivu and tunniste == eka:
-                    loki("  palvelin ei tue sivutusta (sama sivu toistui) – käytetään ensimmäistä sivua")
-                    break
-                eka = eka or tunniste
-                eka_koko = eka_koko or len(kohteet)
-                kaikki += kohteet
-                # Seuraava sivu alkaa saatujen määrästä: palvelimen yläraja voi olla pienempi kuin SIVU.
-                # Lopetetaan tyhjään sivuun tai kun palvelimen ilmoittama määrä on saatu.
-                alku += len(kohteet)
-                if isinstance(ilmoitettu, int) and alku >= ilmoitettu:
-                    break
-            if kaikki:
-                nahty, uniikit = set(), []
-                for k in kaikki:   # sama kohde voi tulla kahdesti, jos palvelin järjestää sivut eri tavoin
-                    o = k[1][0] if k[1] else []
-                    tunnus = (k[0], tuple(o[0]) if o else None, tuple(o[-1]) if o else None, len(o), len(k[1]))
-                    if tunnus not in nahty:
-                        nahty.add(tunnus); uniikit.append(k)
-                loki(f"  {len(uniikit)} kohdetta ({len(kaikki) - len(uniikit)} kaksoiskappaletta pois); palvelin ilmoitti "
-                     f"{ilmoitettu}; sivuja {sivu + 1}, ensimmäisen sivun koko {eka_koko} "
-                     f"(muoto {muoto or 'GML'}, bbox {bbox.rsplit(',', 1)[-1]})")
-                if isinstance(ilmoitettu, int) and len(kaikki) < ilmoitettu:
-                    loki(f"  VAROITUS: saatiin {len(kaikki)} / {ilmoitettu} kohdetta – osa puuttuu")
-                return uniikit
+            nimi = f"muoto {muoto or 'GML'}, bbox {bbox.rsplit(',', 1)[-1]}"
+            hae = lambda alku, maara, j=None: _getfeature(osoite, versio, taso, bbox, muoto, kentat, maara, alku, j)  # noqa: E731
+            try:
+                eka, ilm = hae(0, SIVU)
+            except Exception as e:  # noqa: BLE001
+                loki(f"  GetFeature epäonnistui ({nimi}): {e}")
+                continue
+            if not eka:
+                continue
+            kaikki, tapa = eka, "yksi sivu"
+            # Lisää sivuja, jos palvelin ilmoitti enemmän – tai ei ilmoittanut määrää lainkaan (yläraja voi olla < SIVU).
+            if (isinstance(ilm, int) and ilm > len(eka)) or ilm is None:
+                kerralla = []
+                if isinstance(ilm, int):
+                    try:
+                        kerralla, _ = hae(0, ilm + 10)
+                    except Exception as e:  # noqa: BLE001
+                        loki(f"  kaikki kerralla ei onnistunut: {e}")
+                if isinstance(ilm, int) and len(_uniikit(kerralla)) >= ilm:
+                    kaikki, tapa = kerralla, f"kaikki kerralla ({len(kerralla)})"
+                else:
+                    avain = _jarjestysavain(eka)
+                    try:
+                        if not avain:
+                            raise ValueError("ei järjestysavainta")
+                        kaikki = _sivuttain(lambda a, m: hae(a, m, avain), ilm, len(kerralla) or len(eka), loki)
+                        tapa = f"sivuttain järjestettynä ({avain})"
+                    except Exception as e:  # noqa: BLE001
+                        loki(f"  järjestetty sivutus ei onnistunut ({e}) – sivutetaan ilman järjestystä")
+                        kaikki = _sivuttain(hae, ilm, len(eka), loki)
+                        tapa = "sivuttain ilman järjestystä"
+            uniikit = _uniikit(kaikki)
+            loki(f"  {len(uniikit)} kohdetta ({len(kaikki) - len(uniikit)} kaksoiskappaletta pois); palvelin ilmoitti "
+                 f"{ilm}; ensimmäisen sivun koko {len(eka)}; tapa: {tapa} ({nimi})")
+            if isinstance(ilm, int) and len(uniikit) < ilm:
+                loki(f"  VAROITUS: saatiin {len(uniikit)} / {ilm} kohdetta – {ilm - len(uniikit)} puuttuu")
+            return uniikit
     return []
 
 

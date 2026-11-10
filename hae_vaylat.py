@@ -1,4 +1,4 @@
-"""Merilohitutka – hae_vaylat.py (v11)
+"""Merilohitutka – hae_vaylat.py (v12)
 
 Hakee Väyläviraston vesiväyläaineistosta (avoin WFS, CC BY 4.0) alueen navigointilinjat ja
 väyläalueet (reunat + kulkusyvyys) ja kirjoittaa ne tiedostoon data/vaylat.json.
@@ -18,33 +18,37 @@ import hae_syvyys as W   # WFS-apufunktiot (GetCapabilities, GeoJSON/GML, bbox, 
 WFS = ["https://avoinapi.vaylapilvi.fi/vaylatiedot/ows", "https://avoinapi.vaylapilvi.fi/vaylatiedot/wfs"]
 LINJA_AVAIMET = ["navigointilinja", "navigointilinjat"]
 ALUE_AVAIMET = ["vaylaalue", "vaylaalueet", "väyläalue"]
-SYVYYS_KENTAT = ["kulkusyvyys", "kulkusyvyys1", "kulkusyv", "syvyys", "vaylan_syvyys"]
+# v11-lokista: väylätiedoissa kentät "mitoitussyvays" ja "haraussyvyys" (ei "kulkusyvyys").
+SYVYYS_KENTAT = ["mitoitussyvays", "kulkusyvyys", "kulkusyvyys1", "syvyys"]
+HARAUS_KENTAT = ["haraussyvyys"]
 LAHDE = "Väylävirasto, vesiväyläaineisto (navigointilinjat, väyläalueet)"
 HUOM = "Aineisto ei sovellu navigointikäyttöön."
 UUSINTA_VRK = 30
-VERSIO = 2   # v11: sivutuksen korjaus -> vanha tiedosto haetaan uudelleen
+VERSIO = 3   # v12: kaikki väylätasot (myös Väyläviraston _uusi), mitoitus- ja haraussyvyys -> vanha haetaan uudelleen
 
 
 def _valitse(nimet, avaimet):
+    """Kaikki tasot, joiden nimi alkaa avaimella (v11: navigointilinjat_uusi = Väylävirasto,
+    navigointilinjat_muut_vaylanpitajat = esim. kaupungit). Vesiväylätasot ensin."""
+    out = []
     for n in nimet:
         pieni = n.lower().split(":")[-1]
         if any(pieni == a or pieni.startswith(a) for a in avaimet):
-            return n
-    for n in nimet:
-        if any(a in n.lower() for a in avaimet):
-            return n
-    return None
+            out.append(n)
+    return sorted(out, key=lambda n: (not n.lower().startswith("vesivayla"), n))
 
 
-def _koodaa_kaikki(kohteet, jarjestys, origo, kentat_mukaan):
+def _koodaa_kaikki(kohteet, jarjestys, origo):
+    """-> [{"s": mitoitussyväys, "h": haraussyvyys, "k": koodattu viiva}]"""
     out = []
-    for syv, osat, _ in kohteet:
+    for syv, osat, ominaisuudet in kohteet:
+        haraus = W.syvyysarvo(ominaisuudet, HARAUS_KENTAT) if any(k.lower() in HARAUS_KENTAT for k in ominaisuudet) else None
         for o in osat:
             if len(o) < 2:
                 continue
             k = W.koodaa(W.yksinkertaista(W.muunna(o, jarjestys), 4.0), origo)
             if len(k) >= 4:
-                out.append({"s": syv, "k": k} if kentat_mukaan else k)
+                out.append({"s": syv, "h": haraus, "k": k})
     return out
 
 
@@ -58,27 +62,26 @@ def hae_vaylavirastolta(loki=print):
             virheet.append(f"{osoite}: GetCapabilities {e}")
             loki(f"väylät: {osoite} GetCapabilities epäonnistui: {e}")
             continue
-        vesi = [n for n in nimet if "vesi" in n.lower() or "vayl" in n.lower() or "navig" in n.lower()]
-        loki(f"väylät: {osoite} WFS {versio}, {len(nimet)} tasoa; vesiväylätasot: {', '.join(vesi)[:900]}")
-        linja, alue = _valitse(nimet, LINJA_AVAIMET), _valitse(nimet, ALUE_AVAIMET)
-        loki(f"  navigointilinjat: {linja}; väyläalueet: {alue}")
-        if not linja and not alue:
+        linjat, alueet = _valitse(nimet, LINJA_AVAIMET), _valitse(nimet, ALUE_AVAIMET)
+        loki(f"väylät: {osoite} WFS {versio}, {len(nimet)} tasoa; navigointilinjat: {', '.join(linjat)}; "
+             f"väyläalueet: {', '.join(alueet)}")
+        if not linjat and not alueet:
             virheet.append(f"{osoite}: ei väylätasoja")
             continue
         origo = (int(W.ALUE["lat_min"] * 10) / 10, int(W.ALUE["lon_min"] * 10) / 10)
         tulos = {"muoto": 1, "versio": VERSIO, "luotu": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "lahde": LAHDE,
                  "huom": HUOM, "lisenssi": "CC BY 4.0", "origo": list(origo), "kerroin": W.KERROIN,
+                 "syvyydet": "s = mitoitussyväys, h = haraussyvyys (Väyläviraston kentät mitoitussyvays, haraussyvyys)",
                  "linjat": [], "alueet": []}
-        for taso, avain in ((linja, "linjat"), (alue, "alueet")):
-            if not taso:
-                continue
-            kohteet = W.hae_kohteet(osoite, versio, taso, muodot, loki, SYVYYS_KENTAT)
-            if not kohteet:
-                virheet.append(f"{taso}: ei kohteita")
-                continue
-            loki(f"  {avain}: {len(kohteet)} kohdetta; esimerkki: {json.dumps(kohteet[0][2], ensure_ascii=False)[:400]}")
-            a, b = next(p for k in kohteet for o in k[1] for p in o[:1])
-            tulos[avain] = _koodaa_kaikki(kohteet, W.tulkitse_jarjestys(a, b), origo, avain == "alueet")
+        for tasot, avain in ((linjat, "linjat"), (alueet, "alueet")):
+            for taso in tasot:
+                kohteet = W.hae_kohteet(osoite, versio, taso, muodot, loki, SYVYYS_KENTAT)
+                if not kohteet:
+                    loki(f"  {taso}: ei kohteita alueella")
+                    continue
+                loki(f"  {taso}: {len(kohteet)} kohdetta; esimerkki: {json.dumps(kohteet[0][2], ensure_ascii=False)[:300]}")
+                a, b = next(p for k in kohteet for o in k[1] for p in o[:1])
+                tulos[avain] += _koodaa_kaikki(kohteet, W.tulkitse_jarjestys(a, b), origo)
         if tulos["linjat"] or tulos["alueet"]:
             loki(f"  väyliä: {len(tulos['linjat'])} linjaa, {len(tulos['alueet'])} aluereunaa")
             return tulos, None
