@@ -1,6 +1,7 @@
 /* Merilohitutka – kartta.js
  * Kevyt oma karttanäkymä (ei ulkoisia kirjastoja): OSM-taustakartta valinnaisena,
- * Copernicus-datasta lämpökäyrät, satelliittilämpö, pintavirtanuolet ja aallonkorkeus.
+ * Copernicus-datasta lämpökäyrät, lohikerros (lämpövälin syvyys), satelliittilämpö, pintavirtanuolet
+ * ja aallonkorkeus.
  * Puhtaat laskentafunktiot (käyrät, projektio, lähin arvo) testattavissa Nodessa.
  */
 (function (root) {
@@ -236,6 +237,10 @@
         const p = this.osoittimet.get(e.pointerId);
         this.osoittimet.delete(e.pointerId);
         if (p && !this.raahattu && this.osoittimet.size === 0) {
+          const a = this._profiiliAlue;
+          if (a && e.offsetX >= a.x && e.offsetX <= a.x + a.w && e.offsetY >= a.y && e.offsetY <= a.y + a.h) {
+            this.valittu = null; this._profiiliAlue = null; this.piirra(); this.onNapautus(null, null); return;   // profiili kiinni
+          }
           const [la, lo] = this.paikka(e.offsetX, e.offsetY);
           this.valittu = [la, lo]; this.piirra(); this.onNapautus(la, lo);
         }
@@ -279,8 +284,9 @@
         if (this.tasot.virta && d.phy) this._virta();
       }
       this._merkit();
-      this._selite();
-      if (d && this.tasot.lohi && this.valittu) this._profiili();
+      this._profiiliAlue = null;
+      const profiili = d && this.tasot.lohi && this.valittu ? this._profiili() : false;
+      if (!profiili) this._selite();   // selite ja profiili eivät mahdu päällekkäin
     }
 
     /** Lohikerroksen luokat ruuduittain (välimuisti: sama data, aika ja lämpöväli). */
@@ -314,10 +320,10 @@
     /** Valitun pisteen lämpöprofiili pienenä kuvana vasempaan yläkulmaan. */
     _profiili() {
       const pr = profiiliPisteessa(this.data.phy, this.aika, this.valittu[0], this.valittu[1]);
-      if (!pr) return;
+      if (!pr) return false;
       const pts = [];
       for (let k = 0; k < pr.syvyydet.length; k++) { const v = pr.arvot[k]; if (v === null || !isFinite(v)) break; pts.push([pr.syvyydet[k], v]); }
-      if (!pts.length) return;
+      if (!pts.length) return false;
       const [a, b] = this.lohiVali, k = kerros(pr.arvot, pr.syvyydet, a, b);
       const g = this.ctx, X = 8, Y = 8, W = 132, H = 156;
       const dMax = pr.syvyydet[pr.syvyydet.length - 1];
@@ -330,6 +336,8 @@
       g.fillStyle = 'rgba(5,15,28,0.88)'; g.fillRect(X, Y, W, H);
       g.strokeStyle = 'rgba(255,255,255,0.25)'; g.strokeRect(X + 0.5, Y + 0.5, W - 1, H - 1);
       g.font = 'bold 12px sans-serif'; g.fillStyle = '#e9f1f7'; g.fillText('Profiili (malli)', X + 6, Y + 15);
+      g.font = 'bold 15px sans-serif'; g.fillStyle = '#8fa6ba'; g.fillText('×', X + W - 14, Y + 15);   // napautus sulkee
+      this._profiiliAlue = { x: X, y: Y, w: W, h: H };
       // lämpöväli
       g.fillStyle = 'rgba(60,220,120,0.22)'; g.fillRect(xT(a), px.y0, xT(b) - xT(a), px.y1 - px.y0);
       // 0–3 m optimi
@@ -356,6 +364,7 @@
         g.beginPath(); g.moveTo(xr - 3, yD(k.yla)); g.lineTo(xr, yD(k.yla)); g.lineTo(xr, yD(k.ala)); g.lineTo(xr - 3, yD(k.ala)); g.stroke();
       }
       g.restore();
+      return true;
     }
 
     _tausta() {
@@ -481,25 +490,31 @@
     }
 
     _selite() {
-      const g = this.ctx, rivit = [];
-      if (this.tasot.lohi && this.data && this.data.phy && this.data.phy.profiili) {
-        const v = this.lohiVali.map(x => x.toFixed(1).replace('.', ',')).join('–');
-        rivit.push(['Lohikerros ' + v + ' °C alkaa (malli):', '#7ed957']);
-        rivit.push(['vihreä 0–3 m · keltainen 3–6 · oranssi 6–12', '#7ed957']);
-      }
-      if (this.tasot.lampo && this.data && this.data.phy) rivit.push(['Lämpö (malli) käyrät ' + this.askel.toString().replace('.', ',') + ' °C välein', '#ffb24a']);
-      if (this.tasot.sst && this.data && this.data.sst) rivit.push(['Satelliittilämpö (katkoviiva)', '#fff']);
-      if (this.tasot.virta && this.data && this.data.phy) rivit.push(['Virta: nuoli ≈ 0,25 m/s', '#78ebff']);
-      if (this.tasot.aalto && this.data && this.data.wav) {
-        rivit.push(['Aalto (m): sininen <0,25 · vihreä <0,75', '#ffd54a']);
-        rivit.push(['keltainen <1,0 · oranssi <1,5 · punainen ≥1,5', '#ffd54a']);
-      }
+      // Tiivis selite: rivi = osia [teksti, tekstin väri, neliön väri]
+      const d = this.data, rivit = [];
+      if (!d) return;
+      const f = x => x.toString().replace('.', ',');
+      if (this.tasot.lohi && d.phy && d.phy.profiili) rivit.push([['Lohikerros alkaa', '#7ed957'],
+        ['0–3', '#e9f1f7', 'rgb(60,220,120)'], ['3–6', '#e9f1f7', 'rgb(240,210,60)'], ['6–12 m', '#e9f1f7', 'rgb(255,140,40)'], ['ei', '#e9f1f7', 'rgb(110,120,130)']]);
+      if (this.tasot.lampo && d.phy) rivit.push([['Lämpö (malli) ' + f(this.askel) + ' °C välein', '#ffb24a']]);
+      if (this.tasot.sst && d.sst) rivit.push([['Satelliitti: katkoviiva', '#ffffff']]);
+      if (this.tasot.virta && d.phy) rivit.push([['Virta: nuoli ≈ 0,25 m/s', '#78ebff']]);
+      if (this.tasot.aalto && d.wav) rivit.push([['Aalto <', '#ffd54a'], ['0,25', '#e9f1f7', 'rgb(64,140,255)'], ['0,5', '#e9f1f7', 'rgb(60,200,160)'],
+        ['0,75', '#e9f1f7', 'rgb(170,220,60)'], ['1', '#e9f1f7', 'rgb(250,210,40)'], ['1,5', '#e9f1f7', 'rgb(255,140,30)'], ['+ m', '#e9f1f7', 'rgb(235,50,40)']]);
       if (!rivit.length) return;
+      const g = this.ctx;
       g.save(); g.font = '12px sans-serif';
-      const lev = Math.max(...rivit.map(r => g.measureText(r[0]).width)) + 16;
-      const kork = rivit.length * 17 + 8, y0 = this.h - kork - 22; // vasen alakulma, ei peitä zoom-nappeja
+      const leveys = rivi => rivi.reduce((s, [t, , n]) => s + g.measureText(t).width + (n ? 13 : 0) + 6, 0);
+      const lev = Math.max(...rivit.map(leveys)) + 10;
+      const kork = rivit.length * 16 + 8, y0 = this.h - kork - 20;   // vasen alakulma, ei peitä zoom-nappeja
       g.fillStyle = 'rgba(5,15,28,0.75)'; g.fillRect(6, y0, lev, kork);
-      rivit.forEach(([t, c], i) => { g.fillStyle = c; g.fillText(t, 14, y0 + 16 + i * 17); });
+      rivit.forEach((rivi, i) => {
+        let x = 12; const y = y0 + 16 + i * 16;
+        for (const [t, vari, nelio] of rivi) {
+          if (nelio) { g.fillStyle = nelio; g.fillRect(x, y - 9, 10, 10); x += 13; }
+          g.fillStyle = vari; g.fillText(t, x, y); x += g.measureText(t).width + 6;
+        }
+      });
       g.restore();
     }
   }
