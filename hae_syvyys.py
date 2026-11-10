@@ -1,4 +1,4 @@
-"""Merilohitutka – hae_syvyys.py (v8)
+"""Merilohitutka – hae_syvyys.py (v11)
 
 Hakee Traficomin merikartan syvyyskäyrät (aineisto "Merikartan syvyystiedot") WFS-rajapinnasta
 Uusikaarlepyy–Tankar-alueelta ja kirjoittaa ne sovellukselle tiedostoon data/syvyys.json.
@@ -28,7 +28,8 @@ WFS = ["https://julkinen.traficom.fi/inspirepalvelu/rajoitettu/wfs",
 TASON_AVAIMET = ["syvyyskayra", "syvyyskäyrä", "depcnt", "depth_contour", "depthcontour"]
 SYVYYS_KENTAT = ["valdco", "syvyys", "syvyysarvo", "depth", "arvo", "value", "val"]
 SIVU = 2000              # kohteita per pyyntö
-MAX_SIVUT = 60
+MAX_SIVUT = 300
+VERSIO = 2               # v11: sivutus korjattu (palvelimen yläraja < SIVU katkaisi haun) -> vanha tiedosto haetaan uudelleen
 TOLERANSSI_M = 6.0       # yksinkertaistus (Douglas–Peucker), metriä
 KERROIN = 100000         # koordinaatit 1e-5 asteen kokonaislukuina
 UUSINTA_VRK = 30
@@ -189,7 +190,7 @@ def rakenna(viivat_syvyyksittain, luotu, taso):
                     pisteita += len(k) // 2
         if lista:
             kayrat[(f"{syv:g}")] = lista
-    return {"muoto": 1, "luotu": luotu, "lahde": LAHDE, "huom": HUOM, "taso": taso,
+    return {"muoto": 1, "versio": VERSIO, "luotu": luotu, "lahde": LAHDE, "huom": HUOM, "taso": taso,
             "lisenssi": "Traficomin avoin data (CC BY 4.0 / hydrografisen aineiston lisenssi), "
                         "https://www.traficom.fi/en/transport-system/geoinformationsmaterial/use-and-licences-data",
             "origo": list(origo), "kerroin": KERROIN, "pisteita": pisteita, "kayrat": kayrat}
@@ -292,7 +293,7 @@ def hae_kohteet(osoite, versio, taso, muodot, loki, kentat=None):
     tulosmuodot = json_muodot[:1] + [None]   # None = palvelimen oletus (GML)
     for bbox in bbox_vaihtoehdot():
         for muoto in tulosmuodot:
-            kaikki, alku, eka = [], 0, None
+            kaikki, alku, eka, ilmoitettu, eka_koko = [], 0, None, None, None
             for sivu in range(MAX_SIVUT):
                 p = {"service": "WFS", "version": versio, "request": "GetFeature", "bbox": bbox,
                      ("typeNames" if versio.startswith("2") else "typeName"): taso,
@@ -311,11 +312,17 @@ def hae_kohteet(osoite, versio, taso, muodot, loki, kentat=None):
                 teksti = sisalto.decode("utf-8", "replace")
                 try:
                     if teksti.lstrip().startswith("{"):
-                        kohteet = jasenna_geojson(json.loads(teksti), kentat)
+                        data = json.loads(teksti)
+                        kohteet = jasenna_geojson(data, kentat)
+                        if not sivu:
+                            ilmoitettu = data.get("numberMatched", data.get("totalFeatures"))
                     else:
                         if "ExceptionReport" in teksti[:2000] or "ServiceException" in teksti[:2000]:
                             raise ValueError("palvelimen virhe: " + re.sub(r"\s+", " ", teksti[:400]))
                         kohteet = jasenna_gml(teksti, kentat)
+                        m = re.search(r'numberMatched="(\d+)"', teksti[:3000])
+                        if not sivu and m:
+                            ilmoitettu = int(m.group(1))
                 except Exception as e:  # noqa: BLE001
                     loki(f"  vastausta ei voitu jäsentää ({muoto or 'GML'}, {tyyppi}): {e}; alku: {teksti[:300]!r}")
                     break
@@ -326,13 +333,26 @@ def hae_kohteet(osoite, versio, taso, muodot, loki, kentat=None):
                     loki("  palvelin ei tue sivutusta (sama sivu toistui) – käytetään ensimmäistä sivua")
                     break
                 eka = eka or tunniste
+                eka_koko = eka_koko or len(kohteet)
                 kaikki += kohteet
-                if len(kohteet) < SIVU:
+                # Seuraava sivu alkaa saatujen määrästä: palvelimen yläraja voi olla pienempi kuin SIVU.
+                # Lopetetaan tyhjään sivuun tai kun palvelimen ilmoittama määrä on saatu.
+                alku += len(kohteet)
+                if isinstance(ilmoitettu, int) and alku >= ilmoitettu:
                     break
-                alku += SIVU
             if kaikki:
-                loki(f"  {len(kaikki)} kohdetta (muoto {muoto or 'GML'}, bbox {bbox.rsplit(',', 1)[-1]})")
-                return kaikki
+                nahty, uniikit = set(), []
+                for k in kaikki:   # sama kohde voi tulla kahdesti, jos palvelin järjestää sivut eri tavoin
+                    o = k[1][0] if k[1] else []
+                    tunnus = (k[0], tuple(o[0]) if o else None, tuple(o[-1]) if o else None, len(o), len(k[1]))
+                    if tunnus not in nahty:
+                        nahty.add(tunnus); uniikit.append(k)
+                loki(f"  {len(uniikit)} kohdetta ({len(kaikki) - len(uniikit)} kaksoiskappaletta pois); palvelin ilmoitti "
+                     f"{ilmoitettu}; sivuja {sivu + 1}, ensimmäisen sivun koko {eka_koko} "
+                     f"(muoto {muoto or 'GML'}, bbox {bbox.rsplit(',', 1)[-1]})")
+                if isinstance(ilmoitettu, int) and len(kaikki) < ilmoitettu:
+                    loki(f"  VAROITUS: saatiin {len(kaikki)} / {ilmoitettu} kohdetta – osa puuttuu")
+                return uniikit
     return []
 
 
@@ -389,6 +409,12 @@ def paivita(kansio, sivun_osoite, loki=print):
             vanha = json.loads(r.read().decode("utf-8"))
     except Exception as e:  # noqa: BLE001
         loki(f"syvyys: edellistä syvyys.json:ia ei saatu ({e})")
+    if vanha and "kayrat" in vanha and vanha.get("versio", 1) < VERSIO:
+        loki(f"syvyys: edellinen tiedosto on vanhaa versiota ({vanha.get('versio', 1)}) – haetaan uudelleen")
+        vanha_kaytettavissa = vanha   # varalle, jos uusi haku epäonnistuu
+        vanha = None
+    else:
+        vanha_kaytettavissa = vanha
     if vanha and "kayrat" in vanha:
         try:
             ika = (datetime.now(timezone.utc) - datetime.strptime(vanha["luotu"], "%Y-%m-%dT%H:%M:%SZ")
@@ -410,6 +436,7 @@ def paivita(kansio, sivun_osoite, loki=print):
         loki(f"syvyys: kirjoitettu {polku}, {os.path.getsize(polku) // 1024} kt (pakkaamatta)")
         return {"tila": "ok", "luotu": uusi["luotu"]}
     loki(f"syvyys: VIRHE {virhe}")
+    vanha = vanha_kaytettavissa
     if vanha and "kayrat" in vanha:
         with open(polku, "w", encoding="utf-8") as f:
             json.dump(vanha, f, ensure_ascii=False, separators=(",", ":"))

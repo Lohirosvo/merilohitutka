@@ -1,4 +1,4 @@
-"""Merilohitutka – hae_vaylat.py (v9)
+"""Merilohitutka – hae_vaylat.py (v11)
 
 Hakee Väyläviraston vesiväyläaineistosta (avoin WFS, CC BY 4.0) alueen navigointilinjat ja
 väyläalueet (reunat + kulkusyvyys) ja kirjoittaa ne tiedostoon data/vaylat.json.
@@ -22,6 +22,7 @@ SYVYYS_KENTAT = ["kulkusyvyys", "kulkusyvyys1", "kulkusyv", "syvyys", "vaylan_sy
 LAHDE = "Väylävirasto, vesiväyläaineisto (navigointilinjat, väyläalueet)"
 HUOM = "Aineisto ei sovellu navigointikäyttöön."
 UUSINTA_VRK = 30
+VERSIO = 2   # v11: sivutuksen korjaus -> vanha tiedosto haetaan uudelleen
 
 
 def _valitse(nimet, avaimet):
@@ -65,7 +66,7 @@ def hae_vaylavirastolta(loki=print):
             virheet.append(f"{osoite}: ei väylätasoja")
             continue
         origo = (int(W.ALUE["lat_min"] * 10) / 10, int(W.ALUE["lon_min"] * 10) / 10)
-        tulos = {"muoto": 1, "luotu": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "lahde": LAHDE,
+        tulos = {"muoto": 1, "versio": VERSIO, "luotu": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "lahde": LAHDE,
                  "huom": HUOM, "lisenssi": "CC BY 4.0", "origo": list(origo), "kerroin": W.KERROIN,
                  "linjat": [], "alueet": []}
         for taso, avain in ((linja, "linjat"), (alue, "alueet")):
@@ -93,6 +94,10 @@ def paivita(kansio, sivun_osoite, loki=print):
             vanha = json.loads(r.read().decode("utf-8"))
     except Exception as e:  # noqa: BLE001
         loki(f"väylät: edellistä vaylat.json:ia ei saatu ({e})")
+    varalla = vanha
+    if vanha and vanha.get("versio", 1) < VERSIO:
+        loki("väylät: edellinen tiedosto on vanhaa versiota – haetaan uudelleen")
+        vanha = None
     if vanha and "linjat" in vanha:
         try:
             ika = (datetime.now(timezone.utc) - datetime.strptime(vanha["luotu"], "%Y-%m-%dT%H:%M:%SZ")
@@ -114,6 +119,7 @@ def paivita(kansio, sivun_osoite, loki=print):
         loki(f"väylät: kirjoitettu {polku}, {os.path.getsize(polku) // 1024} kt")
         return {"tila": "ok", "luotu": uusi["luotu"]}
     loki(f"väylät: VIRHE {virhe}")
+    vanha = varalla
     if vanha and "linjat" in vanha:
         with open(polku, "w", encoding="utf-8") as f:
             json.dump(vanha, f, ensure_ascii=False, separators=(",", ":"))

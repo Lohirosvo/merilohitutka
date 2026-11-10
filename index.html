@@ -683,7 +683,7 @@ function piirraMeriTila() {
   if (meri.syvyys && meri.syvyys.tila !== 'ok') osat.push('syvyys: ' + meri.syvyys.tila + (meri.syvyys.viesti ? ' (' + meri.syvyys.viesti + ')' : ''));
   if (meri.vaylat && meri.vaylat.tila !== 'ok') osat.push('väylät: ' + meri.vaylat.tila + (meri.vaylat.viesti ? ' (' + meri.vaylat.viesti + ')' : ''));
   if (meri.tuuli) osat.push(`Tuuli: Ilmatieteen laitos, toimitettu ennuste (avoin data, CC BY 4.0), ${pvmTeksti(meri.tuuli.loppu.slice(0, 10))} asti`);
-  if (syvyys) osat.push(`Syvyyskäyrät: Traficom, Merikartan syvyystiedot (haettu ${pvm(new Date(syvyys.luotu))}). Ei navigointikäyttöön. Ei täytä virallisen merikartan vaatimuksia`);
+  if (syvyys) osat.push(`Syvyyskäyrät: Traficom, Merikartan syvyystiedot (haettu ${pvm(new Date(syvyys.luotu))}; käyriä ${syvyys.tasot.map(t => luku(t.syvyys, t.syvyys % 1 ? 1 : 0) + ' m: ' + t.viivat.length).join(', ')}). Ei navigointikäyttöön. Ei täytä virallisen merikartan vaatimuksia`);
   if (vaylat) osat.push(`Väylät: Väylävirasto, vesiväyläaineisto (CC BY 4.0). Ei navigointikäyttöön`);
   if (meri.virheet && meri.virheet.length) osat.push('virheet: ' + meri.virheet.join(' | '));
   osat.push('Todisteen taso: malli (lämpö, lohikerros, virta, aalto), satelliitti (SST), sääennuste (tuuli). Ennusteen tarkkuus heikkenee loppua kohti. E.U. Copernicus Marine Service Information.');
