@@ -267,6 +267,72 @@
     return `hsl(${h},90%,${55 + 10 * Math.sin(f * Math.PI)}%)`;
   }
   /** Tuulen väri: Hannun paluuraja 10 m/s punaisena. */
+  /** Omat havainnot (havainnot.js ja puhelimeen tallennetut saaliit): värit lajin mukaan. */
+  const HAVAINTOVARIT = { lammin: '255,122,69', kylma: '77,163,255', muu: '190,150,255', saalis: '255,77,109' };
+  function havaintoVari(laji) { return HAVAINTOVARIT[laji] || HAVAINTOVARIT.muu; }
+  const KM_LAT = 110.574;
+  function kmLon(lat) { return 111.32 * Math.cos(lat * Math.PI / 180); }
+  /** Etäisyys (km) pisteestä murtoviivaan [[lat, lon], ...] ja lähimmän kohdan leveys. */
+  function etaisyysViivaan(pisteet, lat, lon) {
+    const kx = kmLon(lat);
+    let paras = { km: Infinity, lat: null };
+    for (let i = 0; i + 1 < pisteet.length; i++) {
+      const [a0, b0] = pisteet[i], [a1, b1] = pisteet[i + 1];
+      const ax = (b0 - lon) * kx, ay = (a0 - lat) * KM_LAT, bx = (b1 - lon) * kx, by = (a1 - lat) * KM_LAT;
+      const dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy;
+      const t = L2 > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / L2)) : 0;
+      const km = Math.hypot(ax + t * dx, ay + t * dy);
+      if (km < paras.km) paras = { km, lat: a0 + t * (a1 - a0) };
+    }
+    return paras;
+  }
+  /** Viivan vahvistusryhmä leveyden mukaan (esim. 62,25–62,42 = 5 havaintoa) tai null. */
+  function vahvistusRyhma(h, lat) {
+    for (const r of h.vahvistukset || []) if (lat >= r.lat[0] && lat <= r.lat[1]) return r;
+    return null;
+  }
+  /** Ellipsi rajausruudun sisällä: (x/a)^2 + (y/b)^2, < 1 = sisällä. */
+  function ellipsiArvo(lat, lon, la, lo) {
+    const a = (lo[1] - lo[0]) / 2, b = (la[1] - la[0]) / 2;
+    return Math.pow((lon - (lo[0] + lo[1]) / 2) / a, 2) + Math.pow((lat - (la[0] + la[1]) / 2) / b, 2);
+  }
+  /** Havainnot pisteessä: [{ h, km, ryhma, reunalla }]. Viiva: leveys_km sisällä; alue: ellipsi (tai reuna);
+   *  saalis: 0,8 km; piste: max(sade_km, 1,5 km); kaista: lat- ja lon-väli. */
+  function havaintoTiedot(H, lat, lon) {
+    const tulos = [];
+    for (const h of H || []) {
+      if (h.tyyppi === 'viiva') {
+        const e = etaisyysViivaan(h.pisteet, lat, lon);
+        if (e.km <= (h.leveys_km || 1)) tulos.push({ h, km: e.km, ryhma: vahvistusRyhma(h, e.lat) });
+      } else if (h.tyyppi === 'alue') {
+        if (ellipsiArvo(lat, lon, h.lat, h.lon) <= 1) tulos.push({ h });
+        else if (h.reuna && ellipsiArvo(lat, lon, h.reuna.lat, h.reuna.lon) <= 1) tulos.push({ h, reunalla: true });
+      } else if (h.tyyppi === 'kaista') {
+        if (lat >= h.lat[0] && lat <= h.lat[1] && lon >= h.lon[0] && lon <= h.lon[1]) tulos.push({ h });
+      } else if (isFinite(h.lat) && isFinite(h.lon)) {
+        const km = Math.hypot((h.lon - lon) * kmLon(lat), (h.lat - lat) * KM_LAT);
+        if (km <= (h.tyyppi === 'saalis' ? 0.8 : Math.max(h.sade_km || 0, 1.5))) tulos.push({ h, km });
+      }
+    }
+    return tulos;
+  }
+  function havainnotPisteessa(H, lat, lon) { return havaintoTiedot(H, lat, lon).map(t => t.h); }
+  /** Saalispisteiden teksti (lat,lon tieto (varmuus: lisä)) -> [{ tyyppi: 'saalis', ... }]. Muut rivit ohitetaan. */
+  function jasennaSaaliit(teksti) {
+    const tulos = [];
+    for (const rivi of String(teksti || '').split(/\r?\n/)) {
+      const m = rivi.match(/^\s*(-?\d{1,2}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)\s+(.+?)\s*$/);
+      if (!m) continue;
+      const lat = parseFloat(m[1]), lon = parseFloat(m[2]);
+      if (!(lat > 50 && lat < 70 && lon > 5 && lon < 35)) continue;
+      let tieto = m[3], varmuus = null, lisa = null;
+      const v = tieto.match(/\(\s*([A-ZÅÄÖ])\s*(?::\s*([^)]*))?\)\s*$/);
+      if (v) { varmuus = v[1]; lisa = v[2] ? v[2].trim() : null; tieto = tieto.slice(0, v.index).trim(); }
+      const lyhyt = tieto.length > 26 ? tieto.slice(0, 25).replace(/[\s,]+\S*$/, '') + '…' : tieto;
+      tulos.push({ tyyppi: 'saalis', laji: 'saalis', lat, lon, nimi: lyhyt, teksti: tieto, varmuus, lisa });
+    }
+    return tulos;
+  }
   function tuuliVari(ws) { return ws >= 10 ? '#ff5c5c' : ws >= 8 ? '#ffa94d' : ws >= 5 ? '#ffe066' : '#e8f4ff'; }
   function aaltoVari(h) {
     const raja = [[0.25, '64,140,255'], [0.5, '60,200,160'], [0.75, '170,220,60'], [1.0, '250,210,40'], [1.5, '255,140,30'], [99, '235,50,40']];
@@ -281,12 +347,13 @@
       this.lat = opts.lat; this.lon = opts.lon; this.z = opts.z || 11;
       this.data = null; this.aika = 0; this.askel = opts.askel || 0.2;
       this.lohiVali = opts.lohiVali || [6.6, 8.8];
-      this.tasot = { lampo: true, lohi: true, syvyys: true, tuuli: true, vaylat: true, sst: false, virta: true, aalto: false, tausta: true };
+      this.tasot = { lampo: true, lohi: true, syvyys: true, tuuli: true, vaylat: true, havainnot: true, sst: false, virta: true, aalto: false, tausta: true };
       this.syvyys = null;   // puraSyvyys()-tulos
       this.vaylat = null;   // puraVaylat()-tulos
       this.ylaVara = 0; this.alaVara = 0;   // ohjainten peittämä osa ylhäällä ja alhaalla (px)
       this._seliteAsti = 0;
       this.merkit = opts.merkit || []; this.oma = null; this.valittu = null;
+      this.havainnot = opts.havainnot || [];   // havainnot.js
       this.laatat = new Map(); this.onNapautus = opts.onNapautus || (() => {});
       this.osoittimet = new Map(); this.raahattu = false;
       this._kuuntele();
@@ -395,6 +462,7 @@
       }
       if (this.tasot.syvyys && this.syvyys) this._syvyys();   // lämpökäyrien päälle: 20 m ja 6 m erottuvat
       if (this.tasot.vaylat && this.vaylat) this._vaylat();
+      if (this.tasot.havainnot && this.havainnot.length) this._havainnot();   // virta- ja tuulinuolten alle
       if (d && this.tasot.virta && d.phy) this._virta();
       if (d && this.tasot.tuuli && d.tuuli) this._tuuli();
       this._merkit();
@@ -697,6 +765,93 @@
       g.restore();
     }
 
+    /** Omat havainnot: viiva = ±leveys_km vyöhyke (vahvempi, mitä useampi havainto), alue = ellipsi rajausruudusta,
+     *  kaista = pystykaista, piste = vinoneliö, saalis = punainen ympyrä. */
+    _havainnot() {
+      const g = this.ctx, yla = this.ylaVara + 4, ala = this.h - this.alaVara - 4;
+      const kmPx = lat => Math.abs(this.ruutu(lat + 1 / KM_LAT, this.lon)[1] - this.ruutu(lat, this.lon)[1]);
+      g.save(); g.font = 'bold 12px sans-serif'; g.textAlign = 'center'; g.lineJoin = 'round'; g.lineCap = 'round';
+      const teksti = (t, x, y, c) => {
+        g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,0.85)'; g.strokeText(t, x, y);
+        g.fillStyle = 'rgb(' + c + ')'; g.fillText(t, x, y);
+      };
+      const nakyy = (x, y, m) => x > -m && x < this.w + m && y > yla - m && y < ala + m;
+      const saaliit = [];
+      for (const h of this.havainnot) {
+        const c = havaintoVari(h.laji);
+        if (h.tyyppi === 'viiva') {
+          const P = h.pisteet.map(([la, lo]) => this.ruutu(la, lo));
+          if (!P.some(([x, y]) => nakyy(x, y, 300))) continue;
+          // osat vahvistusryhmittäin, jotta päällekkäiset puoliläpinäkyvät palat eivät tummu
+          let osa = null; const osat = [];
+          for (let k = 0; k + 1 < P.length; k++) {
+            const r = vahvistusRyhma(h, (h.pisteet[k][0] + h.pisteet[k + 1][0]) / 2);
+            if (!osa || osa.r !== r) { osa = { r, p: [P[k]] }; osat.push(osa); }
+            osa.p.push(P[k + 1]);
+          }
+          const lev = 2 * (h.leveys_km || 1) * kmPx(h.pisteet[0][0]);
+          const polku = p => { g.beginPath(); g.moveTo(p[0][0], p[0][1]); for (const [x, y] of p.slice(1)) g.lineTo(x, y); };
+          // pohja: koko vyöhyke yhtenä haaleana (pyöreät päät vain viivan päissä)
+          g.strokeStyle = 'rgba(' + c + ',0.10)'; g.lineWidth = lev; g.lineCap = 'round'; polku(P); g.stroke();
+          // vahvistetut osat tummemmiksi (suorat päät, ettei ryhmien rajoille tule läikkiä)
+          g.lineCap = 'butt';
+          for (const o of osat) {
+            const heikko = !o.r || o.r.heikko, n = o.r ? parseInt(o.r.n, 10) || 1 : 1;
+            if (!heikko) { g.strokeStyle = 'rgba(' + c + ',' + Math.min(0.22, 0.04 * n) + ')'; g.lineWidth = lev; polku(o.p); g.stroke(); }
+            g.strokeStyle = 'rgba(' + c + ',' + (heikko ? 0.55 : 0.95) + ')'; g.lineWidth = heikko ? 1.5 : 2.2;
+            g.setLineDash(heikko ? [3, 6] : [10, 6]); polku(o.p); g.stroke(); g.setLineDash([]);
+          }
+          g.lineCap = 'round';
+          // nimi keskiviivalle lähimpään näkyvään kohtaan ruudun keskeltä
+          let paras = null;
+          for (const [x, y] of P) if (nakyy(x, y, -20)) { const d = Math.hypot(x - this.w / 2, y - (yla + ala) / 2); if (!paras || d < paras.d) paras = { x, y, d }; }
+          if (paras) {
+            const lx = Math.min(Math.max(paras.x, g.measureText(h.nimi).width / 2 + 6), this.w - g.measureText(h.nimi).width / 2 - 60);
+            teksti(h.nimi, lx, paras.y - 8, c);
+          }
+        } else if (h.tyyppi === 'alue') {
+          const piirraEllipsi = (la, lo, tayta, katko) => {
+            const [x0, y0] = this.ruutu(la[1], lo[0]), [x1, y1] = this.ruutu(la[0], lo[1]);
+            const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, rx = Math.abs(x1 - x0) / 2, ry = Math.abs(y1 - y0) / 2;
+            if (!nakyy(cx, cy, Math.max(rx, ry) + 40)) return null;
+            g.beginPath(); g.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+            if (tayta) { g.fillStyle = 'rgba(' + c + ',0.20)'; g.fill(); }
+            g.strokeStyle = 'rgba(' + c + ',0.95)'; g.lineWidth = tayta ? 2.2 : 1.5; g.setLineDash(katko); g.stroke(); g.setLineDash([]);
+            return [cx, cy];
+          };
+          if (h.reuna) piirraEllipsi(h.reuna.lat, h.reuna.lon, false, [3, 5]);
+          const k = piirraEllipsi(h.lat, h.lon, true, [8, 5]);
+          if (k) { teksti(h.nimi, k[0], k[1] - 2, c); if (h.lyhyt) teksti(h.lyhyt, k[0], k[1] + 13, c); }
+        } else if (h.tyyppi === 'kaista') {
+          const [x0, y0] = this.ruutu(h.lat[1], h.lon[0]), [x1, y1] = this.ruutu(h.lat[0], h.lon[1]);
+          if (x1 < 0 || x0 > this.w || y1 < yla || y0 > ala) continue;
+          g.fillStyle = 'rgba(' + c + ',0.16)'; g.fillRect(x0, y0, x1 - x0, y1 - y0);
+          g.strokeStyle = 'rgba(' + c + ',0.95)'; g.lineWidth = 2; g.setLineDash([8, 5]);
+          g.beginPath(); g.moveTo(x0, y0); g.lineTo(x0, y1); g.moveTo(x1, y0); g.lineTo(x1, y1); g.stroke(); g.setLineDash([]);
+          const ty = Math.min(Math.max(y0 + 16, yla + 14), y1 - 6);
+          teksti(h.nimi, (x0 + x1) / 2, ty, c);
+        } else if (h.tyyppi === 'saalis') {
+          saaliit.push(h);   // saaliit päällimmäisiksi
+        } else {
+          const [x, y] = this.ruutu(h.lat, h.lon);
+          if (!nakyy(x, y, 60)) continue;
+          g.fillStyle = 'rgb(' + c + ')'; g.strokeStyle = '#000'; g.lineWidth = 1.5;
+          g.beginPath(); g.moveTo(x, y - 9); g.lineTo(x + 8, y); g.lineTo(x, y + 9); g.lineTo(x - 8, y); g.closePath(); g.fill(); g.stroke();
+          g.textAlign = 'left'; teksti(h.nimi, x + 11, y + 4, c); g.textAlign = 'center';
+        }
+      }
+      g.textAlign = 'left';
+      for (const h of saaliit) {
+        const [x, y] = this.ruutu(h.lat, h.lon);
+        if (!nakyy(x, y, 60)) continue;
+        g.fillStyle = 'rgb(' + havaintoVari('saalis') + ')'; g.strokeStyle = '#fff'; g.lineWidth = 2;
+        g.beginPath(); g.arc(x, y, 6, 0, Math.PI * 2); g.fill(); g.stroke();
+        g.fillStyle = '#fff'; g.beginPath(); g.arc(x, y, 1.8, 0, Math.PI * 2); g.fill();
+        teksti(h.nimi, x + 10, y + 4, '255,170,185');
+      }
+      g.restore();
+    }
+
     _merkit() {
       const g = this.ctx;
       g.save(); g.font = 'bold 13px sans-serif';
@@ -740,6 +895,9 @@
         rivit.push([['', '#e9f1f7'], ['<5', '#e9f1f7', '#e8f4ff'], ['5–8', '#e9f1f7', '#ffe066'], ['8–10', '#e9f1f7', '#ffa94d'], ['≥10 m/s', '#e9f1f7', '#ff5c5c']]);
       }
       if (this.tasot.vaylat && this.vaylat) rivit.push([['Väylä (Väylävirasto), mitoitussyväys m', '#ffd166']]);
+      if (this.tasot.havainnot && this.havainnot.length) rivit.push([['Omat', 'rgb(' + havaintoVari('muu') + ')'],
+        ['lämpöraja', '#e9f1f7', 'rgba(' + havaintoVari('muu') + ',0.8)'], ['lämmin', '#e9f1f7', 'rgb(' + havaintoVari('lammin') + ')'],
+        ['kylmä', '#e9f1f7', 'rgb(' + havaintoVari('kylma') + ')'], ['saalis', '#e9f1f7', 'rgb(' + havaintoVari('saalis') + ')']]);
       if (this.tasot.lampo && d.phy) rivit.push([['Lämpö (malli) ' + f(this.askel) + ' °C välein', '#ffb24a']]);
       if (this.tasot.sst && d.sst) rivit.push([['Satelliitti: katkoviiva', '#ffffff']]);
       if (this.tasot.virta && d.phy) rivit.push([['Virta: nuoli ≈ 0,25 m/s', '#78ebff']]);
@@ -764,7 +922,8 @@
   }
 
   const KarttaMalli = { lonX, latY, xLon, yLat, kayra, tasot, arvovali, lahinIndeksi, lahinArvo, lahinAika, virta, akseliArvo,
-                        kerros, lohiLuokka, profiiliPisteessa, puraSyvyys, lahinKayra, puraVaylat, lahinVayla, tuuliVari };
+                        kerros, lohiLuokka, profiiliPisteessa, puraSyvyys, lahinKayra, puraVaylat, lahinVayla, tuuliVari,
+                        havainnotPisteessa, havaintoTiedot, havaintoVari, etaisyysViivaan, jasennaSaaliit };
   if (typeof module !== 'undefined' && module.exports) module.exports = KarttaMalli;
   else { root.KarttaMalli = KarttaMalli; root.Kartta = Kartta; }
 })(typeof window !== 'undefined' ? window : this);

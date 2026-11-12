@@ -169,6 +169,7 @@
           <span class="lohivali" id="lohiRivi"><input id="lohiMin" inputmode="decimal">–<input id="lohiMax" inputmode="decimal">°C</span>
           <button data-taso="tuuli">Tuuli</button>
           <button data-taso="vaylat">Väylät</button>
+          <button data-taso="havainnot">Havainnot</button>
           <button data-taso="lampo">Lämpö</button>
           <button data-taso="virta">Virta</button>
           <button data-taso="aalto">Aalto</button>
@@ -222,6 +223,20 @@
     </div>
     <div class="kortti">
       <details>
+        <summary>Omat saalispisteet (vain tässä puhelimessa)</summary>
+        <p class="pieni">Liitä rivit muodossa <code>lat,lon tieto (varmuus: lisä)</code>, esim.
+          <code>62.35005,21.04873 "otti" 3.5.2016 (V)</code>. Muut rivit ohitetaan. Pisteet jäävät vain tämän puhelimen
+          selaimeen eivätkä mene GitHubiin (sivu ja varasto ovat julkisia). Selaimen tietojen tyhjennys poistaa ne.</p>
+        <textarea id="saalisTeksti" rows="6" style="width:100%;font-size:14px;background:#0d1b2b;color:var(--teksti);border:1px solid var(--reuna);border-radius:8px"></textarea>
+        <div class="napit" style="margin-top:8px">
+          <button class="sininen" id="saalisTallenna">Tallenna pisteet</button>
+          <button id="saalisTyhjenna">Poista pisteet</button>
+        </div>
+        <div class="pieni" id="saalisTila"></div>
+      </details>
+    </div>
+    <div class="kortti">
+      <details>
         <summary>Asetukset</summary>
         <div id="asetukset"></div>
         <div class="napit" style="margin-top:8px">
@@ -230,8 +245,11 @@
         </div>
       </details>
     </div>
-    <p class="pieni">Alueet: Luoto–Tankar (paluuikkuna ja tuulihälytys), Vaasa, Norrskär, Kaskinen–Kristiinankaupunki ja Ahvenanmaa–Eckerö
+    <p class="pieni">Alueet: Luoto–Tankar (paluuikkuna ja tuulihälytys), Vaasa, Norrskär, Kaskinen–Kristiinankaupunki, Pori ja Ahvenanmaa–Eckerö
       (tuulihälytys, ei paluuikkunaa). Hälytysalue valitaan GPS-sijainnista; muualla näytetään kartalla valitun alueen tiedot ilman hälytystä.</p>
+    <p class="pieni">Kartan taso "Havainnot": Hannun omat havainnot Copernicus-mallikartoista (havainnot.js): toistuva lämpöraja ±3 km
+      (haalea = heikosti vahvistettu), kylmä alue ja lämmin kieli ellipseinä rajausruuduista (todellinen muoto ei tiedossa),
+      saalispisteet punaisina (vain tässä puhelimessa).</p>
     <p class="pieni">Havainnot ja ennuste: Ilmatieteen laitos, avoin data (CC BY 4.0). Ylityshetki on interpoloitu tuntiarvojen välistä.
       Matka on suora viiva × reittikerroin, ei todellinen reitti. Nopeus on maan suhteen (GPS).</p>
     <p class="pieni">Meridata: E.U. Copernicus Marine Service Information. Tuuli kartalla: Ilmatieteen laitos, avoin data (CC BY 4.0).</p>
@@ -253,11 +271,12 @@
   <button data-v="v-raportit">⋯<br>RAPORTIT</button>
 </nav>
 
-<script src="alueet.js?v=14"></script>
+<script src="alueet.js?v=15"></script>
+<script src="havainnot.js?v=15"></script>
 <script src="malli.js?v=13"></script>
 <script src="fmi.js?v=13"></script>
 <script src="nopeus.js?v=13"></script>
-<script src="kartta.js?v=13"></script>
+<script src="kartta.js?v=15"></script>
 <script>
 'use strict';
 // ---------- Apufunktiot ----------
@@ -853,12 +872,35 @@ function vaylaTeksti(lat, lon) {
   if (l.haraus !== null && l.haraus !== undefined) s.push('haraus ' + luku(l.haraus, 1) + ' m');
   return `väylä ${etaisyys(l.m)}${s.length ? ' (' + s.join(', ') + ')' : ''}`;
 }
+/** Omat havainnot (havainnot.js) ja saalispisteet (vain puhelimessa) napautetussa pisteessä. */
+function havaintoTeksti(lat, lon) {
+  if (!kartta || !kartta.tasot.havainnot) return null;
+  const l = KarttaMalli.havaintoTiedot(kartta.havainnot, lat, lon);
+  return l.length ? l.map(({ h, km, ryhma, reunalla }) => {
+    if (h.tyyppi === 'viiva') return `${h.nimi}: ±${luku(h.leveys_km, 0)} km, keskiviivalle ${etaisyys(km * 1000)}` +
+      (ryhma ? `; tällä kohtaa ${ryhma.n} havaintoa (${ryhma.teksti})` : '; tältä kohdalta ei vahvistuslukua') + (h.lahde ? `, viiva: ${h.lahde}` : '');
+    if (h.tyyppi === 'alue') return `${h.nimi}${reunalla && h.reuna ? ' (' + h.reuna.teksti + ')' : ''}: ${h.teksti}`;
+    if (h.tyyppi === 'saalis') return `saalis: ${h.teksti}${h.varmuus ? ' (' + h.varmuus + (h.lisa ? ': ' + h.lisa : '') + ')' : ''}, ${etaisyys(km * 1000)}`;
+    return `${h.nimi}${h.teksti ? ', ' + h.teksti : ''}`;
+  }).join(' · ') : null;
+}
+/** Saalispisteet tallennetaan vain tähän puhelimeen (localStorage), ei GitHubiin: varasto ja sivu ovat julkisia. */
+function lueSaaliit() { const l = lue('mlt_saaliit'); return Array.isArray(l) ? l : []; }
+function kaikkiHavainnot() { return (window.HAVAINNOT || []).concat(lueSaaliit()); }
+function piirraSaaliit() {
+  const l = lueSaaliit();
+  $('saalisTila').textContent = l.length ? `${l.length} pistettä tallessa tässä puhelimessa.` : 'Ei tallennettuja pisteitä.';
+  if (kartta) { kartta.havainnot = kaikkiHavainnot(); kartta.piirra(); }
+}
 function suljePiste() { $('karttaTieto').hidden = true; if (kartta) { kartta.valittu = null; kartta.piirra(); } mitoitaKartta(); }
 function naytaPiste(lat, lon) {
   const el = $('karttaTieto');
   if (lat === null) { suljePiste(); return; }
   el.hidden = false;
-  if (!nakyma) { el.textContent = 'Ei meridataa.'; mitoitaKartta(); return; }
+  if (!nakyma) {   // ei meridataa (esim. Porin edusta): syvyys, väylä ja omat havainnot silti
+    const osat = [syvyysTeksti(lat, lon), vaylaTeksti(lat, lon), havaintoTeksti(lat, lon)].filter(Boolean);
+    el.textContent = 'Ei meridataa tässä' + (osat.length ? ' · ' + osat.join(' · ') : '.') + '  ✕'; mitoitaKartta(); return;
+  }
   const n = nakyma, t = kartta.aika, osat = [];
   const lohi = lohiTeksti(lat, lon);
   if (lohi) osat.push(lohi);
@@ -868,6 +910,8 @@ function naytaPiste(lat, lon) {
   if (tuuli) osat.push(tuuli);
   const vayla = vaylaTeksti(lat, lon);
   if (vayla) osat.push(vayla);
+  const hav = havaintoTeksti(lat, lon);
+  if (hav) osat.push(hav);
   const L = KarttaMalli.lahinArvo(n.phy, 'lampo', t, lat, lon);
   if (isFinite(L)) osat.push('pinta ' + luku(L, 2) + ' °C');
   const S = KarttaMalli.lahinArvo(n.sst, 'lampo', 0, lat, lon);
@@ -929,7 +973,7 @@ function avaaKarttaNakyma() {
   if (!kartta) {
     const tila = lue('mlt_kartta') || {}, nk = alueenNakyma(valittuAlue);
     kartta = new Kartta(c, { lat: nk.lat, lon: nk.lon, z: nk.z, askel: asetukset.lampoAskel,
-      lohiVali: [asetukset.lohiMin, asetukset.lohiMax], merkit: KAIKKI_MERKIT, onNapautus: naytaPiste });
+      lohiVali: [asetukset.lohiMin, asetukset.lohiMax], merkit: KAIKKI_MERKIT, havainnot: kaikkiHavainnot(), onNapautus: naytaPiste });
     if (typeof ResizeObserver === 'function') new ResizeObserver(() => mitoitaKartta()).observe($('karttaOhjaimet'));
     if (tila.tasot) Object.assign(kartta.tasot, tila.tasot);
     kartta.tasot.tausta = true; kartta.tasot.syvyys = true;   // Hannu 10.11.: aina päällä, ei nappia
@@ -1032,10 +1076,17 @@ $('keskitaOma').addEventListener('click', () => {
 
 // ---------- Käynnistys ----------
 $('paivita').addEventListener('click', paivita);
+$('saalisTallenna').addEventListener('click', () => {
+  const uudet = KarttaMalli.jasennaSaaliit($('saalisTeksti').value);
+  if (!uudet.length) { $('saalisTila').textContent = 'Yhtään riviä ei tunnistettu (muoto: lat,lon tieto).'; return; }
+  tallennaLS('mlt_saaliit', uudet); $('saalisTeksti').value = ''; piirraSaaliit();
+});
+$('saalisTyhjenna').addEventListener('click', () => { tallennaLS('mlt_saaliit', []); piirraSaaliit(); });
 $('tallenna').addEventListener('click', () => { lueAsetukset(); piirraAsetukset(); piirra(); if (kartta) { kartta.askel = asetukset.lampoAskel; kartta.lohiVali = [asetukset.lohiMin, asetukset.lohiMax]; piirraLohiRivi(); kartta.piirra(); } paivita(); });
 $('palauta').addEventListener('click', () => { asetukset = oletukset(); asetukset.asemat = [asetukset.asema1, asetukset.asema2]; tallennaLS('mlt_asetukset', asetukset); piirraAsetukset(); piirra(); });
 
 piirraAsetukset();
+piirraSaaliit();
 palautaVanhaData();
 avaa(lue('mlt_valilehti') || 'v-vesilla');
 piirraMeriTila();
