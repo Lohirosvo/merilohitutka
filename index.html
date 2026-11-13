@@ -172,6 +172,7 @@
           <button data-taso="havainnot">Havainnot</button>
           <button data-taso="lampo">Lämpö</button>
           <button data-taso="virta">Virta</button>
+          <button data-taso="aaltoraja">Aaltoraja</button>
           <button data-taso="aalto">Aalto</button>
           <button data-taso="sst">Satelliitti</button>
         </div>
@@ -276,7 +277,7 @@
 <script src="malli.js?v=13"></script>
 <script src="fmi.js?v=13"></script>
 <script src="nopeus.js?v=13"></script>
-<script src="kartta.js?v=16"></script>
+<script src="kartta.js?v=17"></script>
 <script>
 'use strict';
 // ---------- Apufunktiot ----------
@@ -302,11 +303,13 @@ const KENTAT = [
   ['tasausS', 'Nopeuden tasaus (s)'], ['halytysViiveS', 'Hälytysviive (s)'], ['toistoS', 'Hälytyksen toisto (s)'],
   ['pysahdysKmh', 'Ei hälytystä alle (km/h)'],
   ['lampoAskel', 'Lämpökäyrien väli (°C)'],
-  ['lohiMin', 'Lohikerros, alin lämpö (°C)'], ['lohiMax', 'Lohikerros, ylin lämpö (°C)']
+  ['lohiMin', 'Lohikerros, alin lämpö (°C)'], ['lohiMax', 'Lohikerros, ylin lämpö (°C)'],
+  ['aaltoRaja1', 'Aaltoraja 1, merkitsevä aallonkorkeus (m)'], ['aaltoRaja2', 'Aaltoraja 2, merkitsevä aallonkorkeus (m)']
 ];
 function oletukset() {
   return Object.assign({}, Malli.OLETUKSET, Nopeus.OLETUKSET,
-    { asema1: Malli.OLETUKSET.asemat[0], asema2: Malli.OLETUKSET.asemat[1], lampoAskel: 0.2, lohiMin: 6.6, lohiMax: 8.8 });
+    { asema1: Malli.OLETUKSET.asemat[0], asema2: Malli.OLETUKSET.asemat[1], lampoAskel: 0.2, lohiMin: 6.6, lohiMax: 8.8,
+      aaltoRaja1: 0.35, aaltoRaja2: 0.5 });   // Hannu 13.11.: merkitsevä aallonkorkeus
 }
 const tallennetut = lue('mlt_asetukset') || {};
 // Vanhat Kallan-hakupisteet ja Tankar nimellä -> nykyiset oletukset
@@ -921,7 +924,10 @@ function naytaPiste(lat, lon) {
   if (n.wav) {
     const tw = KarttaMalli.lahinAika(n.wav.ajat, Date.parse(karttaAjat()[t]));
     const h = KarttaMalli.lahinArvo(n.wav, 'hs', tw, lat, lon);
-    if (isFinite(h)) osat.push('aalto ' + luku(h, 1) + ' m');
+    if (isFinite(h)) {
+      const [r1, r2] = aaltoRajat(), l = KarttaMalli.aaltoLuokka(h, [r1, r2]);
+      osat.push('merkitsevä aalto ' + luku(h, 2) + ' m' + (l ? ` (yli aaltorajan ${l}: ${luku(l === 2 ? r2 : r1, 2)} m)` : ''));
+    }
   }
   if (valittuAlue.paluuikkuna) {
     const etK = Malli.etaisyysKm(lat, lon, asetukset.kohdeLat, asetukset.kohdeLon);
@@ -954,6 +960,11 @@ function poistuKokoNaytosta() {
   const f = document.exitFullscreen || document.webkitExitFullscreen;
   if (f && kokoNaytossa()) { try { const p = f.call(document); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
 }
+/** Aaltorajat asetuksista; virheellinen tai puuttuva arvo -> oletus (0,35 ja 0,5 m), järjestys pienempi ensin. */
+function aaltoRajat() {
+  const a = isFinite(asetukset.aaltoRaja1) ? asetukset.aaltoRaja1 : 0.35, b = isFinite(asetukset.aaltoRaja2) ? asetukset.aaltoRaja2 : 0.5;
+  return a <= b ? [a, b] : [b, a];
+}
 function piirraLohiRivi() {
   $('lohiRivi').style.display = kartta && kartta.tasot.lohi ? 'flex' : 'none';
   $('lohiMin').value = luku(asetukset.lohiMin);
@@ -973,7 +984,7 @@ function avaaKarttaNakyma() {
   if (!kartta) {
     const tila = lue('mlt_kartta') || {}, nk = alueenNakyma(valittuAlue);
     kartta = new Kartta(c, { lat: nk.lat, lon: nk.lon, z: nk.z, askel: asetukset.lampoAskel,
-      lohiVali: [asetukset.lohiMin, asetukset.lohiMax], merkit: KAIKKI_MERKIT, havainnot: kaikkiHavainnot(), onNapautus: naytaPiste });
+      lohiVali: [asetukset.lohiMin, asetukset.lohiMax], aaltoRajat: aaltoRajat(), merkit: KAIKKI_MERKIT, havainnot: kaikkiHavainnot(), onNapautus: naytaPiste });
     if (typeof ResizeObserver === 'function') new ResizeObserver(() => mitoitaKartta()).observe($('karttaOhjaimet'));
     if (tila.tasot) Object.assign(kartta.tasot, tila.tasot);
     kartta.tasot.tausta = true; kartta.tasot.syvyys = true;   // Hannu 10.11.: aina päällä, ei nappia
@@ -991,7 +1002,7 @@ function avaaKarttaNakyma() {
     mitoitaKartta();
     valitsePaiva(tamaPaiva(), null);
   } else {
-    kartta.askel = asetukset.lampoAskel; kartta.lohiVali = [asetukset.lohiMin, asetukset.lohiMax];
+    kartta.askel = asetukset.lampoAskel; kartta.lohiVali = [asetukset.lohiMin, asetukset.lohiMax]; kartta.aaltoRajat = aaltoRajat();
     piirraLohiRivi(); piirraPaivat(); mitoitaKartta(); kartta.koko();
     if (!nakyma) valitsePaiva(valittuPvm || tamaPaiva(), null);
   }
@@ -1082,7 +1093,7 @@ $('saalisTallenna').addEventListener('click', () => {
   tallennaLS('mlt_saaliit', uudet); $('saalisTeksti').value = ''; piirraSaaliit();
 });
 $('saalisTyhjenna').addEventListener('click', () => { tallennaLS('mlt_saaliit', []); piirraSaaliit(); });
-$('tallenna').addEventListener('click', () => { lueAsetukset(); piirraAsetukset(); piirra(); if (kartta) { kartta.askel = asetukset.lampoAskel; kartta.lohiVali = [asetukset.lohiMin, asetukset.lohiMax]; piirraLohiRivi(); kartta.piirra(); } paivita(); });
+$('tallenna').addEventListener('click', () => { lueAsetukset(); piirraAsetukset(); piirra(); if (kartta) { kartta.askel = asetukset.lampoAskel; kartta.lohiVali = [asetukset.lohiMin, asetukset.lohiMax]; kartta.aaltoRajat = aaltoRajat(); piirraLohiRivi(); kartta.piirra(); } paivita(); });
 $('palauta').addEventListener('click', () => { asetukset = oletukset(); asetukset.asemat = [asetukset.asema1, asetukset.asema2]; tallennaLS('mlt_asetukset', asetukset); piirraAsetukset(); piirra(); });
 
 piirraAsetukset();

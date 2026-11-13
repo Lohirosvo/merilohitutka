@@ -334,6 +334,11 @@
     return tulos;
   }
   function tuuliVari(ws) { return ws >= 10 ? '#ff5c5c' : ws >= 8 ? '#ffa94d' : ws >= 5 ? '#ffe066' : '#e8f4ff'; }
+  /** Aaltoraja (v17, Hannu 13.11.): merkitsevä aallonkorkeus -> 0 = alle rajan 1, 1 = raja 1 (oletus 0,35 m), 2 = raja 2 (0,5 m). */
+  function aaltoLuokka(hs, rajat) {
+    if (hs === null || hs === undefined || !isFinite(hs)) return 0;
+    return hs >= rajat[1] ? 2 : hs >= rajat[0] ? 1 : 0;
+  }
   function aaltoVari(h) {
     const raja = [[0.25, '64,140,255'], [0.5, '60,200,160'], [0.75, '170,220,60'], [1.0, '250,210,40'], [1.5, '255,140,30'], [99, '235,50,40']];
     for (const [r, c] of raja) if (h < r) return c;
@@ -347,7 +352,8 @@
       this.lat = opts.lat; this.lon = opts.lon; this.z = opts.z || 11;
       this.data = null; this.aika = 0; this.askel = opts.askel || 0.2;
       this.lohiVali = opts.lohiVali || [6.6, 8.8];
-      this.tasot = { lampo: true, lohi: true, syvyys: true, tuuli: true, vaylat: true, havainnot: true, sst: false, virta: true, aalto: false, tausta: true };
+      this.aaltoRajat = opts.aaltoRajat || [0.35, 0.5];   // merkitsevä aallonkorkeus (m)
+      this.tasot = { lampo: true, lohi: true, syvyys: true, tuuli: true, vaylat: true, havainnot: true, aaltoraja: true, sst: false, virta: true, aalto: false, tausta: true };
       this.syvyys = null;   // puraSyvyys()-tulos
       this.vaylat = null;   // puraVaylat()-tulos
       this.ylaVara = 0; this.alaVara = 0;   // ohjainten peittämä osa ylhäällä ja alhaalla (px)
@@ -456,6 +462,7 @@
       if (d) {
         if (this.tasot.aalto && d.wav) this._aalto();
         if (this.tasot.lohi && d.phy && d.phy.profiili) this._lohi();
+        if (this.tasot.aaltoraja && d.wav) this._aaltoraja();   // lämpö- ja syvyyskäyrät piirtyvät päälle
       }
       if (d) {
         if (this.tasot.lampo && d.phy) this._kayrat(d.phy, 'lampo', this.aika, false);
@@ -744,6 +751,43 @@
       }
     }
 
+    /** Aaltoraja: ruudut, joissa merkitsevä aallonkorkeus ylittää rajan 1 (harva pisterasteri) tai rajan 2
+     *  (punainen harva vinoviivoitus). Kuvio on kiinni kartassa, joten se ei liu'u karttaa vierittäessä. */
+    _aaltoraja() {
+      const wv = this.data.wav, g = this.ctx;
+      const t = lahinAika(wv.ajat, Date.parse(this.data.phy ? this.data.phy.ajat[this.aika] : wv.ajat[0]));
+      const hs = wv.hs[t]; if (!hs) return;
+      const dl = Math.abs(wv.lat[1] - wv.lat[0]) / 2, dn = Math.abs(wv.lon[1] - wv.lon[0]) / 2;
+      const alueet = [null, new Path2D(), new Path2D()], maara = [0, 0, 0];
+      for (let i = 0; i < wv.lat.length; i++) for (let j = 0; j < wv.lon.length; j++) {
+        const l = aaltoLuokka(hs[i][j], this.aaltoRajat); if (!l) continue;
+        const [x1, y1] = this.ruutu(wv.lat[i] + dl, wv.lon[j] - dn), [x2, y2] = this.ruutu(wv.lat[i] - dl, wv.lon[j] + dn);
+        if (x2 < 0 || y2 < 0 || x1 > this.w || y1 > this.h) continue;
+        alueet[l].rect(x1, y1, x2 - x1 + 0.6, y2 - y1 + 0.6); maara[l]++;
+      }
+      this.aaltorajaRuutuja = maara;
+      const ox = lonX(this.lon, this.z) - this.w / 2, oy = latY(this.lat, this.z) - this.h / 2;
+      const S = 16, mod = (a, b) => ((a % b) + b) % b;   // harva: pisteet 16 px, viivat 22 px välein
+      if (maara[1]) {   // taso 1: harva pisterasteri
+        g.save(); g.clip(alueet[1]);
+        for (let x = -mod(ox, S); x < this.w + S; x += S) for (let y = -mod(oy, S); y < this.h + S; y += S) {
+          g.fillStyle = 'rgba(0,0,0,0.55)'; g.fillRect(x - 2, y - 2, 4, 4);
+          g.fillStyle = 'rgba(255,213,74,0.95)'; g.fillRect(x - 1.2, y - 1.2, 2.4, 2.4);
+        }
+        g.restore();
+      }
+      if (maara[2]) {   // taso 2: punainen harva vinoviivoitus (viivat x - y = vakio kartan koordinaateissa)
+        const V = 22;
+        g.save(); g.clip(alueet[2]); g.lineCap = 'butt';
+        for (const [lev, vari] of [[3.6, 'rgba(0,0,0,0.45)'], [1.8, 'rgba(255,60,60,0.95)']]) {
+          g.strokeStyle = vari; g.lineWidth = lev; g.beginPath();
+          for (let c = -mod(ox - oy, V) - this.h; c < this.w + V; c += V) { g.moveTo(c, 0); g.lineTo(c + this.h, this.h); }
+          g.stroke();
+        }
+        g.restore();
+      }
+    }
+
     _kayrat(lahde, kentta, t, katko) {
       const z = lahde[kentta][t]; if (!z) return;
       const [min, max] = arvovali(z);
@@ -933,6 +977,10 @@
       if (this.tasot.lampo && d.phy) rivit.push([['Lämpö (malli) ' + f(this.askel) + ' °C välein', '#ffb24a']]);
       if (this.tasot.sst && d.sst) rivit.push([['Satelliitti: katkoviiva', '#ffffff']]);
       if (this.tasot.virta && d.phy) rivit.push([['Virta: nuoli ≈ 0,25 m/s', '#78ebff']]);
+      if (this.tasot.aaltoraja && d.wav) {
+        const f2 = x => x.toFixed(2).replace(/0$/, '').replace('.', ',');
+        rivit.push([['Merkitsevä aalto', '#e9f1f7'], ['≥' + f2(this.aaltoRajat[0]) + ' m pisteet', '#e9f1f7', '#ffd54a'], ['≥' + f2(this.aaltoRajat[1]) + ' m viivat', '#e9f1f7', '#ff3c3c']]);
+      }
       if (this.tasot.aalto && d.wav) rivit.push([['Aalto <', '#ffd54a'], ['0,25', '#e9f1f7', 'rgb(64,140,255)'], ['0,5', '#e9f1f7', 'rgb(60,200,160)'],
         ['0,75', '#e9f1f7', 'rgb(170,220,60)'], ['1', '#e9f1f7', 'rgb(250,210,40)'], ['1,5', '#e9f1f7', 'rgb(255,140,30)'], ['+ m', '#e9f1f7', 'rgb(235,50,40)']]);
       if (!rivit.length) return;
@@ -955,7 +1003,7 @@
 
   const KarttaMalli = { lonX, latY, xLon, yLat, kayra, tasot, arvovali, lahinIndeksi, lahinArvo, lahinAika, virta, akseliArvo,
                         kerros, lohiLuokka, profiiliPisteessa, puraSyvyys, lahinKayra, puraVaylat, lahinVayla, tuuliVari,
-                        havainnotPisteessa, havaintoTiedot, havaintoVari, etaisyysViivaan, jasennaSaaliit };
+                        havainnotPisteessa, havaintoTiedot, havaintoVari, etaisyysViivaan, jasennaSaaliit, aaltoLuokka };
   if (typeof module !== 'undefined' && module.exports) module.exports = KarttaMalli;
   else { root.KarttaMalli = KarttaMalli; root.Kartta = Kartta; }
 })(typeof window !== 'undefined' ? window : this);
