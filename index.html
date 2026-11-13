@@ -259,7 +259,8 @@
       (haalea = heikosti vahvistettu), kylmä alue ja lämmin kieli ellipseinä rajausruuduista (todellinen muoto ei tiedossa),
       saalispisteet punaisina (vain tässä puhelimessa).</p>
     <p class="pieni">Havainnot ja ennuste: Ilmatieteen laitos, avoin data (CC BY 4.0). Ylityshetki on interpoloitu tuntiarvojen välistä.
-      Matka on suora viiva × reittikerroin, ei todellinen reitti. Nopeus on maan suhteen (GPS).</p>
+      Matka on suora viiva × reittikerroin, ei todellinen reitti. Iso nopeusluku on maan suhteen (GPS); "vesi" on veden suhteen
+      (GPS miinus Copernicuksen pintavirta). Nopeushälytys käyttää veden suhteen laskettua nopeutta, kun virtatieto on saatavilla.</p>
     <p class="pieni">Meridata: E.U. Copernicus Marine Service Information. Tuuli kartalla: Ilmatieteen laitos, avoin data (CC BY 4.0).</p>
     <p class="pieni" id="vaylaLahde">Väylät: Lähde Väylävirasto, vesiväyläaineisto, CC BY 4.0. Aineisto ei sovellu navigointikäyttöön.</p>
     <p class="pieni" id="syvyysLahde">Syvyyskäyrät: Lähde Liikenne- ja viestintävirasto Traficom, Merikartan syvyystiedot.
@@ -468,16 +469,19 @@ function piirraNopeus() {
   $('kmh').textContent = luku(kmh);
   const s = Nopeus.suunta(gpsPisteet);
   $('suunta').textContent = isFinite(s) ? Math.round(s) + '°' : '';
-  piirraVesiNopeus(kmh, s, nyt);
+  const vesi = piirraVesiNopeus(kmh, s, nyt);
+  // v18 (Hannu 13.11.): hälytys veden suhteen, kun virtatieto on; muuten maanopeus. Pysähdys (vesi ei laskettavissa) -> maanopeus.
+  const vedessa = !!vesi && isFinite(vesi.kmh), kaytetty = vedessa ? vesi.kmh : kmh, kohde = vedessa ? $('vesiKmh') : $('kmh');
   const el = $('halytystila');
-  $('kmh').style.color = '';
+  $('kmh').style.color = ''; $('vesiKmh').style.color = '';
   if (!uistelu) { el.className = 'halytystila'; el.textContent = 'Aloita uistelu, niin hälytys on päällä.'; return; }
-  const r = Nopeus.halytys(kmh, nyt, halytysTila, asetukset);
+  const r = Nopeus.halytys(kaytetty, nyt, halytysTila, asetukset);
   halytysTila = r.tila;
   const tekstit = { ok: 'Nopeus alueella', hidas: 'Liian hidas → Hanaa', nopea: 'Liian nopea → Himmaa', pysahdys: 'Pysähdyksissä – ei hälytystä', ei: 'Ei nopeustietoa' };
   el.className = 'halytystila ' + r.luokka;
-  $('kmh').style.color = r.luokka === 'hidas' ? '#f2b33d' : r.luokka === 'nopea' ? '#f05aa0' : '';
-  el.textContent = tekstit[r.luokka] + ` (${luku(asetukset.nopeusMin)}–${luku(asetukset.nopeusMax)} km/h)`;
+  kohde.style.color = r.luokka === 'hidas' ? '#f2b33d' : r.luokka === 'nopea' ? '#f05aa0' : '';
+  el.textContent = tekstit[r.luokka] + ` (${luku(asetukset.nopeusMin)}–${luku(asetukset.nopeusMax)} km/h ` +
+    (vedessa ? 'veden suhteen)' : 'maan suhteen – ei virtatietoa)');
   if (r.puhu) puhu(r.puhu);
 }
 
@@ -501,13 +505,14 @@ function virtaNyt(lat, lon, ms) {
 function piirraVesiNopeus(kmh, suuntaAst, nyt) {
   const el = $('vesiKmh');
   const vi = sijainti ? virtaNyt(sijainti.lat, sijainti.lon, nyt) : null;
-  if (!vi) { el.hidden = true; return; }
+  if (!vi) { el.hidden = true; return null; }
   const r = Nopeus.vedenSuhteen(kmh, suuntaAst, vi.u, vi.v);
   el.hidden = false;
   const vast = isFinite(r.vastaan) && Math.abs(r.vastaan) >= 0.05
     ? ` <small>virta ${r.vastaan > 0 ? 'vastaan' : 'myötä'} ${luku(Math.abs(r.vastaan))}</small>` : '';
   el.innerHTML = isFinite(r.kmh) ? `vesi ${luku(r.kmh)}${vast}` : `vesi – <small>virta ${luku(r.virtaKmh)} km/h</small>`;
   el.title = 'Nopeus veden suhteen = GPS-nopeus miinus Copernicuksen pintavirta (malli, ylin taso 0,5 m)';
+  return r;
 }
 
 function kaynnistaGps() {
