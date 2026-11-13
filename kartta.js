@@ -339,6 +339,33 @@
     if (hs === null || hs === undefined || !isFinite(hs)) return 0;
     return hs >= rajat[1] ? 2 : hs >= rajat[0] ? 1 : 0;
   }
+  /** Oma reittijälki (v20): [[t s, lat × 1e5, lon × 1e5], …]. Osat [alku, loppu] (indeksit, mukaan lukien):
+   *  katko, kun pisteiden väli on yli katkoS (näyttö oli kiinni tai GPS poissa) tai hyppy yli hyppyM. */
+  function jalkiOsat(J, katkoS = 300, hyppyM = 2000) {
+    const osat = [];
+    if (!Array.isArray(J) || !J.length) return osat;
+    let a = 0;
+    for (let i = 1; i < J.length; i++) {
+      const p = J[i - 1], q = J[i];
+      const m = Math.hypot((q[1] - p[1]) / 1e5 * KM_LAT, (q[2] - p[2]) / 1e5 * kmLon(p[1] / 1e5)) * 1000;
+      if (q[0] - p[0] > katkoS || m > hyppyM) { osat.push([a, i - 1]); a = i; }
+    }
+    osat.push([a, J.length - 1]);
+    return osat;
+  }
+  /** Jäljen peittävyys iän mukaan: tuore 1,0 → 24 h vanha 0,15 (lineaarisesti). */
+  function jalkiAlfa(ikaS) { return 0.15 + 0.85 * Math.max(0, Math.min(1, 1 - ikaS / 86400)); }
+  /** Lähin jäljen piste: { i, m } tai null. */
+  function lahinJalki(J, lat, lon) {
+    if (!Array.isArray(J) || !J.length) return null;
+    const kx = kmLon(lat) * 1000, ky = KM_LAT * 1000;
+    let paras = null;
+    for (let i = 0; i < J.length; i++) {
+      const m = Math.hypot((J[i][1] / 1e5 - lat) * ky, (J[i][2] / 1e5 - lon) * kx);
+      if (!paras || m < paras.m) paras = { i, m };
+    }
+    return paras;
+  }
   function aaltoVari(h) {
     const raja = [[0.25, '64,140,255'], [0.5, '60,200,160'], [0.75, '170,220,60'], [1.0, '250,210,40'], [1.5, '255,140,30'], [99, '235,50,40']];
     for (const [r, c] of raja) if (h < r) return c;
@@ -353,13 +380,14 @@
       this.data = null; this.aika = 0; this.askel = opts.askel || 0.2;
       this.lohiVali = opts.lohiVali || [6.6, 8.8];
       this.aaltoRajat = opts.aaltoRajat || [0.35, 0.5];   // merkitsevä aallonkorkeus (m)
-      this.tasot = { lampo: true, lohi: true, syvyys: true, tuuli: true, vaylat: true, havainnot: true, aaltoraja: true, sst: false, virta: true, aalto: false, tausta: true };
+      this.tasot = { lampo: true, lohi: true, syvyys: true, tuuli: true, vaylat: true, havainnot: true, aaltoraja: true, jalki: true, sst: false, virta: true, aalto: false, tausta: true };
       this.syvyys = null;   // puraSyvyys()-tulos
       this.vaylat = null;   // puraVaylat()-tulos
       this.ylaVara = 0; this.alaVara = 0;   // ohjainten peittämä osa ylhäällä ja alhaalla (px)
       this._seliteAsti = 0;
       this.merkit = opts.merkit || []; this.oma = null; this.valittu = null;
       this.havainnot = opts.havainnot || [];   // havainnot.js
+      this.jalki = opts.jalki || [];   // oma reittijälki 24 h (v20)
       this.laatat = new Map(); this.onNapautus = opts.onNapautus || (() => {});
       this.osoittimet = new Map(); this.raahattu = false;
       this._kuuntele();
@@ -473,6 +501,7 @@
       if (this.tasot.havainnot && this.havainnot.length) this._havainnot();   // virta- ja tuulinuolten alle
       if (d && this.tasot.virta && d.phy) this._virta();
       if (d && this.tasot.tuuli && d.tuuli) this._tuuli();
+      if (this.tasot.jalki && this.jalki.length > 1) this._jalki();   // nuolten päälle, merkkien alle
       this._merkit();
       this._piirraNimet();   // kaikkien tasojen numerot ja nimet tärkeysjärjestyksessä, ei päällekkäin (v16)
       this._profiiliAlue = null;
@@ -959,6 +988,36 @@
       g.restore();
     }
 
+    /** Oma reittijälki (v20): punainen, haalenee 24 tunnissa. Janat ryhmitellään tunnin ikäluokkiin
+     *  (24 polkua), jotta tuhansien pisteiden jälki piirtyy nopeasti myös kartan liikkuessa. */
+    _jalki() {
+      const g = this.ctx, J = this.jalki, nyt = Date.now() / 1000, R = 24, ryhmat = [];
+      for (let k = 0; k < R; k++) ryhmat.push([]);
+      const m = 40, pois = (a, b) => (a[0] < -m && b[0] < -m) || (a[0] > this.w + m && b[0] > this.w + m) ||
+        (a[1] < -m && b[1] < -m) || (a[1] > this.h + m && b[1] > this.h + m);
+      for (const [a, b] of jalkiOsat(J)) {
+        let ed = this.ruutu(J[a][1] / 1e5, J[a][2] / 1e5);
+        for (let i = a + 1; i <= b; i++) {
+          const q = this.ruutu(J[i][1] / 1e5, J[i][2] / 1e5);
+          if (!pois(ed, q)) {
+            const k = Math.max(0, Math.min(R - 1, Math.floor((nyt - J[i][0]) / 3600)));
+            ryhmat[k].push(ed[0], ed[1], q[0], q[1]);
+          }
+          ed = q;
+        }
+      }
+      g.save(); g.lineCap = 'round'; g.lineJoin = 'round';
+      for (let k = R - 1; k >= 0; k--) {   // vanhin ensin, tuorein päällimmäiseksi
+        const v = ryhmat[k]; if (!v.length) continue;
+        const p = new Path2D();
+        for (let i = 0; i < v.length; i += 4) { p.moveTo(v[i], v[i + 1]); p.lineTo(v[i + 2], v[i + 3]); }
+        const al = jalkiAlfa((k + 0.5) * 3600);
+        g.strokeStyle = `rgba(10,10,10,${(0.55 * al).toFixed(3)})`; g.lineWidth = 6.5; g.stroke(p);
+        g.strokeStyle = `rgba(255,59,48,${al.toFixed(3)})`; g.lineWidth = 3.5; g.stroke(p);
+      }
+      g.restore();
+    }
+
     _selite() {
       // Tiivis selite: rivi = osia [teksti, tekstin väri, neliön väri]
       const d = this.data || {}, rivit = [];
@@ -974,6 +1033,8 @@
       if (this.tasot.havainnot && this.havainnot.length) rivit.push([['Omat', 'rgb(' + havaintoVari('muu') + ')'],
         ['lämpöraja', '#e9f1f7', 'rgba(' + havaintoVari('muu') + ',0.8)'], ['lämmin', '#e9f1f7', 'rgb(' + havaintoVari('lammin') + ')'],
         ['kylmä', '#e9f1f7', 'rgb(' + havaintoVari('kylma') + ')'], ['saalis', '#e9f1f7', 'rgb(' + havaintoVari('saalis') + ')']]);
+      if (this.tasot.jalki && this.jalki.length > 1) rivit.push([['Oma jälki 24 h', '#ff6b61'], ['nyt', '#e9f1f7', 'rgba(255,59,48,1)'],
+        ['12 h', '#e9f1f7', 'rgba(255,59,48,' + jalkiAlfa(43200).toFixed(2) + ')'], ['24 h sitten', '#e9f1f7', 'rgba(255,59,48,' + jalkiAlfa(86400).toFixed(2) + ')']]);
       if (this.tasot.lampo && d.phy) rivit.push([['Lämpö (malli) ' + f(this.askel) + ' °C välein', '#ffb24a']]);
       if (this.tasot.sst && d.sst) rivit.push([['Satelliitti: katkoviiva', '#ffffff']]);
       if (this.tasot.virta && d.phy) rivit.push([['Virta: nuoli ≈ 0,9 km/h (0,25 m/s)', '#78ebff']]);
@@ -1003,7 +1064,8 @@
 
   const KarttaMalli = { lonX, latY, xLon, yLat, kayra, tasot, arvovali, lahinIndeksi, lahinArvo, lahinAika, virta, akseliArvo,
                         kerros, lohiLuokka, profiiliPisteessa, puraSyvyys, lahinKayra, puraVaylat, lahinVayla, tuuliVari,
-                        havainnotPisteessa, havaintoTiedot, havaintoVari, etaisyysViivaan, jasennaSaaliit, aaltoLuokka };
+                        havainnotPisteessa, havaintoTiedot, havaintoVari, etaisyysViivaan, jasennaSaaliit, aaltoLuokka,
+                        jalkiOsat, jalkiAlfa, lahinJalki };
   if (typeof module !== 'undefined' && module.exports) module.exports = KarttaMalli;
   else { root.KarttaMalli = KarttaMalli; root.Kartta = Kartta; }
 })(typeof window !== 'undefined' ? window : this);

@@ -84,12 +84,13 @@
 
   /**
    * Nopeus veden suhteen (v18, Hannu 13.11.): maanopeusvektori (GPS: km/h ja kulkusuunta astetta) miinus pintavirta
-   * (Copernicus u = itään, v = pohjoiseen, m/s). Palauttaa { kmh, vastaan, virtaKmh }:
+   * (Copernicus u = itään, v = pohjoiseen, m/s). Palauttaa { kmh, vastaan, sivu, virtaKmh }:
    *   kmh = nopeus veden suhteen (km/h), vastaan = virran komponentti kulkusuuntaa vastaan (km/h, + = vastavirta,
-   *   – = myötävirta), virtaKmh = virran nopeus (km/h). Alle 0,5 km/h kulkusuunta ei ole luotettava -> kmh NaN.
+   *   – = myötävirta), sivu = poikittainen komponentti (km/h, + = virtaa oikealle eli tulee vasemmalta,
+   *   – = tulee oikealta), virtaKmh = virran nopeus (km/h). Alle 0,5 km/h kulkusuunta ei ole luotettava -> kmh NaN.
    */
   function vedenSuhteen(kmh, suuntaAst, u, v) {
-    const tulos = { kmh: NaN, vastaan: NaN, virtaKmh: NaN };
+    const tulos = { kmh: NaN, vastaan: NaN, sivu: NaN, virtaKmh: NaN };
     if (!isFinite(u) || !isFinite(v)) return tulos;
     tulos.virtaKmh = Math.hypot(u, v) * 3.6;
     if (!isFinite(kmh) || !isFinite(suuntaAst) || kmh < 0.5) return tulos;
@@ -97,10 +98,41 @@
     const vx = ms * Math.sin(k) - u, vy = ms * Math.cos(k) - v;
     tulos.kmh = Math.hypot(vx, vy) * 3.6;
     tulos.vastaan = -(u * Math.sin(k) + v * Math.cos(k)) * 3.6;
+    tulos.sivu = (u * Math.cos(k) - v * Math.sin(k)) * 3.6;   // oikea käsi = (cos k, −sin k)
     return tulos;
   }
 
-  const Nopeus = { OLETUKSET, tasattuNopeus, suunta, halytys, etaisyysM, vedenSuhteen };
+  /**
+   * Oma reittijälki 24 h (v20, Hannu 13.11.: "24 h reittijälki … punainen mutta haaleneva kun vanhenee").
+   * Jälki = [[t (unix s), lat × 1e5, lon × 1e5], …] aikajärjestyksessä (tiivis, tallennetaan puhelimeen).
+   * Uusi piste lisätään, kun GPS-tarkkuus ≤ tarkkuusM ja siirtymä edellisestä ≥ minSiirtymaM (ei kotona
+   * paikallaan kertyvää GPS-kohinaa). Yli ikaMs vanhat poistetaan. Palauttaa { jalki, lisatty, poistettu };
+   * alkuperäistä taulukkoa ei muuteta.
+   */
+  const JALKI = { ikaMs: 24 * 3600 * 1000, minSiirtymaM: 15, tarkkuusM: 20 };
+  function jalkiLisaa(jalki, p, nytMs, opts) {
+    const o = Object.assign({}, JALKI, opts || {});
+    let j = Array.isArray(jalki) ? jalki : [];
+    const raja = Math.floor((nytMs - o.ikaMs) / 1000);
+    let alku = 0;
+    while (alku < j.length && !(j[alku][0] >= raja)) alku++;
+    if (alku) j = j.slice(alku);
+    const tulos = { jalki: j, lisatty: false, poistettu: alku };
+    if (!p || !isFinite(p.lat) || !isFinite(p.lon) || !isFinite(p.t) || !(p.tarkkuus <= o.tarkkuusM)) return tulos;
+    const t = Math.floor(p.t / 1000);
+    if (t < raja) return tulos;
+    const ed = j[j.length - 1];
+    if (ed) {
+      if (t <= ed[0]) return tulos;   // sama sekunti tai aika taaksepäin
+      if (etaisyysM({ lat: ed[1] / 1e5, lon: ed[2] / 1e5 }, p) < o.minSiirtymaM) return tulos;
+    }
+    j = j === jalki ? j.slice() : j;
+    j.push([t, Math.round(p.lat * 1e5), Math.round(p.lon * 1e5)]);
+    tulos.jalki = j; tulos.lisatty = true;
+    return tulos;
+  }
+
+  const Nopeus = { OLETUKSET, tasattuNopeus, suunta, halytys, etaisyysM, vedenSuhteen, JALKI, jalkiLisaa };
   if (typeof module !== 'undefined' && module.exports) module.exports = Nopeus;
   else root.Nopeus = Nopeus;
 })(typeof window !== 'undefined' ? window : this);

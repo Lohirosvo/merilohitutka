@@ -179,6 +179,7 @@
           <button data-taso="tuuli">Tuuli</button>
           <button data-taso="vaylat">Väylät</button>
           <button data-taso="havainnot">Havainnot</button>
+          <button data-taso="jalki">Jälki</button>
           <button data-taso="lampo">Lämpö</button>
           <button data-taso="virta">Virta</button>
           <button data-taso="aaltoraja">Aaltoraja</button>
@@ -231,6 +232,16 @@
     <div class="kortti">
       <h2>Reissut</h2>
       <div id="reissut" class="pieni">Ei vielä reissuja.</div>
+    </div>
+    <div class="kortti">
+      <details>
+        <summary>Oma reittijälki 24 h (vain tässä puhelimessa)</summary>
+        <p class="pieni">Kartalla punainen viiva, joka haalenee vuorokaudessa (taso Jälki). Piste tallentuu, kun olet liikkunut
+          15 m ja GPS-tarkkuus on 20 m tai parempi. Selain saa GPS:n vain sivun ollessa auki ja näytön päällä:
+          jos näyttö sammuu, jälkeen jää katko. Jälki ei mene GitHubiin.</p>
+        <div class="napit"><button id="jalkiPoista">Poista jälki</button></div>
+        <div class="pieni" id="jalkiTila"></div>
+      </details>
     </div>
     <div class="kortti">
       <details>
@@ -288,8 +299,8 @@
 <script src="havainnot.js?v=15"></script>
 <script src="malli.js?v=13"></script>
 <script src="fmi.js?v=13"></script>
-<script src="nopeus.js?v=19"></script>
-<script src="kartta.js?v=18"></script>
+<script src="nopeus.js?v=20"></script>
+<script src="kartta.js?v=20"></script>
 <script>
 'use strict';
 // ---------- Apufunktiot ----------
@@ -357,6 +368,32 @@ function lueRajat() {
 let sijainti = lue('mlt_sijainti');
 let sijaintiTarkkuus = null;
 let gpsPisteet = [];           // viimeiset 2 min
+// Oma reittijälki 24 h (v20): vain tämän puhelimen selaimessa, ei GitHubiin. Tallennus enintään 20 s välein ja kun sivu piiloutuu.
+let jalki = Nopeus.jalkiLisaa((lue('mlt_jalki') || {}).p, null, Date.now()).jalki, jalkiMuuttui = false, jalkiTallennettu = 0;
+function tallennaJalki(heti) {
+  if (!jalkiMuuttui || (!heti && Date.now() - jalkiTallennettu < 20000)) return;
+  tallennaLS('mlt_jalki', { v: 1, p: jalki }); jalkiTallennettu = Date.now(); jalkiMuuttui = false; piirraJalkiTila();
+}
+function lisaaJalkeen(p) {
+  const r = Nopeus.jalkiLisaa(jalki, p, Date.now());
+  if (!r.lisatty && !r.poistettu) return;
+  jalki = r.jalki; jalkiMuuttui = true; if (kartta) kartta.jalki = jalki;
+  tallennaJalki(false);
+}
+function piirraJalkiTila() {
+  const el = document.getElementById('jalkiTila'); if (!el) return;
+  const d0 = jalki.length ? new Date(jalki[0][0] * 1000) : null, eilen = d0 && d0.toDateString() !== new Date().toDateString();
+  el.textContent = d0 ? `${jalki.length} pistettä, vanhin ${eilen ? 'eilen ' : ''}klo ${klo(d0)}.` : 'Ei jälkeä viimeisen 24 h ajalta.';
+}
+/** Napautus: lähin jäljen piste, jos se on alle 24 px:n päässä ruudulla. */
+function jalkiTeksti(lat, lon) {
+  if (!kartta || !kartta.tasot.jalki) return '';
+  const l = KarttaMalli.lahinJalki(jalki, lat, lon); if (!l) return '';
+  const q = jalki[l.i], a = kartta.ruutu(q[1] / 1e5, q[2] / 1e5), b = kartta.ruutu(lat, lon);
+  if (Math.hypot(a[0] - b[0], a[1] - b[1]) > 24) return '';
+  const ms = q[0] * 1000, tanaan = new Date(ms).toDateString() === new Date().toDateString();
+  return `oma jälki ${tanaan ? '' : 'eilen '}klo ${klo(new Date(ms))} (${min((Date.now() - ms) / 60000)} sitten), ${Math.round(l.m)} m`;
+}
 let havaintoData = [], ennusteData = [], ennusteLahde = '', virheet = [];   // alueelle dataAlue
 let edellinenTila = null;
 let uistelu = lue('mlt_uistelu'); // {alku: ms} kun käynnissä
@@ -426,7 +463,11 @@ async function pidaNaytto() {
   piirraGps();
 }
 function vapautaNaytto() { try { if (wakeLock) wakeLock.release(); } catch (e) {} wakeLock = null; piirraGps(); }
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && (uistelu || karttaAuki())) pidaNaytto(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && (uistelu || karttaAuki())) pidaNaytto();
+  if (document.visibilityState === 'hidden') tallennaJalki(true);   // jälki talteen ennen kuin selain pysäyttää sivun
+});
+window.addEventListener('pagehide', () => tallennaJalki(true));
 
 // ---------- Uistelu ----------
 function piirraUistelu() {
@@ -528,6 +569,7 @@ function kaynnistaGps() {
     const c = p.coords;
     sijainti = { lat: c.latitude, lon: c.longitude };
     sijaintiTarkkuus = c.accuracy;
+    lisaaJalkeen({ t: p.timestamp || Date.now(), lat: c.latitude, lon: c.longitude, tarkkuus: c.accuracy });
     gpsPisteet.push({ t: p.timestamp || Date.now(), lat: c.latitude, lon: c.longitude, speed: c.speed, heading: c.heading });
     const raja = Date.now() - 120000;
     gpsPisteet = gpsPisteet.filter(x => x.t >= raja);
@@ -952,10 +994,12 @@ function naytaPiste(lat, lon) {
   if (lat === null) { suljePiste(); return; }
   el.hidden = false;
   if (!nakyma) {   // ei meridataa (esim. Porin edusta): syvyys, väylä ja omat havainnot silti
-    const osat = [syvyysTeksti(lat, lon), vaylaTeksti(lat, lon), havaintoTeksti(lat, lon)].filter(Boolean);
+    const osat = [jalkiTeksti(lat, lon), syvyysTeksti(lat, lon), vaylaTeksti(lat, lon), havaintoTeksti(lat, lon)].filter(Boolean);
     el.textContent = 'Ei meridataa tässä' + (osat.length ? ' · ' + osat.join(' · ') : '.') + '  ✕'; mitoitaKartta(); return;
   }
   const n = nakyma, t = kartta.aika, osat = [];
+  const jt = jalkiTeksti(lat, lon);
+  if (jt) osat.push(jt);
   const lohi = lohiTeksti(lat, lon);
   if (lohi) osat.push(lohi);
   const syv = syvyysTeksti(lat, lon);
@@ -984,7 +1028,7 @@ function naytaPiste(lat, lon) {
     const etK = Malli.etaisyysKm(lat, lon, asetukset.kohdeLat, asetukset.kohdeLon);
     osat.push(`${luku(etK)} km ${asetukset.kohdeNimi}iin`);
   }
-  el.textContent = (osat.length > 1 ? '' : 'Ei dataa tässä pisteessä (maa tai alueen ulkopuolella) · ') + osat.join(' · ') + '  ✕';
+  el.textContent = (osat.length > (jt ? 2 : 1) ? '' : 'Ei dataa tässä pisteessä (maa tai alueen ulkopuolella) · ') + osat.join(' · ') + '  ✕';
   mitoitaKartta();
 }
 function mitoitaKartta() {
@@ -1034,7 +1078,7 @@ function avaaKarttaNakyma() {
   const c = $('karttaCanvas');
   if (!kartta) {
     const tila = lue('mlt_kartta') || {}, nk = alueenNakyma(valittuAlue);
-    kartta = new Kartta(c, { lat: nk.lat, lon: nk.lon, z: nk.z, askel: asetukset.lampoAskel,
+    kartta = new Kartta(c, { lat: nk.lat, lon: nk.lon, z: nk.z, askel: asetukset.lampoAskel, jalki,
       lohiVali: [asetukset.lohiMin, asetukset.lohiMax], aaltoRajat: aaltoRajat(), merkit: KAIKKI_MERKIT, havainnot: kaikkiHavainnot(), onNapautus: naytaPiste });
     if (typeof ResizeObserver === 'function') {   // ohjainrivi tai alapalkki muuttaa korkeutta (esim. virtarivi 1 → 2 riviä)
       const ro = new ResizeObserver(() => mitoitaKartta());
@@ -1147,11 +1191,16 @@ $('saalisTallenna').addEventListener('click', () => {
   tallennaLS('mlt_saaliit', uudet); $('saalisTeksti').value = ''; piirraSaaliit();
 });
 $('saalisTyhjenna').addEventListener('click', () => { tallennaLS('mlt_saaliit', []); piirraSaaliit(); });
+$('jalkiPoista').addEventListener('click', () => {
+  jalki = []; jalkiMuuttui = true; tallennaJalki(true);
+  if (kartta) { kartta.jalki = jalki; kartta.piirra(); }
+});
 $('tallenna').addEventListener('click', () => { lueAsetukset(); piirraAsetukset(); piirra(); if (kartta) { kartta.askel = asetukset.lampoAskel; kartta.lohiVali = [asetukset.lohiMin, asetukset.lohiMax]; kartta.aaltoRajat = aaltoRajat(); piirraLohiRivi(); kartta.piirra(); } paivita(); });
 $('palauta').addEventListener('click', () => { asetukset = oletukset(); asetukset.asemat = [asetukset.asema1, asetukset.asema2]; tallennaLS('mlt_asetukset', asetukset); piirraAsetukset(); piirra(); });
 
 piirraAsetukset();
 piirraSaaliit();
+piirraJalkiTila();
 palautaVanhaData();
 avaa(lue('mlt_valilehti') || 'v-vesilla');
 piirraMeriTila();
