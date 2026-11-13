@@ -42,6 +42,7 @@ ASKEL_H = 3                    # vain UTC-tunnit 0, 3, 6, … (tasainen aikasarj
 SYVYYS_MAX = 12.5              # lämpöprofiili 0–12 m (Hannu: nousulohi max 12 m)
 VYOHYKE = ZoneInfo("Europe/Helsinki")
 KERROIN = 100                  # tallennus kokonaislukuina: arvo × 100
+VIRTA_SYV = 3.0                # m, toinen virtataso: nopeus veden suhteen 3 m:ssä (Hannu 13.11.2026)
 
 # Tuote-ID:t ja muuttujat. Jos tunnus on väärä, skripti tulostaa lokiin Itämeren datasetit.
 LAHTEET = {
@@ -65,6 +66,24 @@ def pyorista(taulukko, desimaalit):
     o = a.astype(object)
     o[~np.isfinite(a)] = None
     return o.tolist()
+
+
+def taso_syvyydella(a, syvyydet, z):
+    """a[aika, syvyys, lat, lon] -> a[aika, lat, lon] syvyydellä z, lineaarisesti kahden mallitason välistä.
+    Jos alempi taso puuttuu (pohja z:n ja alemman tason välissä) tai z on tasojen ulkopuolella, tulos on NaN
+    (paitsi kun z osuu tasolle). Palauttaa (taulukko, kuvaus) tai (None, syy)."""
+    syv = np.atleast_1d(np.asarray(syvyydet, dtype=float))
+    a = np.asarray(a, dtype=float)
+    if a.ndim != 4 or a.shape[1] != len(syv) or not len(syv):
+        return None, "ei syvyystasoja"
+    k = int(np.argmin(np.abs(syv - z)))
+    if abs(syv[k] - z) < 0.01:
+        return a[:, k], f"taso {syv[k]:.2f} m"
+    if z < syv[0] or z > syv[-1]:
+        return None, f"{z} m tasojen {syv[0]:.2f}–{syv[-1]:.2f} m ulkopuolella"
+    i = min(int(np.searchsorted(syv, z, side="right")) - 1, len(syv) - 2)
+    w = (z - syv[i]) / (syv[i + 1] - syv[i])
+    return a[:, i] * (1 - w) + a[:, i + 1] * w, f"tasojen {syv[i]:.2f} ja {syv[i + 1]:.2f} m välistä"
 
 
 def kokonaisluvut(taulukko, kerroin=KERROIN):
@@ -109,7 +128,8 @@ def tiedostonimi(pvm):
 
 def rakenna(phy, wav, sst, luotu, virheet, syvyys=None, tuuli=None, vaylat=None, alue=None):
     """Kokoaa hakemiston ja päivätiedostot.
-    phy = dict(ajat, lat, lon, syvyydet, thetao[aika, syvyys, lat, lon], u[aika, lat, lon], v, dataset)
+    phy = dict(ajat, lat, lon, syvyydet, thetao[aika, syvyys, lat, lon], u[aika, lat, lon], v, dataset,
+               u3/v3[aika, lat, lon] = virta VIRTA_SYV m:ssä tai None)
     wav = dict(ajat, lat, lon, hs[aika, lat, lon], suunta, dataset) tai None
     sst = valmis JSON-osa tai None
     Palauttaa (hakemisto, {tiedostonimi: sisältö})."""
@@ -127,6 +147,9 @@ def rakenna(phy, wav, sst, luotu, virheet, syvyys=None, tuuli=None, vaylat=None,
         t_paivat = paivittain([np.datetime64(a.replace("Z", "")) for a in tuuli["ajat"]])
     hakemisto["phy"] = {"dataset": phy["dataset"], "lat": pyorista(phy["lat"], 4), "lon": pyorista(phy["lon"], 4),
                         "syvyydet": pyorista(phy["syvyydet"], 2)}
+    syva = phy.get("u3") is not None and phy.get("v3") is not None
+    if syva:
+        hakemisto["phy"]["virtaSyv"] = VIRTA_SYV   # päivätiedostoissa u3/v3 = virta tällä syvyydellä
     if wav:
         hakemisto["wav"] = {"dataset": wav["dataset"], "lat": pyorista(wav["lat"], 4), "lon": pyorista(wav["lon"], 4)}
     if sst:
@@ -143,6 +166,9 @@ def rakenna(phy, wav, sst, luotu, virheet, syvyys=None, tuuli=None, vaylat=None,
             sis["phy"] = {"t": kokonaisluvut(np.asarray(phy["thetao"])[ip]),
                           "u": kokonaisluvut(np.asarray(phy["u"])[ip]),
                           "v": kokonaisluvut(np.asarray(phy["v"])[ip])}
+            if syva:
+                sis["phy"]["u3"] = kokonaisluvut(np.asarray(phy["u3"])[ip])
+                sis["phy"]["v3"] = kokonaisluvut(np.asarray(phy["v3"])[ip])
         iw = w_paivat.get(pvm, [])
         if iw:
             w = {"ajat": [iso(np.datetime64(wav["ajat"][i])) for i in iw],
@@ -222,13 +248,20 @@ def hae_phy(nyt, alue=None):
     th = th.transpose("time", "depth", "latitude", "longitude")
     syv = ds["depth"].values if "depth" in ds.coords else np.array([0.5])
     u, v = ds["uo"], ds["vo"]
+    u3 = v3 = None
     if "depth" in u.dims:
+        jarj = ("time", "depth", "latitude", "longitude")
+        u3, kuvaus = taso_syvyydella(u.transpose(*jarj).values, syv, VIRTA_SYV)
+        v3, _ = taso_syvyydella(v.transpose(*jarj).values, syv, VIRTA_SYV)
+        print(f"phy virta {VIRTA_SYV:g} m:", kuvaus)
         u, v = u.isel(depth=0), v.isel(depth=0)
+    else:
+        print(f"phy virta {VIRTA_SYV:g} m: ei syvyystasoja, vain pintavirta")
     print("phy syvyystasot (m):", ", ".join(f"{d:.2f}" for d in np.atleast_1d(syv)))
     return dict(dataset=ds_id, ajat=ds["time"].values, lat=ds["latitude"].values, lon=ds["longitude"].values,
                 syvyydet=np.atleast_1d(syv), thetao=th.values,
                 u=u.transpose("time", "latitude", "longitude").values,
-                v=v.transpose("time", "latitude", "longitude").values)
+                v=v.transpose("time", "latitude", "longitude").values, u3=u3, v3=v3)
 
 
 def hae_wav(nyt, alue=None):

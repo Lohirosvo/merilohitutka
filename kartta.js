@@ -339,6 +339,123 @@
     if (hs === null || hs === undefined || !isFinite(hs)) return 0;
     return hs >= rajat[1] ? 2 : hs >= rajat[0] ? 1 : 0;
   }
+  /** Matalikot syvyyskäyristä (v21, Hannu 13.11.: "10 m matalikko–20 m tai poikkeaa ympäristöstä merkittävästi").
+   *  Suljettu käyrä (rengas), jonka sisällä vesi on matalampaa, on mäki. Huippu = sisin mäkirengas: matalin kohta on
+   *  sen syvyyden ja seuraavan matalamman käyrätason välissä. Mäki vai kuoppa: renkaan sisällä olevista renkaista,
+   *  muuten ympäröivästä renkaasta, muuten lähimmästä avoimesta käyrästä (enintään 3 km). Saman syvyyden pätkät
+   *  yhdistetään päistään (käyrä voi olla pätkitty). Luokat: 'vali' = huippurengas min–max m (oletus 10–20);
+   *  'nousu' = matalin kohta vähintään 3 m:ssä (ei saaria eikä pintaan nousevia karikoita) ja uloin mäkirengas
+   *  vähintään nousuM syvemmällä kuin huippurengas (oletus 5 m). Reunalla katkenneet käyrät eivät ole renkaita. */
+  function ketjuta(viivat) {
+    const avain = (a, i) => Math.round(a[i] * 1e5) + ',' + Math.round(a[i + 1] * 1e5);
+    const suljettu = a => a.length >= 8 && avain(a, 0) === avain(a, a.length - 2);
+    const valmiit = [], auki = [];
+    for (const v of viivat) (suljettu(v) ? valmiit : auki).push(Array.from(v));
+    const paat = new Map(), lisaa = (k, i) => { if (!paat.has(k)) paat.set(k, []); paat.get(k).push(i); };
+    auki.forEach((a, i) => { lisaa(avain(a, 0), i); lisaa(avain(a, a.length - 2), i); });
+    const kaytetty = new Array(auki.length).fill(false);
+    const kaanna = a => { const b = []; for (let i = a.length - 2; i >= 0; i -= 2) b.push(a[i], a[i + 1]); return b; };
+    const seuraava = k => (paat.get(k) || []).find(j => !kaytetty[j]);
+    for (let i = 0; i < auki.length; i++) {
+      if (kaytetty[i]) continue;
+      kaytetty[i] = true; let ketju = auki[i];
+      for (let kierros = 0; kierros < 2; kierros++) {   // jatketaan loppupäästä, sitten käännettynä alkupäästä
+        for (;;) {
+          if (suljettu(ketju)) break;
+          const k = avain(ketju, ketju.length - 2), j = seuraava(k);
+          if (j === undefined) break;
+          kaytetty[j] = true;
+          const b = avain(auki[j], 0) === k ? auki[j] : kaanna(auki[j]);
+          ketju = ketju.concat(b.slice(2));
+        }
+        ketju = kaanna(ketju);
+      }
+      valmiit.push(ketju);
+    }
+    return valmiit.map(a => ({ ll: a, suljettu: suljettu(a) }));
+  }
+  function rajaus(ll) {
+    let la0 = 90, la1 = -90, lo0 = 180, lo1 = -180;
+    for (let i = 0; i < ll.length; i += 2) { const a = ll[i], o = ll[i + 1]; if (a < la0) la0 = a; if (a > la1) la1 = a; if (o < lo0) lo0 = o; if (o > lo1) lo1 = o; }
+    return { la0, la1, lo0, lo1 };
+  }
+  function renkaanSisalla(ll, lat, lon) {
+    let sis = false;
+    for (let i = 0, j = ll.length - 2; i < ll.length; j = i, i += 2) {
+      const ai = ll[i], oi = ll[i + 1], aj = ll[j], oj = ll[j + 1];
+      if ((ai > lat) !== (aj > lat) && lon < (oj - oi) * (lat - ai) / (aj - ai) + oi) sis = !sis;
+    }
+    return sis;
+  }
+  function matalikot(S, o = {}) {
+    const min = isFinite(o.min) ? o.min : 10, max = isFinite(o.max) ? o.max : 20, nousuM = isFinite(o.nousuM) ? o.nousuM : 5;
+    const tulos = { matalikot: [], renkaita: 0, maki: 0, kuoppa: 0, epaselva: 0 };
+    if (!S || !S.tasot) return tulos;
+    const tasot = S.tasot.map(t => t.syvyys).filter(isFinite).sort((a, b) => a - b);
+    const R = [], A = [];
+    for (const t of S.tasot) for (const k of ketjuta(t.viivat.map(v => v.ll))) {
+      const x = Object.assign({ d: t.syvyys, ll: k.ll }, rajaus(k.ll));
+      if (k.suljettu) { x.ala = (x.la1 - x.la0) * (x.lo1 - x.lo0); x.lapset = []; x.ylempi = null; R.push(x); } else A.push(x);
+    }
+    tulos.renkaita = R.length;
+    R.sort((a, b) => a.ala - b.ala);
+    for (let i = 0; i < R.length; i++) {   // ylempi = pienin rengas, jonka sisällä tämä on (käyrät eivät leikkaa)
+      const a = R[i];
+      for (let j = i + 1; j < R.length; j++) {
+        const b = R[j];
+        if (b.la0 <= a.la0 && b.la1 >= a.la1 && b.lo0 <= a.lo0 && b.lo1 >= a.lo1 && renkaanSisalla(b.ll, a.ll[0], a.ll[1])) { a.ylempi = b; b.lapset.push(a); break; }
+      }
+    }
+    const lahinAvoin = a => {   // lähin eri syvyyden avoin käyrä enintään 3 km:n päässä (pisteet harvennettuina)
+      const v = 0.03, kx = kmLon(a.la0), ehd = [];
+      for (const b of A) {   // rajausruutujen etäisyys = alaraja; lähimmät ensin, kauemmat ohitetaan
+        if (b.d === a.d || b.la1 < a.la0 - v || b.la0 > a.la1 + v || b.lo1 < a.lo0 - 2 * v || b.lo0 > a.lo1 + 2 * v) continue;
+        const dy = Math.max(0, b.la0 - a.la1, a.la0 - b.la1) * KM_LAT, dx = Math.max(0, b.lo0 - a.lo1, a.lo0 - b.lo1) * kx;
+        ehd.push([Math.hypot(dx, dy), b]);
+      }
+      ehd.sort((x, y) => x[0] - y[0]);
+      let paras = null, pm = 3;
+      const ra = Math.max(1, Math.floor(a.ll.length / 2 / 16)) * 2;
+      for (const [alaraja, b] of ehd) {
+        if (alaraja >= pm) break;
+        const rb = Math.max(1, Math.floor(b.ll.length / 2 / 150)) * 2;
+        for (let i = 0; i < a.ll.length; i += ra) for (let j = 0; j < b.ll.length; j += rb) {
+          const dy = (a.ll[i] - b.ll[j]) * KM_LAT, dx = (a.ll[i + 1] - b.ll[j + 1]) * kx, m = dx * dx + dy * dy;
+          if (m < pm * pm) { pm = Math.sqrt(m); paras = b; }
+        }
+      }
+      return paras;
+    };
+    for (const a of R) {
+      const mat = a.lapset.some(c => c.d < a.d), syv = a.lapset.some(c => c.d > a.d);
+      if (mat || syv) a.tyyppi = mat && !syv ? 'maki' : syv && !mat ? 'kuoppa' : null;
+      else if (a.ylempi && a.ylempi.d !== a.d) a.tyyppi = a.ylempi.d > a.d ? 'maki' : 'kuoppa';
+      else { const b = lahinAvoin(a); a.tyyppi = b ? (b.d > a.d ? 'maki' : 'kuoppa') : null; }
+      if (a.tyyppi === 'maki') tulos.maki++; else if (a.tyyppi === 'kuoppa') tulos.kuoppa++; else tulos.epaselva++;
+    }
+    for (const p of R) {
+      if (p.tyyppi !== 'maki' || p.lapset.some(c => c.d < p.d)) continue;   // huippu: ei matalampaa rengasta sisällä
+      let F = p;
+      while (F.ylempi && F.ylempi.tyyppi === 'maki' && F.ylempi.d > F.d) F = F.ylempi;
+      const ala = tasot.filter(d => d < p.d).pop() || 0, nousu = F.d - p.d;
+      const luokka = p.d >= min && p.d <= max ? 'vali' : ala >= 3 && nousu >= nousuM ? 'nousu' : null;
+      if (!luokka) continue;
+      let sa = 0, so = 0; const n = p.ll.length / 2;
+      for (let i = 0; i < p.ll.length; i += 2) { sa += p.ll[i]; so += p.ll[i + 1]; }
+      tulos.matalikot.push({ d: p.d, ala, ymparisto: F.d, nousu, luokka, ll: p.ll, la0: p.la0, la1: p.la1, lo0: p.lo0, lo1: p.lo1, keski: [sa / n, so / n] });
+    }
+    return tulos;
+  }
+  /** Matalikko pisteessä: pienin, jonka huippurenkaan sisällä piste on (tai null). */
+  function matalikkoPisteessa(lista, lat, lon) {
+    let paras = null;
+    for (const m of lista || []) {
+      if (lat < m.la0 || lat > m.la1 || lon < m.lo0 || lon > m.lo1 || !renkaanSisalla(m.ll, lat, lon)) continue;
+      if (!paras || (m.la1 - m.la0) * (m.lo1 - m.lo0) < (paras.la1 - paras.la0) * (paras.lo1 - paras.lo0)) paras = m;
+    }
+    return paras;
+  }
+
   /** Oma reittijälki (v20): [[t s, lat × 1e5, lon × 1e5], …]. Osat [alku, loppu] (indeksit, mukaan lukien):
    *  katko, kun pisteiden väli on yli katkoS (näyttö oli kiinni tai GPS poissa) tai hyppy yli hyppyM. */
   function jalkiOsat(J, katkoS = 300, hyppyM = 2000) {
@@ -380,7 +497,7 @@
       this.data = null; this.aika = 0; this.askel = opts.askel || 0.2;
       this.lohiVali = opts.lohiVali || [6.6, 8.8];
       this.aaltoRajat = opts.aaltoRajat || [0.35, 0.5];   // merkitsevä aallonkorkeus (m)
-      this.tasot = { lampo: true, lohi: true, syvyys: true, tuuli: true, vaylat: true, havainnot: true, aaltoraja: true, jalki: true, sst: false, virta: true, aalto: false, tausta: true };
+      this.tasot = { lampo: true, lohi: true, syvyys: true, tuuli: true, vaylat: true, havainnot: true, aaltoraja: true, jalki: true, matalikot: true, sst: false, virta: true, aalto: false, tausta: true };
       this.syvyys = null;   // puraSyvyys()-tulos
       this.vaylat = null;   // puraVaylat()-tulos
       this.ylaVara = 0; this.alaVara = 0;   // ohjainten peittämä osa ylhäällä ja alhaalla (px)
@@ -388,6 +505,7 @@
       this.merkit = opts.merkit || []; this.oma = null; this.valittu = null;
       this.havainnot = opts.havainnot || [];   // havainnot.js
       this.jalki = opts.jalki || [];   // oma reittijälki 24 h (v20)
+      this.matalikot = []; this.matalikkoVali = '10–20';   // matalikot()-tuloksen lista ja selitteen väli (v21)
       this.laatat = new Map(); this.onNapautus = opts.onNapautus || (() => {});
       this.osoittimet = new Map(); this.raahattu = false;
       this._kuuntele();
@@ -497,6 +615,7 @@
         if (this.tasot.sst && d.sst) this._kayrat(d.sst, 'lampo', 0, true);
       }
       if (this.tasot.syvyys && this.syvyys) this._syvyys();   // lämpökäyrien päälle: 20 m ja 6 m erottuvat
+      if (this.tasot.matalikot && this.matalikot.length) this._matalikot();
       if (this.tasot.vaylat && this.vaylat) this._vaylat();
       if (this.tasot.havainnot && this.havainnot.length) this._havainnot();   // virta- ja tuulinuolten alle
       if (d && this.tasot.virta && d.phy) this._virta();
@@ -988,6 +1107,29 @@
       g.restore();
     }
 
+    /** Matalikot (v21): huippurengas hiekanvärisenä (huippu min–max m vahvempana, muu nousu haaleana katkoviivalla)
+     *  ja nimi "▲6–10" = matalin kohta 6–10 m. */
+    _matalikot() {
+      const g = this.ctx, [laY, loV] = this.paikka(-40, -40), [laA, loO] = this.paikka(this.w + 40, this.h + 40);
+      const f = d => String(d).replace('.', ',');
+      g.save(); g.lineJoin = 'round';
+      for (const m of this.matalikot) {
+        if (m.la1 < laA || m.la0 > laY || m.lo1 < loV || m.lo0 > loO) continue;
+        const p = new Path2D();
+        for (let i = 0; i < m.ll.length; i += 2) { const [x, y] = this.ruutu(m.ll[i], m.ll[i + 1]); if (i) p.lineTo(x, y); else p.moveTo(x, y); }
+        p.closePath();
+        const vali = m.luokka === 'vali';
+        g.fillStyle = vali ? 'rgba(255,196,90,0.45)' : 'rgba(255,196,90,0.22)'; g.fill(p);
+        g.setLineDash([]); g.strokeStyle = 'rgba(0,0,0,0.55)'; g.lineWidth = vali ? 4 : 3; g.stroke(p);   // tumma reuna erottaa taustasta
+        g.setLineDash(vali ? [] : [5, 3]);
+        g.strokeStyle = vali ? 'rgba(255,224,160,1)' : 'rgba(255,224,160,0.8)'; g.lineWidth = vali ? 2 : 1.4; g.stroke(p);
+        const [x, y] = this.ruutu(m.keski[0], m.keski[1]);
+        this._nimi('▲' + f(m.ala) + '–' + f(m.d), [[x + 4, y - 4], [x + 4, y + 12], [x - 40, y - 4]], '#ffe0a0', vali ? 4.2 : 4.6,
+          { font: 'bold 11px sans-serif', reuna: 'rgba(0,0,0,0.85)', ryhma: 'matalikko', max: 12 });
+      }
+      g.restore();
+    }
+
     /** Oma reittijälki (v20): punainen, haalenee 24 tunnissa. Janat ryhmitellään tunnin ikäluokkiin
      *  (24 polkua), jotta tuhansien pisteiden jälki piirtyy nopeasti myös kartan liikkuessa. */
     _jalki() {
@@ -1033,6 +1175,8 @@
       if (this.tasot.havainnot && this.havainnot.length) rivit.push([['Omat', 'rgb(' + havaintoVari('muu') + ')'],
         ['lämpöraja', '#e9f1f7', 'rgba(' + havaintoVari('muu') + ',0.8)'], ['lämmin', '#e9f1f7', 'rgb(' + havaintoVari('lammin') + ')'],
         ['kylmä', '#e9f1f7', 'rgb(' + havaintoVari('kylma') + ')'], ['saalis', '#e9f1f7', 'rgb(' + havaintoVari('saalis') + ')']]);
+      if (this.tasot.matalikot && this.matalikot.length) rivit.push([['Matalikko (käyristä) ▲matalin', '#ffe0a0'], ['huippu ' + this.matalikkoVali + ' m', '#e9f1f7', 'rgba(255,196,90,0.85)'],
+        ['muu nousu', '#e9f1f7', 'rgba(255,196,90,0.4)']]);
       if (this.tasot.jalki && this.jalki.length > 1) rivit.push([['Oma jälki 24 h', '#ff6b61'], ['nyt', '#e9f1f7', 'rgba(255,59,48,1)'],
         ['12 h', '#e9f1f7', 'rgba(255,59,48,' + jalkiAlfa(43200).toFixed(2) + ')'], ['24 h sitten', '#e9f1f7', 'rgba(255,59,48,' + jalkiAlfa(86400).toFixed(2) + ')']]);
       if (this.tasot.lampo && d.phy) rivit.push([['Lämpö (malli) ' + f(this.askel) + ' °C välein', '#ffb24a']]);
@@ -1065,7 +1209,7 @@
   const KarttaMalli = { lonX, latY, xLon, yLat, kayra, tasot, arvovali, lahinIndeksi, lahinArvo, lahinAika, virta, akseliArvo,
                         kerros, lohiLuokka, profiiliPisteessa, puraSyvyys, lahinKayra, puraVaylat, lahinVayla, tuuliVari,
                         havainnotPisteessa, havaintoTiedot, havaintoVari, etaisyysViivaan, jasennaSaaliit, aaltoLuokka,
-                        jalkiOsat, jalkiAlfa, lahinJalki };
+                        jalkiOsat, jalkiAlfa, lahinJalki, ketjuta, matalikot, matalikkoPisteessa, renkaanSisalla };
   if (typeof module !== 'undefined' && module.exports) module.exports = KarttaMalli;
   else { root.KarttaMalli = KarttaMalli; root.Kartta = Kartta; }
 })(typeof window !== 'undefined' ? window : this);
