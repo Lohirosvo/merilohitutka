@@ -66,6 +66,9 @@
   .alapalkki .vesi small { font-size:12px; font-weight:400; color:var(--himmea); font-family:inherit; }   /* virta toisella rivillä */
   .alapalkki .lisa { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .alapalkki .vesi:not([hidden]) ~ .lisa .pitka { display:none; }   /* vesinopeuden kanssa lyhyt: "±6 m · ☀" */
+  @media (max-width: 430px) { .alapalkki .vesi:not([hidden]) ~ .suunta { display:none; } }   /* kapea: kulkusuunnan asteet pois vesinopeuden tieltä */
+  @media (max-width: 430px) { .alapalkki .vesi small { white-space:normal; max-width:11em; } }   /* kapea: pitkä virtarivi rivittyy, ettei GPS-tarkkuus katkea */
+  @media (max-width: 380px) { .alapalkki { gap:8px; } }   /* hyvin kapea: väli pienemmäksi, ettei "±6 m · ☀" katkea */
   .alapalkki .lisa { font-size:14px; color:var(--himmea); margin-left:auto; text-align:right; }
   nav { position:fixed; left:0; right:0; bottom:0; height:64px; display:flex; background:#08121e; border-top:1px solid var(--reuna); }
   nav button { flex:1; border:0; border-radius:0; background:transparent; color:var(--himmea); font-size:15px; letter-spacing:2px; padding:6px 0; }
@@ -285,7 +288,7 @@
 <script src="havainnot.js?v=15"></script>
 <script src="malli.js?v=13"></script>
 <script src="fmi.js?v=13"></script>
-<script src="nopeus.js?v=18"></script>
+<script src="nopeus.js?v=19"></script>
 <script src="kartta.js?v=18"></script>
 <script>
 'use strict';
@@ -508,9 +511,12 @@ function piirraVesiNopeus(kmh, suuntaAst, nyt) {
   if (!vi) { el.hidden = true; return null; }
   const r = Nopeus.vedenSuhteen(kmh, suuntaAst, vi.u, vi.v);
   el.hidden = false;
-  const vast = isFinite(r.vastaan) && Math.abs(r.vastaan) >= 0.05
-    ? ` <small>virta ${r.vastaan > 0 ? 'vastaan' : 'myötä'} ${luku(Math.abs(r.vastaan))}</small>` : '';
-  el.innerHTML = isFinite(r.kmh) ? `vesi ${luku(r.kmh)}${vast}` : `vesi – <small>virta ${luku(r.virtaKmh)} km/h</small>`;
+  // toinen rivi: virran komponentit kulkusuunnassa (vastaan/myötä) ja sivulta (km/h), pienet (< 0,05) pois
+  const osat = [];
+  if (isFinite(r.vastaan) && Math.abs(r.vastaan) >= 0.05) osat.push((r.vastaan > 0 ? 'vastaan ' : 'myötä ') + luku(Math.abs(r.vastaan)));
+  if (isFinite(r.sivu) && Math.abs(r.sivu) >= 0.05) osat.push((r.sivu > 0 ? 'vasemmalta ' : 'oikealta ') + luku(Math.abs(r.sivu)));
+  el.innerHTML = isFinite(r.kmh) ? `vesi ${luku(r.kmh)}${osat.length ? ' <small>virta ' + osat.join(' · ') + '</small>' : ''}`
+    : `vesi – <small>virta ${luku(r.virtaKmh)} km/h</small>`;
   el.title = 'Nopeus veden suhteen = GPS-nopeus miinus Copernicuksen pintavirta (malli, ylin taso 0,5 m)';
   return r;
 }
@@ -1030,7 +1036,10 @@ function avaaKarttaNakyma() {
     const tila = lue('mlt_kartta') || {}, nk = alueenNakyma(valittuAlue);
     kartta = new Kartta(c, { lat: nk.lat, lon: nk.lon, z: nk.z, askel: asetukset.lampoAskel,
       lohiVali: [asetukset.lohiMin, asetukset.lohiMax], aaltoRajat: aaltoRajat(), merkit: KAIKKI_MERKIT, havainnot: kaikkiHavainnot(), onNapautus: naytaPiste });
-    if (typeof ResizeObserver === 'function') new ResizeObserver(() => mitoitaKartta()).observe($('karttaOhjaimet'));
+    if (typeof ResizeObserver === 'function') {   // ohjainrivi tai alapalkki muuttaa korkeutta (esim. virtarivi 1 → 2 riviä)
+      const ro = new ResizeObserver(() => mitoitaKartta());
+      ro.observe($('karttaOhjaimet')); ro.observe(document.querySelector('.alapalkki'));
+    }
     if (tila.tasot) Object.assign(kartta.tasot, tila.tasot);
     kartta.tasot.tausta = true; kartta.tasot.syvyys = true;   // Hannu 10.11.: aina päällä, ei nappia
     kartta.syvyys = syvyys; kartta.vaylat = vaylat;
