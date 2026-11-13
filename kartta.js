@@ -450,6 +450,7 @@
     _piirra() {
       const g = this.ctx, w = this.w, h = this.h;
       g.fillStyle = '#0d2236'; g.fillRect(0, 0, w, h);
+      this._aloitaNimet();
       if (this.tasot.tausta) this._tausta();
       const d = this.data;
       if (d) {
@@ -466,10 +467,58 @@
       if (d && this.tasot.virta && d.phy) this._virta();
       if (d && this.tasot.tuuli && d.tuuli) this._tuuli();
       this._merkit();
+      this._piirraNimet();   // kaikkien tasojen numerot ja nimet tärkeysjärjestyksessä, ei päällekkäin (v16)
       this._profiiliAlue = null;
       const profiili = d && this.tasot.lohi && this.valittu ? this._profiili() : false;
       if (!profiili && Date.now() < this._seliteAsti) this._selite();   // selite 3 s; ei profiilin kanssa
       this._lahteet();
+    }
+
+    /** Nimijono (v16, Hannu 13.11.: numerot menivät päällekkäin). Tasot lisäävät nimet jonoon, _piirraNimet piirtää
+     *  ne lopuksi tärkeysjärjestyksessä (pienempi prio ensin) ja jättää pois nimen, joka osuisi jo piirrettyyn
+     *  nimeen, merkkiin tai ohjaimiin. Nimellä voi olla useita paikkoja: ensimmäinen vapaa käytetään. */
+    _aloitaNimet() {
+      this._nimet = [];
+      const yla = this.ylaVara, ala = this.alaVara;
+      this._varatut = [
+        { x: 0, y: 0, w: this.w, h: yla + 2 },                          // ohjaimet ylhäällä
+        { x: 0, y: this.h - ala - 2, w: this.w, h: ala + 2 },           // napautustieto alhaalla
+        { x: this.w - 60, y: yla + 4, w: 60, h: 160 },                  // zoom-napit
+        { x: this.w - 330, y: this.h - ala - 20, w: 330, h: 18 }        // lähdemaininta
+      ];
+      if (this.valittu && this.tasot.lohi && this.data && this.data.phy) this._varatut.push({ x: 8, y: yla + 8, w: 132, h: 156 });   // profiili
+    }
+    _varaa(x, y, w, h) { if (this._varatut) this._varatut.push({ x, y, w, h }); }
+    /** rivit: teksti tai taulukko riveistä; paikat: [[x, y], ...] (y = ensimmäisen rivin perusviiva). */
+    _nimi(rivit, paikat, vari, prio, o = {}) {
+      if (!this._nimet) return;
+      this._nimet.push({ rivit: Array.isArray(rivit) ? rivit : [rivit], paikat, vari, prio, font: o.font || 'bold 12px sans-serif',
+        tasaus: o.tasaus || 'left', reuna: o.reuna || 'rgba(0,0,0,0.85)', rk: o.rk || 14, ryhma: o.ryhma, max: o.max });
+    }
+    _piirraNimet() {
+      if (!this._nimet || !this._nimet.length) return;
+      const g = this.ctx, V = 1, varatut = this._varatut, maara = {};
+      const osuu = q => varatut.some(v => q.x < v.x + v.w + V && q.x + q.w + V > v.x && q.y < v.y + v.h + V && q.y + q.h + V > v.y);
+      const lista = this._nimet.map((n, i) => [n, i]).sort((a, b) => a[0].prio - b[0].prio || a[1] - b[1]);
+      g.save(); g.lineJoin = 'round'; g.lineWidth = 3;
+      this.nimiaPiirretty = 0; this.nimiaPois = 0; this.nimiRuudut = [];   // testejä ja vianetsintää varten
+      for (const [n] of lista) {
+        if (n.ryhma && n.max && (maara[n.ryhma] || 0) >= n.max) continue;
+        g.font = n.font;
+        const lev = Math.max(...n.rivit.map(t => g.measureText(t).width)), kork = n.rivit.length * n.rk;
+        let piirretty = false;
+        for (const [x, y] of n.paikat) {
+          const q = { x: n.tasaus === 'center' ? x - lev / 2 : n.tasaus === 'right' ? x - lev : x, y: y - n.rk + 3, w: lev, h: kork };
+          if (q.x > this.w || q.x + q.w < 0 || osuu(q)) continue;
+          varatut.push(q); piirretty = true; this.nimiRuudut.push({ q, teksti: n.rivit.join(' / '), prio: n.prio });
+          if (n.ryhma) maara[n.ryhma] = (maara[n.ryhma] || 0) + 1;
+          g.textAlign = n.tasaus;
+          n.rivit.forEach((t, k) => { g.strokeStyle = n.reuna; g.strokeText(t, x, y + k * n.rk); g.fillStyle = n.vari; g.fillText(t, x, y + k * n.rk); });
+          break;
+        }
+        if (piirretty) this.nimiaPiirretty++; else this.nimiaPois++;
+      }
+      g.restore();
     }
 
     /** Selite näkyviin ms millisekunniksi (Hannu 10.11.: sulkeutuu 3 s jälkeen). 0 = piiloon heti. */
@@ -507,16 +556,14 @@
       g.strokeStyle = '#ffd166'; g.lineWidth = 2; g.setLineDash([10, 6]);
       g.beginPath(); for (const v of this.vaylat.linjat) if (nakyy(v)) viiva(v); g.stroke();
       g.setLineDash([]);
-      if (this.z >= 10.5) {   // kulkusyvyydet
-        g.font = 'bold 11px sans-serif'; let n = 0; const varattu = new Set();
+      if (this.z >= 11.5) {   // mitoitussyväys numerona vasta lähempää (v16); napautus kertoo aina
+        const nahty = new Set();
         for (const v of this.vaylat.alueet.concat(this.vaylat.linjat)) {
-          if (n >= 20 || v.syvyys === null || !nakyy(v)) continue;
+          if (v.syvyys === null || v.syvyys === undefined || !nakyy(v)) continue;
           const m = v.m, i = (m.length >> 2) * 2, x = m[i] * s - ox, y = m[i + 1] * s - oy;
-          if (x < 20 || x > this.w - 60 || y < this.ylaVara + 10 || y > this.h - this.alaVara - 20) continue;
-          const r = Math.floor(x / 80) + ',' + Math.floor(y / 30); if (varattu.has(r)) continue; varattu.add(r); n++;
-          const txt = String(v.syvyys).replace('.', ',') + ' m';
-          g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,0.85)'; g.strokeText(txt, x + 3, y - 3);
-          g.fillStyle = '#ffd166'; g.fillText(txt, x + 3, y - 3);
+          const txt = String(v.syvyys).replace('.', ',') + ' m', avain = txt + Math.round(x / 40) + ',' + Math.round(y / 40);
+          if (nahty.has(avain)) continue; nahty.add(avain);   // sama numero lähes samassa kohdassa (alue + linja) kerran
+          this._nimi(txt, [[x + 3, y - 3], [x + 3, y + 13], [x - 3, y - 3]], '#ffd166', 4, { font: 'bold 11px sans-serif', tasaus: 'left', ryhma: 'vayla', max: 20 });
         }
       }
       g.restore();
@@ -545,8 +592,7 @@
           g.stroke();
         }
         const txt = Math.round(ws) + (wg !== null && wg !== undefined ? ' (' + Math.round(wg) + ')' : '');
-        g.font = 'bold 12px sans-serif'; g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,0.85)';
-        g.strokeText(txt, x1 + 4, y1 + 14); g.fillStyle = vari; g.fillText(txt, x1 + 4, y1 + 14);
+        this._nimi(txt, [[x1 + 4, y1 + 14], [x2 + 4, y2 + 14], [x1 + 4, y1 - 6]], vari, 1);
       });
       g.restore();
     }
@@ -566,7 +612,7 @@
         for (const v of taso.viivat) {
           if (v.la1 < laA || v.la0 > laY || v.lo1 < loV || v.lo0 > loO) continue;
           const m = v.m;
-          const vali = taso.syvyys === 20 || taso.syvyys === 6 ? 240 : 600;   // muiden käyrien numerot harvemmin
+          const vali = taso.syvyys === 20 || taso.syvyys === 6 ? 260 : 600;   // muiden käyrien numerot harvemmin
           let px = m[0] * s - ox, py = m[1] * s - oy, kuljettu = vali / 2;
           g.moveTo(px, py);
           for (let k = 2; k < m.length; k += 2) {
@@ -578,21 +624,13 @@
         }
         g.stroke();
       }
-      // numerot: tärkeät ensin, ei päällekkäin
-      g.globalAlpha = 1; g.font = 'bold 11px sans-serif';
-      const varattu = new Set(), tarkeys = d => d === 20 ? 0 : d === 6 ? 1 : 2;
-      ehdokkaat.sort((a, b) => tarkeys(a[0]) - tarkeys(b[0]));
-      let nimetty = 0, muita = 0;
+      // numerot jonoon: 20 m ennen 6 m:ä ennen muita; ryhmittäiset enimmäismäärät (v16)
+      g.globalAlpha = 1;
       for (const [d, x, y, vari] of ehdokkaat) {
-        if (nimetty >= 40) break;
-        const muu = tarkeys(d) === 2;
-        if (muu && (this.z < 11 || muita >= 10)) continue;   // muut käyrät: enintään 10 numeroa
-        const koko = muu ? 150 : 70, ruutu = Math.floor(x / koko) + ',' + Math.floor(y / (muu ? 80 : 34)) + (muu ? 'm' : '');
-        if (varattu.has(ruutu) || (muu && varattu.has(Math.floor(x / 70) + ',' + Math.floor(y / 34)))) continue;
-        varattu.add(ruutu); varattu.add(Math.floor(x / 70) + ',' + Math.floor(y / 34)); nimetty++; if (muu) muita++;
-        const txt = String(d).replace('.', ',');
-        g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,0.8)'; g.strokeText(txt, x + 2, y - 2);
-        g.fillStyle = vari; g.fillText(txt, x + 2, y - 2);
+        const muu = d !== 20 && d !== 6;
+        if (muu && this.z < 11) continue;
+        this._nimi(String(d).replace('.', ','), [[x + 2, y - 2]], vari, d === 20 ? 5 : d === 6 ? 5.5 : 6,
+          { font: 'bold 11px sans-serif', reuna: 'rgba(0,0,0,0.8)', ryhma: 'syv' + (muu ? 'muu' : d), max: d === 20 ? 14 : d === 6 ? 10 : 8 });
       }
       g.restore();
     }
@@ -721,20 +759,18 @@
         g.strokeStyle = katko ? 'rgba(255,255,255,0.8)' : lampoVari(taso, min, max);
         g.lineWidth = paa ? 2.6 : 1.3;
         g.beginPath();
-        let nimiKohta = null;
+        const kohdat = [];   // nimen paikkaehdokkaat käyrällä, vähintään 110 px välein
         for (const [la1, lo1, la2, lo2] of janat) {
           const [x1, y1] = this.ruutu(la1, lo1), [x2, y2] = this.ruutu(la2, lo2);
           g.moveTo(x1, y1); g.lineTo(x2, y2);
-          if (paa && !nimiKohta && x1 > 30 && x1 < this.w - 30 && y1 > 30 && y1 < this.h - 60) nimiKohta = [x1, y1];
+          if (paa && kohdat.length < 12 && x1 > 10 && x1 < this.w - 40 && y1 > this.ylaVara + 16 && y1 < this.h - this.alaVara - 8 &&
+              kohdat.every(([a, b]) => Math.hypot(a - x1 - 3, b - y1 + 3) > 110)) kohdat.push([x1 + 3, y1 - 3]);
         }
         g.stroke();
-        if (nimiKohta) {
-          const txt = taso.toFixed(1).replace('.', ',');
-          g.setLineDash([]); g.font = 'bold 13px sans-serif';
-          g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,0.8)'; g.strokeText(txt, nimiKohta[0] + 3, nimiKohta[1] - 3);
-          g.fillStyle = katko ? '#fff' : lampoVari(taso, min, max); g.fillText(txt, nimiKohta[0] + 3, nimiKohta[1] - 3);
-          g.setLineDash(katko ? [6, 4] : []);
-        }
+        const kx = this.w / 2, ky = (this.ylaVara + this.h - this.alaVara) / 2;   // keskeltä alkaen: reunoilla nimet jäävät selitteen ja ohjainten alle
+        kohdat.sort((a, b) => Math.hypot(a[0] - kx, a[1] - ky) - Math.hypot(b[0] - kx, b[1] - ky));
+        if (kohdat.length) this._nimi(taso.toFixed(1).replace('.', ','), kohdat, katko ? '#fff' : lampoVari(taso, min, max), katko ? 3.5 : 3,
+          { font: 'bold 13px sans-serif', reuna: 'rgba(0,0,0,0.8)' });
       }
       g.restore();
       this._lampoVali = katko ? this._lampoVali : [min, max];
@@ -771,10 +807,7 @@
       const g = this.ctx, yla = this.ylaVara + 4, ala = this.h - this.alaVara - 4;
       const kmPx = lat => Math.abs(this.ruutu(lat + 1 / KM_LAT, this.lon)[1] - this.ruutu(lat, this.lon)[1]);
       g.save(); g.font = 'bold 12px sans-serif'; g.textAlign = 'center'; g.lineJoin = 'round'; g.lineCap = 'round';
-      const teksti = (t, x, y, c) => {
-        g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,0.85)'; g.strokeText(t, x, y);
-        g.fillStyle = 'rgb(' + c + ')'; g.fillText(t, x, y);
-      };
+      const teksti = (t, x, y, c, prio = 2, paikat = null) => this._nimi(t, paikat || [[x, y]], 'rgb(' + c + ')', prio, { tasaus: g.textAlign });
       const nakyy = (x, y, m) => x > -m && x < this.w + m && y > yla - m && y < ala + m;
       const saaliit = [];
       for (const h of this.havainnot) {
@@ -802,13 +835,10 @@
             g.setLineDash(heikko ? [3, 6] : [10, 6]); polku(o.p); g.stroke(); g.setLineDash([]);
           }
           g.lineCap = 'round';
-          // nimi keskiviivalle lähimpään näkyvään kohtaan ruudun keskeltä
-          let paras = null;
-          for (const [x, y] of P) if (nakyy(x, y, -20)) { const d = Math.hypot(x - this.w / 2, y - (yla + ala) / 2); if (!paras || d < paras.d) paras = { x, y, d }; }
-          if (paras) {
-            const lx = Math.min(Math.max(paras.x, g.measureText(h.nimi).width / 2 + 6), this.w - g.measureText(h.nimi).width / 2 - 60);
-            teksti(h.nimi, lx, paras.y - 8, c);
-          }
+          // nimi keskiviivalle: ehdokkaat näkyvistä pisteistä, lähimpänä ruudun keskeä ensin
+          const ehd = P.filter(([x, y]) => nakyy(x, y, -20)).sort((a, b) => Math.hypot(a[0] - this.w / 2, a[1] - (yla + ala) / 2) - Math.hypot(b[0] - this.w / 2, b[1] - (yla + ala) / 2));
+          const lev2 = g.measureText(h.nimi).width / 2 + 6;
+          if (ehd.length) { g.textAlign = 'center'; teksti(h.nimi, 0, 0, c, 2, ehd.map(([x, y]) => [Math.min(Math.max(x, lev2), this.w - lev2 - 60), y - 8])); }
         } else if (h.tyyppi === 'alue') {
           const piirraEllipsi = (la, lo, tayta, katko) => {
             const [x0, y0] = this.ruutu(la[1], lo[0]), [x1, y1] = this.ruutu(la[0], lo[1]);
@@ -821,7 +851,7 @@
           };
           if (h.reuna) piirraEllipsi(h.reuna.lat, h.reuna.lon, false, [3, 5]);
           const k = piirraEllipsi(h.lat, h.lon, true, [8, 5]);
-          if (k) { teksti(h.nimi, k[0], k[1] - 2, c); if (h.lyhyt) teksti(h.lyhyt, k[0], k[1] + 13, c); }
+          if (k) { g.textAlign = 'center'; this._nimi(h.lyhyt ? [h.nimi, h.lyhyt] : h.nimi, [[k[0], k[1] - 2], [k[0], k[1] - 30], [k[0], k[1] + 26]], 'rgb(' + c + ')', 2, { tasaus: 'center' }); }
         } else if (h.tyyppi === 'kaista') {
           const [x0, y0] = this.ruutu(h.lat[1], h.lon[0]), [x1, y1] = this.ruutu(h.lat[0], h.lon[1]);
           if (x1 < 0 || x0 > this.w || y1 < yla || y0 > ala) continue;
@@ -829,7 +859,7 @@
           g.strokeStyle = 'rgba(' + c + ',0.95)'; g.lineWidth = 2; g.setLineDash([8, 5]);
           g.beginPath(); g.moveTo(x0, y0); g.lineTo(x0, y1); g.moveTo(x1, y0); g.lineTo(x1, y1); g.stroke(); g.setLineDash([]);
           const ty = Math.min(Math.max(y0 + 16, yla + 14), y1 - 6);
-          teksti(h.nimi, (x0 + x1) / 2, ty, c);
+          g.textAlign = 'center'; teksti(h.nimi, (x0 + x1) / 2, ty, c);
         } else if (h.tyyppi === 'saalis') {
           saaliit.push(h);   // saaliit päällimmäisiksi
         } else {
@@ -837,7 +867,8 @@
           if (!nakyy(x, y, 60)) continue;
           g.fillStyle = 'rgb(' + c + ')'; g.strokeStyle = '#000'; g.lineWidth = 1.5;
           g.beginPath(); g.moveTo(x, y - 9); g.lineTo(x + 8, y); g.lineTo(x, y + 9); g.lineTo(x - 8, y); g.closePath(); g.fill(); g.stroke();
-          g.textAlign = 'left'; teksti(h.nimi, x + 11, y + 4, c); g.textAlign = 'center';
+          this._varaa(x - 9, y - 10, 18, 20);
+          g.textAlign = 'left'; teksti(h.nimi, x + 12, y + 4, c); g.textAlign = 'center';
         }
       }
       g.textAlign = 'left';
@@ -847,7 +878,8 @@
         g.fillStyle = 'rgb(' + havaintoVari('saalis') + ')'; g.strokeStyle = '#fff'; g.lineWidth = 2;
         g.beginPath(); g.arc(x, y, 6, 0, Math.PI * 2); g.fill(); g.stroke();
         g.fillStyle = '#fff'; g.beginPath(); g.arc(x, y, 1.8, 0, Math.PI * 2); g.fill();
-        teksti(h.nimi, x + 10, y + 4, '255,170,185');
+        this._varaa(x - 8, y - 8, 16, 16);
+        this._nimi(h.nimi, [[x + 11, y + 4], [x + 11, y - 10], [x + 11, y + 18]], 'rgb(255,170,185)', 0);
       }
       g.restore();
     }
@@ -864,8 +896,8 @@
         else if (m.muoto === 'nelio') g.rect(x - 6, y - 6, 12, 12);
         else g.arc(x, y, 6, 0, Math.PI * 2);
         g.fill(); g.stroke();
-        g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,0.85)'; g.strokeText(m.nimi, x + 9, y + 4);
-        g.fillStyle = '#fff'; g.fillText(m.nimi, x + 9, y + 4);
+        this._varaa(x - 8, y - 9, 16, 17);
+        this._nimi(m.nimi, [[x + 11, y + 4], [x + 11, y - 10], [x + 11, y + 18]], '#fff', 0, { font: 'bold 13px sans-serif' });
       }
       if (this.oma) {
         const [x, y] = this.ruutu(this.oma.lat, this.oma.lon);
