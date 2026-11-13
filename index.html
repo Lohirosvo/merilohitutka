@@ -61,6 +61,11 @@
   .alapalkki .kmh { font-size:40px; font-weight:800; color:#7ee08a; font-family:ui-monospace, monospace; }
   .alapalkki .yks { font-size:16px; color:var(--himmea); }
   .alapalkki .suunta { font-size:28px; font-weight:700; }
+  .alapalkki .vesi { font-size:24px; font-weight:800; color:#78ebff; font-family:ui-monospace, monospace; white-space:nowrap;
+                     display:inline-flex; flex-direction:column; line-height:1.05; }
+  .alapalkki .vesi small { font-size:12px; font-weight:400; color:var(--himmea); font-family:inherit; }   /* virta toisella rivillä */
+  .alapalkki .lisa { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .alapalkki .vesi:not([hidden]) ~ .lisa .pitka { display:none; }   /* vesinopeuden kanssa lyhyt: "±6 m · ☀" */
   .alapalkki .lisa { font-size:14px; color:var(--himmea); margin-left:auto; text-align:right; }
   nav { position:fixed; left:0; right:0; bottom:0; height:64px; display:flex; background:#08121e; border-top:1px solid var(--reuna); }
   nav button { flex:1; border:0; border-radius:0; background:transparent; color:var(--himmea); font-size:15px; letter-spacing:2px; padding:6px 0; }
@@ -73,6 +78,7 @@
   body.kartalla .alapalkki { bottom:0; padding:2px 12px; }
   body.kartalla .alapalkki .kmh { font-size:30px; }
   body.kartalla .alapalkki .suunta { font-size:22px; }
+  body.kartalla .alapalkki .vesi { font-size:22px; }
   .kartta-alue { position:fixed; left:0; right:0; top:0; bottom:50px; background:#0d2236; z-index:5; }
   #karttaCanvas { position:absolute; left:0; top:0; width:100%; height:100%; display:block; }
   .kartta-ohjaimet { position:absolute; top:0; left:0; right:0; background:rgba(11,23,38,0.84); border-bottom:1px solid var(--reuna); }
@@ -213,6 +219,7 @@
     <div class="kortti">
       <button class="sininen" id="paivita">Päivitä nyt</button>
       <span class="pieni" id="paivitetty"></span>
+      <div class="pieni" id="hakuvirheet"></div>
     </div>
   </section>
 
@@ -263,6 +270,7 @@
 
 <div class="alapalkki">
   <span class="kmh" id="kmh">–</span><span class="yks">km/h</span>
+  <span class="vesi" id="vesiKmh" hidden></span>
   <span class="suunta" id="suunta"></span>
   <span class="lisa" id="gpsLisa">GPS odotetaan</span>
 </div>
@@ -272,12 +280,12 @@
   <button data-v="v-raportit">⋯<br>RAPORTIT</button>
 </nav>
 
-<script src="alueet.js?v=15"></script>
+<script src="alueet.js?v=17"></script>
 <script src="havainnot.js?v=15"></script>
 <script src="malli.js?v=13"></script>
 <script src="fmi.js?v=13"></script>
-<script src="nopeus.js?v=13"></script>
-<script src="kartta.js?v=17"></script>
+<script src="nopeus.js?v=18"></script>
+<script src="kartta.js?v=18"></script>
 <script>
 'use strict';
 // ---------- Apufunktiot ----------
@@ -451,8 +459,8 @@ function piirraGps() {
   const osat = [];
   if (sijaintiTarkkuus != null) osat.push('±' + Math.round(sijaintiTarkkuus) + ' m');
   else osat.push(sijainti ? 'GPS tallennettu' : 'GPS odotetaan');
-  if (wakeLock) osat.push('☀ näyttö päällä');
-  $('gpsLisa').textContent = osat.join(' · ');
+  if (wakeLock) osat.push('☀<span class="pitka"> näyttö päällä</span>');
+  $('gpsLisa').innerHTML = osat.join(' · ');
 }
 function piirraNopeus() {
   const nyt = Date.now();
@@ -460,6 +468,7 @@ function piirraNopeus() {
   $('kmh').textContent = luku(kmh);
   const s = Nopeus.suunta(gpsPisteet);
   $('suunta').textContent = isFinite(s) ? Math.round(s) + '°' : '';
+  piirraVesiNopeus(kmh, s, nyt);
   const el = $('halytystila');
   $('kmh').style.color = '';
   if (!uistelu) { el.className = 'halytystila'; el.textContent = 'Aloita uistelu, niin hälytys on päällä.'; return; }
@@ -470,6 +479,35 @@ function piirraNopeus() {
   $('kmh').style.color = r.luokka === 'hidas' ? '#f2b33d' : r.luokka === 'nopea' ? '#f05aa0' : '';
   el.textContent = tekstit[r.luokka] + ` (${luku(asetukset.nopeusMin)}–${luku(asetukset.nopeusMax)} km/h)`;
   if (r.puhu) puhu(r.puhu);
+}
+
+// ---------- Nopeus veden suhteen (v18) ----------
+// Tämän päivän meridata (Copernicuksen pintavirta, ylin taso 0,5 m) sijainnissa; aikojen väliltä lineaarisesti.
+let nykyData = null;
+async function lataaNykyPaiva() {
+  const al = valittuAlue;
+  const n = meri && meri.paivat ? await haePaiva(tamaPaiva()) : null;
+  if (al === valittuAlue) nykyData = n;
+}
+function virtaNyt(lat, lon, ms) {
+  const p = nykyData && nykyData.phy; if (!p || !p.ajat || !p.ajat.length) return null;
+  const t = p.ajat.map(a => Date.parse(a));
+  let i = 0; while (i + 1 < t.length && t[i + 1] <= ms) i++;
+  const j = Math.min(i + 1, t.length - 1), w = j > i && ms > t[i] ? Math.min(1, (ms - t[i]) / (t[j] - t[i])) : 0;
+  const arvo = (k, ti) => KarttaMalli.lahinArvo(p, k, ti, lat, lon);
+  const u = arvo('u', i) * (1 - w) + arvo('u', j) * w, v = arvo('v', i) * (1 - w) + arvo('v', j) * w;
+  return isFinite(u) && isFinite(v) ? { u, v } : null;
+}
+function piirraVesiNopeus(kmh, suuntaAst, nyt) {
+  const el = $('vesiKmh');
+  const vi = sijainti ? virtaNyt(sijainti.lat, sijainti.lon, nyt) : null;
+  if (!vi) { el.hidden = true; return; }
+  const r = Nopeus.vedenSuhteen(kmh, suuntaAst, vi.u, vi.v);
+  el.hidden = false;
+  const vast = isFinite(r.vastaan) && Math.abs(r.vastaan) >= 0.05
+    ? ` <small>virta ${r.vastaan > 0 ? 'vastaan' : 'myötä'} ${luku(Math.abs(r.vastaan))}</small>` : '';
+  el.innerHTML = isFinite(r.kmh) ? `vesi ${luku(r.kmh)}${vast}` : `vesi – <small>virta ${luku(r.virtaKmh)} km/h</small>`;
+  el.title = 'Nopeus veden suhteen = GPS-nopeus miinus Copernicuksen pintavirta (malli, ylin taso 0,5 m)';
 }
 
 function kaynnistaGps() {
@@ -614,6 +652,7 @@ async function haeKaikki() {
   await lataaMeri();
   tallennaLS('mlt_data', { aika: nyt, alue: al.tunnus, havainnot: havaintoData, ennuste: ennusteData });
   $('paivitetty').textContent = ' päivitetty klo ' + klo(nyt) + (virheet.length ? ' (osa hauista epäonnistui)' : '');
+  $('hakuvirheet').textContent = virheet.length ? 'Epäonnistui: ' + virheet.join(' · ') : '';   // mikä haku, ettei tarvitse arvata
   piirra();
 }
 function palautaVanhaData() {
@@ -672,6 +711,7 @@ async function lataaMeri() {
   if (uusi) meri = uusi;
   piirraMeriTila();
   lataaSyvyys();
+  lataaNykyPaiva();
   if (muuttui) {
     if (meri.paivat) { siivoaVarasto(new Set(meri.paivat.map(p => paivaUrl(p))), dataPolku(al)); esilataa(); }
     if (kartta) {   // pysytään samassa hetkessä, jos se on uudessa datassa
@@ -920,7 +960,7 @@ function naytaPiste(lat, lon) {
   const S = KarttaMalli.lahinArvo(n.sst, 'lampo', 0, lat, lon);
   if (isFinite(S)) osat.push('satelliitti ' + luku(S, 2) + ' °C (' + pvm(new Date(n.sst.ajat[0])) + ')');
   const u = KarttaMalli.lahinArvo(n.phy, 'u', t, lat, lon), v = KarttaMalli.lahinArvo(n.phy, 'v', t, lat, lon);
-  if (isFinite(u) && isFinite(v)) { const vi = KarttaMalli.virta(u, v); osat.push(`virta ${luku(vi.nopeus, 2)} m/s kohti ${Math.round(vi.suunta)}°`); }
+  if (isFinite(u) && isFinite(v)) { const vi = KarttaMalli.virta(u, v); osat.push(`virta ${luku(vi.nopeus * 3.6)} km/h (${luku(vi.nopeus, 2)} m/s) kohti ${Math.round(vi.suunta)}°`); }
   if (n.wav) {
     const tw = KarttaMalli.lahinAika(n.wav.ajat, Date.parse(karttaAjat()[t]));
     const h = KarttaMalli.lahinArvo(n.wav, 'hs', tw, lat, lon);
@@ -1027,7 +1067,7 @@ async function vaihdaAlue(tunnus, kasin) {
   if (al === valittuAlue) return;
   tallennaKarttaTila();
   valittuAlue = al; tallennaLS('mlt_alue', al.tunnus);
-  meri = null; syvyys = null; vaylat = null; nakyma = null; valittuPvm = null;
+  meri = null; syvyys = null; vaylat = null; nakyma = null; valittuPvm = null; nykyData = null;
   latausNro++; paivaLatautuu = false;   // edellisen alueen kesken jäänyt päivä ei enää näy
   if (kartta) {
     const nk = alueenNakyma(al);
@@ -1041,7 +1081,7 @@ async function vaihdaAlue(tunnus, kasin) {
   if (aktiivinenAlue().tunnus !== haettuAlue) paivita(); else piirra();
   const m = await haeVarastosta(dataPolku(al) + 'meri.json');
   if (al !== valittuAlue) return;
-  if (m && !meri) { meri = m; piirraMeriTila(); lataaSyvyys(); if (kartta) valitsePaiva(tamaPaiva(), null); }
+  if (m && !meri) { meri = m; piirraMeriTila(); lataaSyvyys(); lataaNykyPaiva(); if (kartta) valitsePaiva(tamaPaiva(), null); }
   await lataaMeri();   // hakee myös syvyyskäyrät ja väylät
   if (al === valittuAlue && kartta && !meri) { $('karttaAika').innerHTML = `${al.nimi}<small>ei meridataa vielä (ⓘ)</small>`; kartta.piirra(); }
 }
@@ -1105,7 +1145,7 @@ piirra(); piirraUistelu(); piirraGps();
 if (uistelu) pidaNaytto();
 kaynnistaGps();
 { const al = valittuAlue;
-  haeVarastosta(dataPolku(al) + 'meri.json').then(m => { if (m && !meri && al === valittuAlue) { meri = m; piirraMeriTila(); if (kartta) valitsePaiva(valittuPvm, null); } }); }
+  haeVarastosta(dataPolku(al) + 'meri.json').then(m => { if (m && !meri && al === valittuAlue) { meri = m; piirraMeriTila(); lataaNykyPaiva(); if (kartta) valitsePaiva(valittuPvm, null); } }); }
 lataaSyvyys();
 paivita();
 setInterval(paivita, 10 * 60000);           // uusi data 10 min välein

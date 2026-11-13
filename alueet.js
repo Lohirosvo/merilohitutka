@@ -1,4 +1,4 @@
-/* Merilohitutka – alueet.js (v15)
+/* Merilohitutka – alueet.js (v17)
  * Kalastusalueet. Yksi lähde: sovellus lataa tämän skriptinä ja hae_copernicus.py lukee saman tiedoston.
  * Hakasulkeiden [ ] välissä on oltava puhdasta JSONia (ei kommentteja, ei pilkkua viimeisen alkion jälkeen).
  *
@@ -13,6 +13,8 @@
  * Sälgrund 62°20,1' 21°11,6' (visitkaskinen.fi), Norrskär 63,2367 20,6108 (marinelink).
  * Märket 60,3010 19,1314, Gisslan 60,1889 19,4504 (v15: merkki havainnot.js:ssä), Eckerö Berghamn 60,225 19,537 (Wikipedia);
  * Jomala Jomalaby = Maarianhaminan lentoasema, koordinaatti muistista (ei tarkistettu, haku etsii lähimmän aseman).
+ * Kaskinen (v17): Sälgrundin asema poistettu – Windfinderin mukaan asema ei enää raportoi (havainnot 3/2017–9/2024),
+ * mikä on todennäköinen syy Hannun ilmoitukseen 13.11. "osa hauista epäonnistui" (virheilmoitusta ei nähty). Sälgrund jää kartalle maamerkiksi.
  * Pori (v15): rajat Hannun listasta 12.11.2026. Tahkoluoto 61,644 21,337 (windy.app, likimääräinen; IL:n asema
  * "Pori Tahkoluoto Harbour" mittaa tuulta, tide-forecast.com). Rauma Kylmäpihlaja muistista (ei tarkistettu).
  * Uusien alueiden rajat on arvioitu Hannun karttakuvista 10.11.2026.
@@ -57,7 +59,7 @@
     "tunnus": "kaskinen", "nimi": "Kaskinen–Kristiinankaupunki", "lyhyt": "Kaskinen–Kristiinank.", "polku": "kaskinen/",
     "rajat": { "lat_min": 62.12, "lat_max": 62.65, "lon_min": 20.85, "lon_max": 21.65 },
     "keski": [62.36, 21.25], "zoom": 10.3, "paluuikkuna": false,
-    "asemat": ["Kristiinankaupunki Majakka@62.203,21.173", "Kaskinen Sälgrund@62.335,21.193"],
+    "asemat": ["Kristiinankaupunki Majakka@62.203,21.173"],
     "merkit": [
       { "nimi": "Sälgrund", "lat": 62.335, "lon": 21.193, "vari": "#ffffff" },
       { "nimi": "Kristiinankaupunki majakka", "lat": 62.203, "lon": 21.173, "vari": "#ffffff" }

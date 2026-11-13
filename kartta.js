@@ -976,7 +976,7 @@
         ['kylmä', '#e9f1f7', 'rgb(' + havaintoVari('kylma') + ')'], ['saalis', '#e9f1f7', 'rgb(' + havaintoVari('saalis') + ')']]);
       if (this.tasot.lampo && d.phy) rivit.push([['Lämpö (malli) ' + f(this.askel) + ' °C välein', '#ffb24a']]);
       if (this.tasot.sst && d.sst) rivit.push([['Satelliitti: katkoviiva', '#ffffff']]);
-      if (this.tasot.virta && d.phy) rivit.push([['Virta: nuoli ≈ 0,25 m/s', '#78ebff']]);
+      if (this.tasot.virta && d.phy) rivit.push([['Virta: nuoli ≈ 0,9 km/h (0,25 m/s)', '#78ebff']]);
       if (this.tasot.aaltoraja && d.wav) {
         const f2 = x => x.toFixed(2).replace(/0$/, '').replace('.', ',');
         rivit.push([['Merkitsevä aalto', '#e9f1f7'], ['≥' + f2(this.aaltoRajat[0]) + ' m pisteet', '#e9f1f7', '#ffd54a'], ['≥' + f2(this.aaltoRajat[1]) + ' m viivat', '#e9f1f7', '#ff3c3c']]);

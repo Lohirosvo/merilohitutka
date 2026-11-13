@@ -82,7 +82,25 @@
     return { tila: t, luokka, puhu };
   }
 
-  const Nopeus = { OLETUKSET, tasattuNopeus, suunta, halytys, etaisyysM };
+  /**
+   * Nopeus veden suhteen (v18, Hannu 13.11.): maanopeusvektori (GPS: km/h ja kulkusuunta astetta) miinus pintavirta
+   * (Copernicus u = itään, v = pohjoiseen, m/s). Palauttaa { kmh, vastaan, virtaKmh }:
+   *   kmh = nopeus veden suhteen (km/h), vastaan = virran komponentti kulkusuuntaa vastaan (km/h, + = vastavirta,
+   *   – = myötävirta), virtaKmh = virran nopeus (km/h). Alle 0,5 km/h kulkusuunta ei ole luotettava -> kmh NaN.
+   */
+  function vedenSuhteen(kmh, suuntaAst, u, v) {
+    const tulos = { kmh: NaN, vastaan: NaN, virtaKmh: NaN };
+    if (!isFinite(u) || !isFinite(v)) return tulos;
+    tulos.virtaKmh = Math.hypot(u, v) * 3.6;
+    if (!isFinite(kmh) || !isFinite(suuntaAst) || kmh < 0.5) return tulos;
+    const k = suuntaAst * Math.PI / 180, ms = kmh / 3.6;
+    const vx = ms * Math.sin(k) - u, vy = ms * Math.cos(k) - v;
+    tulos.kmh = Math.hypot(vx, vy) * 3.6;
+    tulos.vastaan = -(u * Math.sin(k) + v * Math.cos(k)) * 3.6;
+    return tulos;
+  }
+
+  const Nopeus = { OLETUKSET, tasattuNopeus, suunta, halytys, etaisyysM, vedenSuhteen };
   if (typeof module !== 'undefined' && module.exports) module.exports = Nopeus;
   else root.Nopeus = Nopeus;
 })(typeof window !== 'undefined' ? window : this);
