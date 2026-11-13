@@ -398,6 +398,7 @@ function jalkiTeksti(lat, lon) {
   const q = jalki[l.i], a = kartta.ruutu(q[1] / 1e5, q[2] / 1e5), b = kartta.ruutu(lat, lon);
   if (Math.hypot(a[0] - b[0], a[1] - b[1]) > 24) return '';
   const ms = q[0] * 1000, tanaan = new Date(ms).toDateString() === new Date().toDateString();
+  if (Date.now() - ms < 120000) return '';   // alle 2 min vanha piste = oma nykyinen paikka, ei tietoa
   return `oma jälki ${tanaan ? '' : 'eilen '}klo ${klo(new Date(ms))} (${min((Date.now() - ms) / 60000)} sitten), ${Math.round(l.m)} m`;
 }
 let havaintoData = [], ennusteData = [], ennusteLahde = '', virheet = [];   // alueelle dataAlue
