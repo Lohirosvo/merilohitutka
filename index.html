@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b1726">
 <title>Merilohitutka</title>
+<!-- v26 (Hannu 14.11.2026 "Tehdään"): service worker sw.js, sovellus käynnistyy ilman verkkoa -->
 <!-- v25 (Hannu 14.11.2026): kuvake ja aloitusnäyttö (manifest, oma ikkuna ilman osoiteriviä) -->
 <link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/png" sizes="48x48" href="favicon-48.png">
@@ -241,6 +242,18 @@
     <div class="kortti">
       <h2>Reissut</h2>
       <div id="reissut" class="pieni">Ei vielä reissuja.</div>
+    </div>
+    <div class="kortti">
+      <h2>Merelle ilman verkkoa</h2>
+      <div class="pieni" id="offlineTila">Tarkistetaan…</div>
+      <details>
+        <summary>Mitä puhelimeen tallentuu</summary>
+        <p class="pieni">Sovellus tallentuu, kun se avataan verkossa (myös aloitusnäytön kuvakkeesta). Meridata (tänään ja
+          huomenna), syvyyskäyrät ja väylät tallentuvat kartalla valitulta alueelta. Tuuliennuste on viimeisimmästä onnistuneesta
+          päivityksestä. Ilman verkkoa toimivat GPS, nopeudet, jälki, kartta ja paluuikkuna tallennetulla ennusteella. Eivät
+          päivity: sää ja havainnot, AIS. Tarkista ennen lähtöä, että rivillä on ✓. Heikossa kentässä sovellus avautuu
+          tallennetusta 4 sekunnin jälkeen ja päivittyy seuraavalla käynnistyksellä.</p>
+      </details>
     </div>
     <div class="kortti">
       <details>
@@ -737,6 +750,7 @@ async function haeKaikki() {
   }
   await lataaMeri();
   tallennaLS('mlt_data', { aika: nyt, alue: al.tunnus, havainnot: havaintoData, ennuste: ennusteData });
+  paivitaOfflineTila();   // v26
   $('paivitetty').textContent = ' päivitetty klo ' + klo(nyt) + (virheet.length ? ' (osa hauista epäonnistui)' : '');
   $('hakuvirheet').textContent = virheet.length ? 'Epäonnistui: ' + virheet.join(' · ') : '';   // mikä haku, ettei tarvitse arvata
   piirra();
@@ -826,6 +840,7 @@ async function lataaSyvyys() {
   const [js, jv] = await Promise.all([lataaKiintea('syvyys.json', meri && meri.syvyys && meri.syvyys.luotu, al),
                                       lataaKiintea('vaylat.json', meri && meri.vaylat && meri.vaylat.luotu, al)]);
   if (al !== valittuAlue) return;
+  paivitaOfflineTila();   // v26
   let muuttui = false;
   if (js && (!syvyys || syvyys.luotu !== js.luotu)) {
     syvyys = KarttaMalli.puraSyvyys(js); muuttui = true;
@@ -883,7 +898,7 @@ async function haePaiva(pv) {
 function esilataa() {   // tänään ja huomenna valmiiksi puhelimeen (merellä ei välttämättä verkkoa)
   if (!meri || !meri.paivat) return;
   const i = Math.max(0, meri.paivat.findIndex(p => p.pvm >= tamaPaiva()));
-  meri.paivat.slice(i, i + 2).forEach(p => haePaiva(p.pvm));
+  Promise.all(meri.paivat.slice(i, i + 2).map(p => haePaiva(p.pvm))).then(paivitaOfflineTila);   // v26
 }
 function piirraMeriTila() {
   const el = $('dataTila');
@@ -903,6 +918,7 @@ function piirraMeriTila() {
   if (vaylat) osat.push(`Väylät: Väylävirasto, vesiväyläaineisto (CC BY 4.0). Ei navigointikäyttöön`);
   if (typeof aisTila === 'function' && aisTila()) osat.push(aisTila());
   if (meri.virheet && meri.virheet.length) osat.push('virheet: ' + meri.virheet.join(' | '));
+  if (offlineTeksti) osat.push(offlineTeksti);   // v26
   osat.push('Todisteen taso: malli (lämpö, lohikerros, virta, aalto), satelliitti (SST), sääennuste (tuuli). Ennusteen tarkkuus heikkenee loppua kohti. E.U. Copernicus Marine Service Information.');
   el.textContent = osat.join(' · ');
 }
@@ -1396,6 +1412,48 @@ function lueKlooni(teksti) {
   return `Luettu ${avaimet.length} kohdetta. Sivu latautuu uudelleen.`;
 }
 
+// ---------- Ilman verkkoa: service worker (v26, Hannu 14.11.2026: "Tehdään") ----------
+// sw.js tallentaa sivun, skriptit ja kuvakkeet; meridata on sivun omassa välimuistissa (VARASTO).
+function swKaytossa() { try { return ('serviceWorker' in navigator) && !!navigator.serviceWorker; } catch (e) { return false; } }
+let swTila = null, offlineTeksti = '';
+async function paivitaOfflineTila() {
+  const osat = [];
+  if (!swKaytossa()) osat.push('sovellus ✗ (selain ei tue)');
+  else if (!swTila) osat.push('sovellus: tarkistetaan…');
+  else if (swTila.virhe) osat.push('sovellus ✗ (' + swTila.virhe + ')');
+  else osat.push(swTila.ok ? 'sovellus ✓' : 'sovellus ✗ puuttuu ' + swTila.puuttuu.join(', '));
+  try {
+    const c = await caches.open(VARASTO), on = async u => !!(await c.match(u)), pol = dataPolku();
+    if (!meri) osat.push(valittuAlue.nimi + ': meridata ✗');
+    else {
+      const paivat = [];
+      if (meri.paivat) {
+        const i = Math.max(0, meri.paivat.findIndex(p => p.pvm >= tamaPaiva()));
+        for (const p of meri.paivat.slice(i, i + 2)) paivat.push(pvmTeksti(p.pvm).toLowerCase() + ((await on(paivaUrl(p))) ? ' ✓' : ' ✗'));
+      }
+      osat.push(valittuAlue.nimi + ': meridata ' + ((await on(pol + 'meri.json')) ? '✓' : '✗') + (paivat.length ? ' (' + paivat.join(', ') + ')' : ''));
+      if (meri.syvyys) osat.push('syvyyskäyrät ' + ((await on(pol + 'syvyys.json')) ? '✓' : '✗'));
+      if (meri.vaylat) osat.push('väylät ' + ((await on(pol + 'vaylat.json')) ? '✓' : '✗'));
+    }
+  } catch (e) { osat.push('meridata: välimuisti ei käytettävissä'); }
+  // Ennusteen loppuhetki eikä tallennushetki: tallennus tapahtuu myös, kun haku epäonnistui.
+  const loppu = (ennusteData || []).reduce((m, r) => r.t > m ? r.t : m, null);
+  osat.push(loppu && loppu > new Date() ? 'tuuliennuste ✓ (' + pvm(loppu) + ' klo ' + klo(loppu) + ' asti)' : 'tuuliennuste ✗');
+  offlineTeksti = 'Ilman verkkoa: ' + osat.join(' · ');
+  $('offlineTila').textContent = offlineTeksti;
+  piirraMeriTila();
+}
+function rekisteroiSw() {
+  if (!swKaytossa()) { paivitaOfflineTila(); return; }
+  navigator.serviceWorker.addEventListener('message', ev => {
+    if (ev.data && ev.data.tyyppi === 'swTila') { swTila = ev.data; paivitaOfflineTila(); }
+  });
+  navigator.serviceWorker.register('sw.js')
+    .then(() => navigator.serviceWorker.ready)
+    .then(reg => { if (reg.active) reg.active.postMessage({ tyyppi: 'varmista' }); })
+    .catch(e => { swTila = { virhe: String((e && e.message) || e).slice(0, 80) }; paivitaOfflineTila(); });
+}
+
 // ---------- Käynnistys ----------
 $('paivita').addEventListener('click', paivita);
 $('saalisTallenna').addEventListener('click', () => {
@@ -1433,6 +1491,7 @@ paivita();
 setInterval(paivita, 10 * 60000);           // uusi data 10 min välein
 setInterval(() => { piirra(); }, 30000);    // tila päivittyy ajan kuluessa
 setInterval(piirraNopeus, 1000);            // nopeus ja hälytys sekunnin välein
+if (document.readyState === 'complete') rekisteroiSw(); else window.addEventListener('load', rekisteroiSw);   // v26
 </script>
 </body>
 </html>
