@@ -394,15 +394,22 @@ def hae_alue(alue, perus, nyt, luotu):
         alku = time.monotonic()
         a = tulokset["phy"]["ajat"]
         pisteet = alue.get("tuulipisteet")
-        if not pisteet:   # mallin meriruuduista (aallot, muuten pintalämpö)
+        if not pisteet or alue.get("tuulipisteetLisaa"):   # mallin meriruuduista (aallot, muuten pintalämpö)
             w = tulokset.get("wav")
             if w is not None:
                 meri = np.isfinite(np.asarray(w["hs"])[0])
-                pisteet = hae_tuuli.meripisteet(w["lat"], w["lon"], meri)
+                auto = hae_tuuli.meripisteet(w["lat"], w["lon"], meri)
             else:
                 p = tulokset["phy"]
-                pisteet = hae_tuuli.meripisteet(p["lat"], p["lon"], np.isfinite(np.asarray(p["thetao"])[0, 0]))
-            print(f"tuuli: pisteet mallin meriruuduista ({len(pisteet)} kpl)")
+                auto = hae_tuuli.meripisteet(p["lat"], p["lon"], np.isfinite(np.asarray(p["thetao"])[0, 0]))
+            if not pisteet:
+                pisteet = auto
+                print(f"tuuli: pisteet mallin meriruuduista ({len(pisteet)} kpl)")
+            else:   # v22: kiinteät + meriruuduista ne, jotka ovat yli 10 km:n päässä kiinteistä (laajennettu alue)
+                kiinteat = len(pisteet)
+                pisteet = hae_tuuli.taydenna(pisteet, auto)
+                print(f"tuuli: {kiinteat} kiinteää pistettä + {len(pisteet) - kiinteat} mallin meriruuduista: "
+                      + ", ".join(f"{la:.3f} {lo:.3f}" for la, lo in pisteet[kiinteat:]))
         tuuli, tvirhe = hae_tuuli.hae(iso(np.datetime64(a[0])), iso(np.datetime64(a[-1])), pisteet=pisteet)
         if tvirhe:
             virheet.append(f"tuuli: {tvirhe}")

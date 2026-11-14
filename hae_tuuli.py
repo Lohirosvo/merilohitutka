@@ -7,6 +7,7 @@ Lähde: Ilmatieteen laitos, avoin data (CC BY 4.0). Sama kysely kuin sovelluksen
 joten puuskaparametri HourlyMaximumGust on todettu toimivaksi 9.11.2026.
 Ennusteen todellinen pituus tulostuu lokiin (ei tarkistettu ennen ensimmäistä ajoa).
 """
+import math
 import re
 import urllib.parse
 import urllib.request
@@ -81,6 +82,18 @@ def meripisteet(lat, lon, meri, tavoite=12):
                 pts = pts[::max(1, len(pts) // (tavoite * 2))]
             return pts
     return []
+
+
+def taydenna(kiinteat, ehdokkaat, min_km=10.0):
+    """Kiinteät pisteet + ne ehdokkaat (mallin meriruuduista), jotka ovat yli min_km:n päässä jokaisesta kiinteästä
+    ja jo lisätystä pisteestä (v22: Luodon alue laajeni Lohtajalle). Palauttaa uuden listan [(lat, lon), ...]."""
+    tulos = [tuple(p) for p in kiinteat]
+    def km(a, b):
+        return math.hypot((a[0] - b[0]) * 111.32, (a[1] - b[1]) * 111.32 * math.cos(math.radians(a[0])))
+    for e in ehdokkaat:
+        if all(km(e, p) > min_km for p in tulos):
+            tulos.append(tuple(e))
+    return tulos
 
 
 def hae(alku_iso, loppu_iso, loki=print, pyynto=None, pisteet=None):

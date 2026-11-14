@@ -1,4 +1,4 @@
-/* Merilohitutka – alueet.js (v17)
+/* Merilohitutka – alueet.js (v22)
  * Kalastusalueet. Yksi lähde: sovellus lataa tämän skriptinä ja hae_copernicus.py lukee saman tiedoston.
  * Hakasulkeiden [ ] välissä on oltava puhdasta JSONia (ei kommentteja, ei pilkkua viimeisen alkion jälkeen).
  *
@@ -18,12 +18,16 @@
  * Pori (v15): rajat Hannun listasta 12.11.2026. Tahkoluoto 61,644 21,337 (windy.app, likimääräinen; IL:n asema
  * "Pori Tahkoluoto Harbour" mittaa tuulta, tide-forecast.com). Rauma Kylmäpihlaja muistista (ei tarkistettu).
  * Uusien alueiden rajat on arvioitu Hannun karttakuvista 10.11.2026.
+ * v22 (Hannu 14.11.2026): Vaasa laajennettu kattamaan Mikkelinsaaret (Kummelskärin luontoasema 63°27,643' 21°46,347',
+ * luontoon.fi; saariryhmän laajuus arvioitu) ja Luoto itään Lohtajalle (Lohtaja 64,0236 23,5056 ja Ohtakari 64,0905 23,4053,
+ * Wikipedia). tuulipisteetLisaa: kiinteiden pisteiden lisäksi haku lisää mallin meriruuduista pisteet alueen osiin,
+ * jotka ovat yli 10 km:n päässä kiinteistä (Lohtajan suunta).
  */
 (typeof window !== 'undefined' ? window : globalThis).ALUEET = [
   {
     "tunnus": "luoto", "nimi": "Luoto–Tankar", "lyhyt": "Luoto", "polku": "",
-    "rajat": { "lat_min": 63.45, "lat_max": 64.05, "lon_min": 22.05, "lon_max": 23.10 },
-    "keski": [63.83, 22.62], "zoom": 10.6, "paluuikkuna": true,
+    "rajat": { "lat_min": 63.45, "lat_max": 64.13, "lon_min": 22.05, "lon_max": 23.65 },
+    "keski": [63.83, 22.62], "zoom": 10.6, "paluuikkuna": true, "tuulipisteetLisaa": true,
     "asemat": ["Pietarsaari Kallan@63.7515,22.5228", "101661"],
     "tuulipisteet": [[63.55, 22.15], [63.55, 22.32], [63.55, 22.47], [63.70, 22.15], [63.70, 22.32], [63.70, 22.48],
                      [63.85, 22.15], [63.85, 22.35], [63.85, 22.55], [64.00, 22.20], [64.00, 22.45], [64.00, 22.70], [64.00, 22.95]],
@@ -31,17 +35,19 @@
       { "nimi": "Köpmanholmen", "lat": 63.806844, "lon": 22.671069, "muoto": "nelio", "vari": "#ffd54a" },
       { "nimi": "Kolmoispatti", "lat": 63.830822, "lon": 22.506817, "muoto": "kolmio", "vari": "#ff9d3a" },
       { "nimi": "Kallan", "lat": 63.751469, "lon": 22.522764, "vari": "#ffffff" },
-      { "nimi": "Tankar", "lat": 63.951, "lon": 22.845, "vari": "#ffffff" }
+      { "nimi": "Tankar", "lat": 63.951, "lon": 22.845, "vari": "#ffffff" },
+      { "nimi": "Ohtakari", "lat": 64.0905, "lon": 23.4053, "vari": "#ffffff" }
     ]
   },
   {
     "tunnus": "vaasa", "nimi": "Vaasa", "lyhyt": "Vaasa", "polku": "vaasa/",
-    "rajat": { "lat_min": 62.95, "lat_max": 63.32, "lon_min": 21.15, "lon_max": 21.80 },
+    "rajat": { "lat_min": 62.95, "lat_max": 63.56, "lon_min": 21.15, "lon_max": 22.00 },
     "keski": [63.12, 21.50], "zoom": 10.9, "paluuikkuna": false,
     "asemat": ["Mustasaari Valassaaret@63.430,21.070", "Maalahti Strömmingsbådan@62.979,20.741"],
     "merkit": [
       { "nimi": "Valassaaret", "lat": 63.430, "lon": 21.070, "vari": "#ffffff" },
-      { "nimi": "Strömmingsbådan", "lat": 62.979, "lon": 20.741, "vari": "#ffffff" }
+      { "nimi": "Strömmingsbådan", "lat": 62.979, "lon": 20.741, "vari": "#ffffff" },
+      { "nimi": "Mikkelinsaaret", "lat": 63.4607, "lon": 21.7725, "vari": "#ffffff" }
     ]
   },
   {
