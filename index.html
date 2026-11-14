@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b1726">
 <title>Merilohitutka</title>
+<!-- v29 (Hannu 14.11.2026 "0.3 m mukavuus kärsii tehdään"): jyrkkä aallokko aallonjaksosta (VTM10): kartta, napautus, 48 h; tuuli virtaa vastaan -huomautus -->
 <!-- v28 (Hannu 14.11.2026 "1 2 3 kerralla"): nousun lämpöraja (48 h -välilehti, ⓘ), 48 h aikajana aallolla ja lohikerroksella, nopeushälytys 3 m:n virrasta (valinta) -->
 <!-- v27 (Hannu 14.11.2026): lohikerroksen reuna haalenee rajan molemmin puolin (asetus lohiReuna, oletus 0,4 °C) ja rajaviiva: sininen liian kylmä, punainen liian lämmin -->
 <!-- v26 (Hannu 14.11.2026 "Tehdään"): service worker sw.js, sovellus käynnistyy ilman verkkoa -->
@@ -42,6 +43,7 @@
   td:first-child, th:first-child { text-align:left; }
   tr.paiva td { color:var(--syaani); font-weight:700; padding-top:8px; text-align:left; }
   tr.hyva td:first-child { box-shadow:inset 3px 0 0 #6fe39a; padding-left:8px; }   /* v28: tuuli ja aalto alle rajojen */
+  .jyrkka { color:#c49bff; font-weight:700; }   /* v29: jyrkkä aallokko */
   .nousu { font-size:19px; font-weight:700; margin:4px 0 6px; }
   .rajat select { width:100%; margin-top:4px; font-size:22px; padding:9px 4px; background:#0d1b2b; color:var(--teksti);
     border:1px solid var(--reuna); border-radius:8px; }
@@ -348,7 +350,7 @@
 <script src="malli.js?v=24"></script>
 <script src="fmi.js?v=13"></script>
 <script src="nopeus.js?v=20"></script>
-<script src="kartta.js?v=25"></script>
+<script src="kartta.js?v=26"></script>
 <script src="ais.js?v=23"></script>
 <script>
 'use strict';
@@ -379,6 +381,8 @@ const KENTAT = [
   ['lohiMin', 'Lohikerros, alin lämpö (°C)'], ['lohiMax', 'Lohikerros, ylin lämpö (°C)'],
   ['lohiReuna', 'Lohikerros: reunan haalennus rajan molemmin puolin (°C, 0 = terävä)'],
   ['nousuLampo', 'Nousun lämpöraja: alueen pintavesi (°C)'],
+  ['jyrkkaHs', 'Jyrkkä aallokko: merkitsevä aallonkorkeus vähintään (m)'],
+  ['jyrkkyysRaja', 'Jyrkkä aallokko: korkeus vähintään % aallonpituudesta'],
   ['aaltoRaja1', 'Aaltoraja 1, merkitsevä aallonkorkeus (m)'], ['aaltoRaja2', 'Aaltoraja 2, merkitsevä aallonkorkeus (m)'],
   ['matalikkoMin', 'Matalikko: huippukäyrä vähintään (m)'], ['matalikkoMax', 'Matalikko: huippukäyrä enintään (m)'],
   ['nousuM', 'Matalikko muuten: nousu ympäristöstä vähintään (m)']
@@ -386,6 +390,7 @@ const KENTAT = [
 function oletukset() {
   return Object.assign({}, Malli.OLETUKSET, Nopeus.OLETUKSET,
     { asema1: Malli.OLETUKSET.asemat[0], asema2: Malli.OLETUKSET.asemat[1], lampoAskel: 0.2, lohiMin: 6.6, lohiMax: 8.8, lohiReuna: 0.4, nousuLampo: 6.6, halytysSyvyys: 'pinta',
+      jyrkkaHs: 0.3, jyrkkyysRaja: 5,   // v29: Hannu 14.11. "0.3 m mukavuus kärsii"; 5 % = arvio, säädettävä
       aaltoRaja1: 0.35, aaltoRaja2: 0.5,   // Hannu 13.11.: merkitsevä aallonkorkeus
       matalikkoMin: 10, matalikkoMax: 20, nousuM: 5 });   // Hannu 13.11.: "10 m matalikko–20 m tai poikkeaa ympäristöstä merkittävästi" (5 m = oletus)
 }
@@ -701,16 +706,17 @@ function piirra() {
   const tiedot = rivit.map(r => {
     const m = kohta ? aikajanaArvot(r.t.getTime(), kohta.lat, kohta.lon) : null;
     const hs = m && isFinite(m.hs) ? m.hs : NaN;
-    return { r, m, hs, hyva: r.ws < asetukset.rajaKeskituuli && r.wg < asetukset.rajaPuuska && !(hs >= aR) };
+    const jyrkka = !!(m && m.jyrkka);
+    return { r, m, hs, jyrkka, hyva: r.ws < asetukset.rajaKeskituuli && r.wg < asetukset.rajaPuuska && !(hs >= aR) && !jyrkka };
   });
-  $('ennusteTaulu').querySelector('tbody').innerHTML = tiedot.map(({ r, m, hs, hyva }) => {
+  $('ennusteTaulu').querySelector('tbody').innerHTML = tiedot.map(({ r, m, hs, jyrkka, hyva }) => {
     const p = r.t.toDateString(); let otsake = '';
     if (p !== edPaiva) { otsake = `<tr class="paiva"><td colspan="6">${pvm(r.t)}</td></tr>`; edPaiva = p; }
     return otsake + `<tr class="${hyva ? 'hyva' : ''}"><td>${klo(r.t)}</td>
       <td class="${r.ws >= asetukset.rajaKeskituuli ? 'yli' : ''}">${luku(r.ws)}</td>
       <td class="${r.wg >= asetukset.rajaPuuska ? 'yli' : ''}">${luku(r.wg)}</td>
       <td>${isFinite(r.wd) ? Math.round(r.wd) + '°' : '–'}</td>
-      <td class="${hs >= aR ? 'yli' : ''}">${isFinite(hs) ? luku(hs) : '–'}</td>
+      <td class="${jyrkka ? 'jyrkka' : hs >= aR ? 'yli' : ''}"${m && isFinite(m.T) ? ` title="jakso ${luku(m.T)} s"` : ''}>${isFinite(hs) ? luku(hs) + (jyrkka ? '!' : '') : '–'}</td>
       <td>${m ? lohiLyhyt(m.lohi) : '–'}</td></tr>`;
   }).join('');
   piirraAikajanaTila(kohta, tiedot);
@@ -899,7 +905,8 @@ function puraPaiva(p, meri) {   // meri: hakemisto, jonka mukaan päivä haettii
               lampo: profiili.map(aika => aika[0]), u: jaa(p.phy.u), v: jaa(p.phy.v) };
     if (p.phy.u3 && p.phy.v3) Object.assign(n.phy, { u3: jaa(p.phy.u3), v3: jaa(p.phy.v3), virtaSyv: meri.phy.virtaSyv || 3 });   // v21
   }
-  if (p.wav && meri.wav) n.wav = { lat: meri.wav.lat, lon: meri.wav.lon, ajat: p.wav.ajat, hs: jaa(p.wav.hs), suunta: p.wav.suunta };
+  if (p.wav && meri.wav) n.wav = { lat: meri.wav.lat, lon: meri.wav.lon, ajat: p.wav.ajat, hs: jaa(p.wav.hs), suunta: p.wav.suunta,
+                                   jakso: p.wav.jakso ? jaa(p.wav.jakso) : null };   // v29: aallonjakso Tm-1,0 (s)
   if (p.tuuli && meri.tuuli) n.tuuli = Object.assign({ pisteet: meri.tuuli.pisteet }, p.tuuli);
   return n;
 }
@@ -1042,6 +1049,23 @@ function syvyysTeksti(lat, lon) {
   return osat.join(', ');
 }
 const ILMANSUUNNAT = ['pohjoisesta', 'koillisesta', 'idästä', 'kaakosta', 'etelästä', 'lounaasta', 'lännestä', 'luoteesta'];
+// v29: jyrkän aallokon rajat asetuksista: [Hs vähintään m, jyrkkyys osuutena]
+function jyrkkaRajat() { return [asetukset.jyrkkaHs, asetukset.jyrkkyysRaja / 100]; }
+/** Tuuli puhaltaa pintavirtaa vastaan (ero ≥ 135°, virta ≥ 0,1 m/s): jyrkentää aallokkoa. Aaltomalli huomioi virran jo. */
+function vastatuuliTeksti(lat, lon, t) {
+  const n = nakyma, tu = n && n.tuuli;
+  if (!tu || !tu.ajat || !tu.ajat.length || !n.phy || !n.phy.u) return null;
+  const u = KarttaMalli.lahinArvo(n.phy, 'u', t, lat, lon), v = KarttaMalli.lahinArvo(n.phy, 'v', t, lat, lon);
+  if (!isFinite(u) || !isFinite(v)) return null;
+  const vi = KarttaMalli.virta(u, v); if (vi.nopeus < 0.1) return null;
+  const ti = KarttaMalli.lahinAika(tu.ajat, Date.parse(karttaAjat()[t]));
+  let paras = -1, pd = Infinity;
+  tu.pisteet.forEach(([la, lo], i) => { const d = Malli.etaisyysKm(lat, lon, la, lo); if (d < pd) { pd = d; paras = i; } });
+  const wd = tu.wd[ti] && tu.wd[ti][paras], ws = tu.ws[ti] && tu.ws[ti][paras];
+  if (wd === null || wd === undefined || !isFinite(wd) || !(ws >= 3)) return null;
+  const ero = Math.abs(((wd + 180 - vi.suunta) % 360 + 540) % 360 - 180);   // tuulen kulkusuunta vs. virran suunta
+  return ero >= 135 ? `tuuli virtaa vastaan (virta ${luku(vi.nopeus, 2)} m/s, ero ${Math.round(ero)}°): jyrkentää aallokkoa, sisältyy aaltoennusteeseen` : null;
+}
 function tuuliTeksti(lat, lon) {
   const tu = nakyma && nakyma.tuuli;
   if (!tu || !kartta.tasot.tuuli || !tu.ajat.length) return null;
@@ -1124,9 +1148,18 @@ function naytaPiste(lat, lon) {
     const h = KarttaMalli.lahinArvo(n.wav, 'hs', tw, lat, lon);
     if (isFinite(h)) {
       const [r1, r2] = aaltoRajat(), l = KarttaMalli.aaltoLuokka(h, [r1, r2]);
-      osat.push('merkitsevä aalto ' + luku(h, 2) + ' m' + (l ? ` (yli aaltorajan ${l}: ${luku(l === 2 ? r2 : r1, 2)} m)` : ''));
+      let txt = 'merkitsevä aalto ' + luku(h, 2) + ' m' + (l ? ` (yli aaltorajan ${l}: ${luku(l === 2 ? r2 : r1, 2)} m)` : '');
+      const T = n.wav.jakso ? KarttaMalli.lahinArvo(n.wav, 'jakso', tw, lat, lon) : NaN;   // v29
+      if (isFinite(T)) {
+        const [mh, mr] = jyrkkaRajat(), sj = KarttaMalli.aaltoJyrkkyys(h, T);
+        txt += `, jakso ${luku(T)} s, pituus ${luku(KarttaMalli.aallonPituus(T), 0)} m, jyrkkyys ${luku(sj * 100)} %` +
+          (KarttaMalli.onJyrkka(h, T, mh, mr) ? ' – JYRKKÄ' : '');
+      }
+      osat.push(txt);
     }
   }
+  const vv = vastatuuliTeksti(lat, lon, t);   // v29
+  if (vv) osat.push(vv);
   if (valittuAlue.paluuikkuna) {
     const pk = Malli.lahinKohde(asetukset, { lat, lon }), etK = Malli.etaisyysKm(lat, lon, pk.kohdeLat, pk.kohdeLon);
     osat.push(`${luku(etK)} km ${Malli.illatiivi(pk.kohdeNimi)}`);
@@ -1204,7 +1237,7 @@ function avaaKarttaNakyma() {
   if (!kartta) {
     const tila = lue('mlt_kartta') || {}, nk = alueenNakyma(valittuAlue);
     kartta = new Kartta(c, { lat: nk.lat, lon: nk.lon, z: nk.z, askel: asetukset.lampoAskel, jalki,
-      lohiVali: [asetukset.lohiMin, asetukset.lohiMax], lohiReuna: asetukset.lohiReuna, aaltoRajat: aaltoRajat(), merkit: KAIKKI_MERKIT, havainnot: kaikkiHavainnot(), onNapautus: naytaPiste });
+      lohiVali: [asetukset.lohiMin, asetukset.lohiMax], lohiReuna: asetukset.lohiReuna, jyrkka: jyrkkaRajat(), aaltoRajat: aaltoRajat(), merkit: KAIKKI_MERKIT, havainnot: kaikkiHavainnot(), onNapautus: naytaPiste });
     if (typeof ResizeObserver === 'function') {   // ohjainrivi tai alapalkki muuttaa korkeutta (esim. virtarivi 1 → 2 riviä)
       const ro = new ResizeObserver(() => mitoitaKartta());
       ro.observe($('karttaOhjaimet')); ro.observe(document.querySelector('.alapalkki'));
@@ -1227,7 +1260,7 @@ function avaaKarttaNakyma() {
     mitoitaKartta();
     valitsePaiva(tamaPaiva(), null);
   } else {
-    kartta.askel = asetukset.lampoAskel; kartta.lohiVali = [asetukset.lohiMin, asetukset.lohiMax]; kartta.lohiReuna = asetukset.lohiReuna; kartta.aaltoRajat = aaltoRajat();
+    kartta.askel = asetukset.lampoAskel; kartta.lohiVali = [asetukset.lohiMin, asetukset.lohiMax]; kartta.lohiReuna = asetukset.lohiReuna; kartta.jyrkka = jyrkkaRajat(); kartta.aaltoRajat = aaltoRajat();
     piirraLohiRivi(); piirraPaivat(); mitoitaKartta(); kartta.koko();
     if (!nakyma) valitsePaiva(valittuPvm || tamaPaiva(), null);
   }
@@ -1511,7 +1544,10 @@ function aikajanaArvot(ms, lat, lon) {
     const pr = KarttaMalli.profiiliPisteessa(d.phy, i, lat, lon);
     const lohi = pr ? KarttaMalli.kerros(pr.arvot, pr.syvyydet, asetukset.lohiMin, asetukset.lohiMax) : null;
     const wi = d.wav ? lahinIndeksiAjoista(d.wav.ajat, ms, 5400000) : -1;
-    return { lohi, hs: wi >= 0 ? KarttaMalli.lahinArvo(d.wav, 'hs', wi, lat, lon) : NaN };
+    const hs = wi >= 0 ? KarttaMalli.lahinArvo(d.wav, 'hs', wi, lat, lon) : NaN;
+    const T = wi >= 0 && d.wav.jakso ? KarttaMalli.lahinArvo(d.wav, 'jakso', wi, lat, lon) : NaN;   // v29
+    const [mh, mr] = jyrkkaRajat();
+    return { lohi, hs, T, jyrkka: KarttaMalli.onJyrkka(hs, T, mh, mr) };
   }
   return null;
 }
@@ -1542,7 +1578,8 @@ function piirraAikajanaTila(kohta, tiedot) {
   $('aikajanaSelite').textContent = (kohta ? `Aalto ja lohikerros: ${kohta.nimi} (${luku(kohta.lat, 3)}, ${luku(kohta.lon, 3)}), Copernicus-malli 3 h välein. `
     : 'Aalto ja lohikerros: ei meridataa tälle jaksolle. ') +
     `Aalto = merkitsevä aallonkorkeus m (raja ${aR}). Lohi = lohikerroksen syvyys m (${luku(asetukset.lohiMin)}–${luku(asetukset.lohiMax)} °C). ` +
-    `Vihreä reuna: tuuli alle ${luku(asetukset.rajaKeskituuli, 0)}/${luku(asetukset.rajaPuuska, 0)} m/s ja aalto alle rajan. Tuuli: ennusteen pisteet yllä.`;
+    `Violetti "!" = jyrkkä aallokko (≥ ${luku(asetukset.jyrkkaHs, 2).replace(/0$/, '')} m ja ≥ ${luku(asetukset.jyrkkyysRaja)} % aallonpituudesta). ` +
+    `Vihreä reuna: tuuli alle ${luku(asetukset.rajaKeskituuli, 0)}/${luku(asetukset.rajaPuuska, 0)} m/s, aalto alle rajan eikä jyrkkä. Tuuli: ennusteen pisteet yllä.`;
 }
 
 // ---------- Ilman verkkoa: service worker (v26, Hannu 14.11.2026: "Tehdään") ----------
@@ -1605,7 +1642,7 @@ $('jalkiPoista').addEventListener('click', () => {
   jalki = []; jalkiMuuttui = true; tallennaJalki(true);
   if (kartta) { kartta.jalki = jalki; kartta.piirra(); }
 });
-$('tallenna').addEventListener('click', () => { lueAsetukset(); piirraAsetukset(); piirra(); laskeMatalikot(); piirraMeriTila(); if (kartta) { kartta.askel = asetukset.lampoAskel; kartta.lohiVali = [asetukset.lohiMin, asetukset.lohiMax]; kartta.lohiReuna = asetukset.lohiReuna; kartta.aaltoRajat = aaltoRajat(); piirraLohiRivi(); kartta.piirra(); } paivita(); });
+$('tallenna').addEventListener('click', () => { lueAsetukset(); piirraAsetukset(); piirra(); laskeMatalikot(); piirraMeriTila(); if (kartta) { kartta.askel = asetukset.lampoAskel; kartta.lohiVali = [asetukset.lohiMin, asetukset.lohiMax]; kartta.lohiReuna = asetukset.lohiReuna; kartta.jyrkka = jyrkkaRajat(); kartta.aaltoRajat = aaltoRajat(); piirraLohiRivi(); kartta.piirra(); } paivita(); });
 $('palauta').addEventListener('click', () => { asetukset = oletukset(); asetukset.asemat = [asetukset.asema1, asetukset.asema2]; tallennaLS('mlt_asetukset', asetukset); piirraAsetukset(); piirra(); });
 
 piirraAsetukset();

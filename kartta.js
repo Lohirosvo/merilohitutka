@@ -165,6 +165,7 @@
     return Math.max(0, Math.min(1, 0.5 + m / (2 * w)));
   }
   const LOHI_RAJA = { kylma: '#5fb4ff', lammin: '#ff6b6b' };
+  const JYRKKA_VARI = '#b07cff';   // v26: jyrkkä aallokko
   /** Kerroksen luokka kartan väriä varten: 'optimi' (alkaa 0–3 m), 'keski' (3–6 m), 'syva' (yli 6 m), 'ei'. */
   function lohiLuokka(k) {
     if (!k) return null;
@@ -356,6 +357,16 @@
   }
   function tuuliVari(ws) { return ws >= 10 ? '#ff5c5c' : ws >= 8 ? '#ffa94d' : ws >= 5 ? '#ffe066' : '#e8f4ff'; }
   /** Aaltoraja (v17, Hannu 13.11.): merkitsevä aallonkorkeus -> 0 = alle rajan 1, 1 = raja 1 (oletus 0,35 m), 2 = raja 2 (0,5 m). */
+  /**
+   * v26 (Hannu 14.11.2026: "0.3 m mukavuus kärsii"): jyrkkä aallokko aallonkorkeudesta ja -jaksosta.
+   * Aallonpituus syvän veden kaavalla L = g T² / 2π (matalassa vedessä todellinen aalto lyhyempi eli jyrkempi).
+   * Jyrkkyys = Hs / L. Copernicuksen aaltomalli sisältää jo pintavirran vaikutuksen aallokkoon.
+   */
+  const PAINOVOIMA = 9.81;
+  function aallonPituus(T) { return isFinite(T) && T > 0 ? PAINOVOIMA * T * T / (2 * Math.PI) : NaN; }
+  function aaltoJyrkkyys(hs, T) { const L = aallonPituus(T); return isFinite(hs) && hs >= 0 && L > 0 ? hs / L : NaN; }
+  /** Jyrkkä: merkitsevä aallonkorkeus ≥ minHs ja jyrkkyys ≥ raja (osuus, esim. 0,05 = 5 %). */
+  function onJyrkka(hs, T, minHs, raja) { const s = aaltoJyrkkyys(hs, T); return isFinite(s) && hs >= minHs - 1e-9 && s >= raja - 1e-12; }
   function aaltoLuokka(hs, rajat) {
     if (hs === null || hs === undefined || !isFinite(hs)) return 0;
     return hs >= rajat[1] ? 2 : hs >= rajat[0] ? 1 : 0;
@@ -517,7 +528,8 @@
       this.lat = opts.lat; this.lon = opts.lon; this.z = opts.z || 11;
       this.data = null; this.aika = 0; this.askel = opts.askel || 0.2;
       this.lohiVali = opts.lohiVali || [6.6, 8.8];
-      this.lohiReuna = isFinite(opts.lohiReuna) ? opts.lohiReuna : 0.4;   // v25: pehmeän reunan leveys (°C), 0 = terävä
+      this.lohiReuna = isFinite(opts.lohiReuna) ? opts.lohiReuna : 0.4;
+      this.jyrkka = opts.jyrkka || [0.3, 0.05];   // v26: [vähintään Hs m, jyrkkyys osuutena]   // v25: pehmeän reunan leveys (°C), 0 = terävä
       this.aaltoRajat = opts.aaltoRajat || [0.35, 0.5];   // merkitsevä aallonkorkeus (m)
       this.tasot = { lampo: true, lohi: true, syvyys: true, tuuli: true, vaylat: true, havainnot: true, aaltoraja: true, jalki: true, matalikot: true, ais: false, sst: false, virta: true, aalto: false, tausta: true };
       this.syvyys = null;   // puraSyvyys()-tulos
@@ -964,6 +976,15 @@
         alueet[l].rect(x1, y1, x2 - x1 + 0.6, y2 - y1 + 0.6); maara[l]++;
       }
       this.aaltorajaRuutuja = maara;
+      // v26: jyrkkä aallokko (aallonjakso tarvitaan; vanhassa datassa ei ole)
+      const jakso = wv.jakso && wv.jakso[t], jyrkat = new Path2D(); let nJ = 0;
+      if (jakso) for (let i = 0; i < wv.lat.length; i++) for (let j = 0; j < wv.lon.length; j++) {
+        if (!onJyrkka(hs[i][j], jakso[i][j], this.jyrkka[0], this.jyrkka[1])) continue;
+        const [x1, y1] = this.ruutu(wv.lat[i] + dl, wv.lon[j] - dn), [x2, y2] = this.ruutu(wv.lat[i] - dl, wv.lon[j] + dn);
+        if (x2 < 0 || y2 < 0 || x1 > this.w || y1 > this.h) continue;
+        jyrkat.rect(x1, y1, x2 - x1 + 0.6, y2 - y1 + 0.6); nJ++;
+      }
+      this.jyrkkiaRuutuja = nJ;
       const ox = lonX(this.lon, this.z) - this.w / 2, oy = latY(this.lat, this.z) - this.h / 2;
       const S = 16, mod = (a, b) => ((a % b) + b) % b;   // harva: pisteet 16 px, viivat 22 px välein
       if (maara[1]) {   // taso 1: harva pisterasteri
@@ -980,6 +1001,16 @@
         for (const [lev, vari] of [[3.6, 'rgba(0,0,0,0.45)'], [1.8, 'rgba(255,60,60,0.95)']]) {
           g.strokeStyle = vari; g.lineWidth = lev; g.beginPath();
           for (let c = -mod(ox - oy, V) - this.h; c < this.w + V; c += V) { g.moveTo(c, 0); g.lineTo(c + this.h, this.h); }
+          g.stroke();
+        }
+        g.restore();
+      }
+      if (nJ) {   // v26: jyrkkä: violetti vinoviivoitus toiseen suuntaan (viivat x + y = vakio), erottuu punaisesta
+        const V = 14;
+        g.save(); g.clip(jyrkat); g.lineCap = 'butt';
+        for (const [lev, vari] of [[3.4, 'rgba(0,0,0,0.45)'], [1.8, JYRKKA_VARI]]) {
+          g.strokeStyle = vari; g.lineWidth = lev; g.beginPath();
+          for (let c = mod(ox + oy, V) * -1; c < this.w + this.h + V; c += V) { g.moveTo(c, 0); g.lineTo(c - this.h, this.h); }
           g.stroke();
         }
         g.restore();
@@ -1292,6 +1323,7 @@
       if (this.tasot.aaltoraja && d.wav) {
         const f2 = x => x.toFixed(2).replace(/0$/, '').replace('.', ',');
         rivit.push([['Merkitsevä aalto', '#e9f1f7'], ['≥' + f2(this.aaltoRajat[0]) + ' m pisteet', '#e9f1f7', '#ffd54a'], ['≥' + f2(this.aaltoRajat[1]) + ' m viivat', '#e9f1f7', '#ff3c3c']]);
+        if (d.wav.jakso) rivit.push([['', '#e9f1f7'], ['jyrkkä: ≥' + f2(this.jyrkka[0]) + ' m ja ≥' + f(Math.round(this.jyrkka[1] * 1000) / 10) + ' % aallonpituudesta', '#e9f1f7', JYRKKA_VARI]]);
       }
       if (this.tasot.aalto && d.wav) rivit.push([['Aalto <', '#ffd54a'], ['0,25', '#e9f1f7', 'rgb(64,140,255)'], ['0,5', '#e9f1f7', 'rgb(60,200,160)'],
         ['0,75', '#e9f1f7', 'rgb(170,220,60)'], ['1', '#e9f1f7', 'rgb(250,210,40)'], ['1,5', '#e9f1f7', 'rgb(255,140,30)'], ['+ m', '#e9f1f7', 'rgb(235,50,40)']]);
@@ -1315,7 +1347,7 @@
 
   const KarttaMalli = { lonX, latY, xLon, yLat, kayra, tasot, arvovali, lahinIndeksi, lahinArvo, lahinAika, virta, akseliArvo,
                         kerros, lohiLuokka, lohiMarginaali, lohiPehmeys, profiiliPisteessa, puraSyvyys, lahinKayra, puraVaylat, lahinVayla, tuuliVari,
-                        havainnotPisteessa, havaintoTiedot, havaintoVari, etaisyysViivaan, jasennaSaaliit, aaltoLuokka,
+                        havainnotPisteessa, havaintoTiedot, havaintoVari, etaisyysViivaan, jasennaSaaliit, aaltoLuokka, aallonPituus, aaltoJyrkkyys, onJyrkka,
                         jalkiOsat, jalkiAlfa, lahinJalki, ketjuta, matalikot, matalikkoPisteessa, renkaanSisalla };
   if (typeof module !== 'undefined' && module.exports) module.exports = KarttaMalli;
   else { root.KarttaMalli = KarttaMalli; root.Kartta = Kartta; }

@@ -51,7 +51,8 @@ LAHTEET = {
                 muuttujat=["thetao", "uo", "vo"]),
     "wav": dict(tuote="BALTICSEA_ANALYSISFORECAST_WAV_003_010",
                 ehdokkaat=["cmems_mod_bal_wav_anfc_PT1H-i"],
-                muuttujat=["VHM0", "VMDR"]),
+                muuttujat=["VHM0", "VMDR"],
+                lisa=["VTM10"]),   # v29: aallonjakso Tm-1,0 jyrkkyyteen (valinnainen: ilman sitä haku toimii kuten ennen)
     "sst": dict(tuote="SST_BAL_SST_L4_NRT_OBSERVATIONS_010_007_b",
                 ehdokkaat=["DMI-BALTIC-SST-L4-NRT-OBS_FULL_TIME_SERIE"],
                 muuttujat=["analysed_sst"]),
@@ -178,6 +179,8 @@ def rakenna(phy, wav, sst, luotu, virheet, syvyys=None, tuuli=None, vaylat=None,
         hakemisto["phy"]["virtaSyv"] = VIRTA_SYV   # päivätiedostoissa u3/v3 = virta tällä syvyydellä
     if wav:
         hakemisto["wav"] = {"dataset": wav["dataset"], "lat": pyorista(wav["lat"], 4), "lon": pyorista(wav["lon"], 4)}
+        if wav.get("jakso") is not None:
+            hakemisto["wav"]["jakso"] = "Tm-1,0 (VTM10)"   # v29: päivätiedostoissa wav.jakso (s)
     if sst:
         hakemisto["sst"] = sst
 
@@ -201,6 +204,8 @@ def rakenna(phy, wav, sst, luotu, virheet, syvyys=None, tuuli=None, vaylat=None,
                  "hs": kokonaisluvut(np.asarray(wav["hs"])[iw])}
             if wav.get("suunta") is not None:
                 w["suunta"] = kokonaisluvut(np.asarray(wav["suunta"])[iw], 1)
+            if wav.get("jakso") is not None:
+                w["jakso"] = kokonaisluvut(np.asarray(wav["jakso"])[iw])   # v29: s × 100
             sis["wav"] = w
         if "ajat" not in sis:
             sis["ajat"] = w["ajat"] if iw else []
@@ -291,10 +296,16 @@ def hae_phy(nyt, alue=None):
 
 
 def hae_wav(nyt, alue=None):
-    ds, ds_id = avaa(LAHTEET["wav"], nyt - timedelta(hours=TUNNIT_TAAKSE), nyt + timedelta(hours=TUNNIT_ETEEN), alue=alue)
+    lahde, alku, loppu = LAHTEET["wav"], nyt - timedelta(hours=TUNNIT_TAAKSE), nyt + timedelta(hours=TUNNIT_ETEEN)
+    try:   # v29 (Hannu 14.11.2026): aallonjakso mukaan; jos se ei onnistu, haetaan ilman (aallonkorkeus ei saa kadota)
+        ds, ds_id = avaa(dict(lahde, muuttujat=lahde["muuttujat"] + lahde.get("lisa", [])), alku, loppu, alue=alue)
+    except Exception as e:  # noqa: BLE001
+        print("wav: aallonjakso", lahde.get("lisa"), "ei saatavilla, haetaan ilman:", e, file=sys.stderr)
+        ds, ds_id = avaa(lahde, alku, loppu, alue=alue)
     ds = ds.isel(time=tasatunnit(ds["time"].values))
     return dict(dataset=ds_id, ajat=ds["time"].values, lat=ds["latitude"].values, lon=ds["longitude"].values,
-                hs=ds["VHM0"].values, suunta=ds["VMDR"].values if "VMDR" in ds else None)
+                hs=ds["VHM0"].values, suunta=ds["VMDR"].values if "VMDR" in ds else None,
+                jakso=ds["VTM10"].values if "VTM10" in ds else None)
 
 
 def hae_sst(nyt, alue=None):
