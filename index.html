@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b1726">
 <title>Merilohitutka</title>
+<!-- v27 (Hannu 14.11.2026): lohikerroksen reuna haalenee rajan molemmin puolin (asetus lohiReuna, oletus 0,4 °C) ja rajaviiva: sininen liian kylmä, punainen liian lämmin -->
 <!-- v26 (Hannu 14.11.2026 "Tehdään"): service worker sw.js, sovellus käynnistyy ilman verkkoa -->
 <!-- v25 (Hannu 14.11.2026): kuvake ja aloitusnäyttö (manifest, oma ikkuna ilman osoiteriviä) -->
 <link rel="manifest" href="manifest.json">
@@ -334,7 +335,7 @@
 <script src="malli.js?v=23"></script>
 <script src="fmi.js?v=13"></script>
 <script src="nopeus.js?v=20"></script>
-<script src="kartta.js?v=24"></script>
+<script src="kartta.js?v=25"></script>
 <script src="ais.js?v=23"></script>
 <script>
 'use strict';
@@ -363,13 +364,14 @@ const KENTAT = [
   ['pysahdysKmh', 'Ei hälytystä alle (km/h)'],
   ['lampoAskel', 'Lämpökäyrien väli (°C)'],
   ['lohiMin', 'Lohikerros, alin lämpö (°C)'], ['lohiMax', 'Lohikerros, ylin lämpö (°C)'],
+  ['lohiReuna', 'Lohikerros: reunan haalennus rajan molemmin puolin (°C, 0 = terävä)'],
   ['aaltoRaja1', 'Aaltoraja 1, merkitsevä aallonkorkeus (m)'], ['aaltoRaja2', 'Aaltoraja 2, merkitsevä aallonkorkeus (m)'],
   ['matalikkoMin', 'Matalikko: huippukäyrä vähintään (m)'], ['matalikkoMax', 'Matalikko: huippukäyrä enintään (m)'],
   ['nousuM', 'Matalikko muuten: nousu ympäristöstä vähintään (m)']
 ];
 function oletukset() {
   return Object.assign({}, Malli.OLETUKSET, Nopeus.OLETUKSET,
-    { asema1: Malli.OLETUKSET.asemat[0], asema2: Malli.OLETUKSET.asemat[1], lampoAskel: 0.2, lohiMin: 6.6, lohiMax: 8.8,
+    { asema1: Malli.OLETUKSET.asemat[0], asema2: Malli.OLETUKSET.asemat[1], lampoAskel: 0.2, lohiMin: 6.6, lohiMax: 8.8, lohiReuna: 0.4,
       aaltoRaja1: 0.35, aaltoRaja2: 0.5,   // Hannu 13.11.: merkitsevä aallonkorkeus
       matalikkoMin: 10, matalikkoMax: 20, nousuM: 5 });   // Hannu 13.11.: "10 m matalikko–20 m tai poikkeaa ympäristöstä merkittävästi" (5 m = oletus)
 }
@@ -987,10 +989,15 @@ function lohiTeksti(lat, lon) {
   const vali = `${luku(asetukset.lohiMin)}–${luku(asetukset.lohiMax)} °C`;
   const syvin = pr.syvyydet[pr.syvyydet.length - 1];
   // matalassa ruudussa raja on mallin pohja (2 km:n ruudun keskisyvyys), ei merikartan syvyys
-  if (!k.loytyi) return k.taysi ? `Lohikerros ${vali}: ei 0–${luku(syvin, 0)} m:ssä`
-    : `Lohikerros ${vali}: ei 0–${luku(k.pohja + 0.5, 0)} m:ssä (mallin pohja ~${luku(k.pohja + 0.5, 0)} m)`;
+  // v25: kuinka kaukana rajasta (kartan haalea reuna): ulkona puuttuva lämpö, sisällä lähellä rajaa etäisyys rajaan
+  const mg = KarttaMalli.lohiMarginaali(pr.arvot, pr.syvyydet, asetukset.lohiMin, asetukset.lohiMax);
+  const ero = !mg || k.loytyi ? '' : mg.maxT < asetukset.lohiMin ? ` · lämpimin vesi ${luku(mg.maxT)} °C, ${luku(asetukset.lohiMin - mg.maxT)} °C liian kylmää`
+    : ` · kylmin vesi ${luku(mg.minT)} °C, ${luku(mg.minT - asetukset.lohiMax)} °C liian lämmintä`;
+  if (!k.loytyi) return (k.taysi ? `Lohikerros ${vali}: ei 0–${luku(syvin, 0)} m:ssä`
+    : `Lohikerros ${vali}: ei 0–${luku(k.pohja + 0.5, 0)} m:ssä (mallin pohja ~${luku(k.pohja + 0.5, 0)} m)`) + ero;
   const ala = k.pohjaan ? (k.taysi ? `yli ${luku(syvin, 0)} m` : `pohjaan (~${luku(k.pohja + 0.5, 0)} m)`) : luku(k.ala) + ' m';
-  return `Lohikerros ${vali}: ${luku(k.yla)} m – ${ala} (paksuus ${luku(k.paksuus)} m)`;
+  const raja = mg && asetukset.lohiReuna > 0 && mg.m < asetukset.lohiReuna ? ` · rajalla: paras vesi ${luku(mg.m)} °C rajan sisällä` : '';
+  return `Lohikerros ${vali}: ${luku(k.yla)} m – ${ala} (paksuus ${luku(k.paksuus)} m)${raja}`;
 }
 function etaisyys(m) { return m < 1000 ? Math.round(m / 10) * 10 + ' m' : luku(m / 1000) + ' km'; }
 function syvyysTeksti(lat, lon) {
@@ -1164,7 +1171,7 @@ function avaaKarttaNakyma() {
   if (!kartta) {
     const tila = lue('mlt_kartta') || {}, nk = alueenNakyma(valittuAlue);
     kartta = new Kartta(c, { lat: nk.lat, lon: nk.lon, z: nk.z, askel: asetukset.lampoAskel, jalki,
-      lohiVali: [asetukset.lohiMin, asetukset.lohiMax], aaltoRajat: aaltoRajat(), merkit: KAIKKI_MERKIT, havainnot: kaikkiHavainnot(), onNapautus: naytaPiste });
+      lohiVali: [asetukset.lohiMin, asetukset.lohiMax], lohiReuna: asetukset.lohiReuna, aaltoRajat: aaltoRajat(), merkit: KAIKKI_MERKIT, havainnot: kaikkiHavainnot(), onNapautus: naytaPiste });
     if (typeof ResizeObserver === 'function') {   // ohjainrivi tai alapalkki muuttaa korkeutta (esim. virtarivi 1 → 2 riviä)
       const ro = new ResizeObserver(() => mitoitaKartta());
       ro.observe($('karttaOhjaimet')); ro.observe(document.querySelector('.alapalkki'));
@@ -1187,7 +1194,7 @@ function avaaKarttaNakyma() {
     mitoitaKartta();
     valitsePaiva(tamaPaiva(), null);
   } else {
-    kartta.askel = asetukset.lampoAskel; kartta.lohiVali = [asetukset.lohiMin, asetukset.lohiMax]; kartta.aaltoRajat = aaltoRajat();
+    kartta.askel = asetukset.lampoAskel; kartta.lohiVali = [asetukset.lohiMin, asetukset.lohiMax]; kartta.lohiReuna = asetukset.lohiReuna; kartta.aaltoRajat = aaltoRajat();
     piirraLohiRivi(); piirraPaivat(); mitoitaKartta(); kartta.koko();
     if (!nakyma) valitsePaiva(valittuPvm || tamaPaiva(), null);
   }
@@ -1472,7 +1479,7 @@ $('jalkiPoista').addEventListener('click', () => {
   jalki = []; jalkiMuuttui = true; tallennaJalki(true);
   if (kartta) { kartta.jalki = jalki; kartta.piirra(); }
 });
-$('tallenna').addEventListener('click', () => { lueAsetukset(); piirraAsetukset(); piirra(); laskeMatalikot(); piirraMeriTila(); if (kartta) { kartta.askel = asetukset.lampoAskel; kartta.lohiVali = [asetukset.lohiMin, asetukset.lohiMax]; kartta.aaltoRajat = aaltoRajat(); piirraLohiRivi(); kartta.piirra(); } paivita(); });
+$('tallenna').addEventListener('click', () => { lueAsetukset(); piirraAsetukset(); piirra(); laskeMatalikot(); piirraMeriTila(); if (kartta) { kartta.askel = asetukset.lampoAskel; kartta.lohiVali = [asetukset.lohiMin, asetukset.lohiMax]; kartta.lohiReuna = asetukset.lohiReuna; kartta.aaltoRajat = aaltoRajat(); piirraLohiRivi(); kartta.piirra(); } paivita(); });
 $('palauta').addEventListener('click', () => { asetukset = oletukset(); asetukset.asemat = [asetukset.asema1, asetukset.asema2]; tallennaLS('mlt_asetukset', asetukset); piirraAsetukset(); piirra(); });
 
 piirraAsetukset();
