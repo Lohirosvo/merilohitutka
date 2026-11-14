@@ -2,6 +2,7 @@ name: Julkaise merilohitutka
 # v15 (13.11.2026): toiminnot Node 24 -versioihin (Node 20 poistettu ajokoneilta 23.9.2026) ja julkaisupaketille
 # yrityskohtainen nimi: RE-RUN teki samaan ajoon toisen "github-pages"-paketin ja deploy-pages kaatui
 # ("Multiple artifacts named github-pages were unexpectedly found").
+# v26 (14.11.2026): sivustoon myös manifest.json ja kuvakkeet (aloitusnäytön sovellus).
 
 on:
   push:
@@ -39,6 +40,11 @@ jobs:
         run: |
           mkdir -p _site/data
           cp *.html *.js _site/
+          # v26 (14.11.2026): aloitusnäytön sovellus tarvitsee myös manifestin ja kuvakkeet (sw.js tulee *.js:n mukana).
+          # Puuttuva tiedosto ei estä datan julkaisua, vaan näkyy ajon varoituksena.
+          for f in manifest.json icon-192.png icon-512.png icon-192-maskable.png icon-512-maskable.png apple-touch-icon.png favicon-48.png; do
+            if [ -f "$f" ]; then cp "$f" _site/; else echo "::warning::puuttuu $f (lataa varaston juureen)"; fi
+          done
           curl -sfL "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/data/meri.json" \
             -o _site/data/meri.json || echo "Ei aiempaa dataa"
 
