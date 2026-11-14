@@ -106,6 +106,7 @@
   .lohivali input { width:48px; font-size:16px; padding:4px 2px; text-align:center; }
   .karttanapit { position:absolute; right:8px; top:150px; display:flex; flex-direction:column; gap:6px; }
   .karttanapit button { width:46px; height:46px; padding:0; font-size:22px; background:rgba(13,27,43,0.85); }
+  .karttanapit button.paalla { border-color:#7ed957; background:rgba(40,90,40,0.85); }   /* v24: lohikerros täällä päällä */
   .kartta-ala { position:absolute; left:0; right:0; bottom:0; }
   .kartta-tieto, .datatila { background:rgba(11,23,38,0.92); border-top:1px solid var(--reuna); padding:6px 10px;
                              max-height:34vh; overflow-y:auto; line-height:1.3; }
@@ -192,7 +193,7 @@
         </div>
       </div>
       <div class="karttanapit" id="karttaNapit">
-        <button id="zoomPlus">+</button><button id="zoomMiinus">−</button><button id="keskitaOma">◎</button>
+        <button id="zoomPlus">+</button><button id="zoomMiinus">−</button><button id="keskitaOma">◎</button><button id="lohiTaalla" title="Lohikerros omalla kohdalla">🐟</button>
       </div>
       <div class="kartta-ala" id="karttaAla">
         <div class="datatila" id="dataTila" hidden>Meridataa ei ole vielä haettu.</div>
@@ -316,7 +317,7 @@
 <script src="malli.js?v=23"></script>
 <script src="fmi.js?v=13"></script>
 <script src="nopeus.js?v=20"></script>
-<script src="kartta.js?v=23"></script>
+<script src="kartta.js?v=24"></script>
 <script src="ais.js?v=23"></script>
 <script>
 'use strict';
@@ -948,7 +949,7 @@ function valitseAika(indeksi) {
   const eroTxt = Math.abs(ero) < 1 ? 'nyt' : (Math.abs(ero) < 48 ? (ero > 0 ? '+' : '') + ero + ' h' : (ero > 0 ? '+' : '') + Math.round(ero / 24) + ' vrk');
   $('karttaAika').innerHTML = `${pvm(t)} klo ${klo(t)}<small>${eroTxt} · malli${ero >= 48 ? ' (ennuste)' : ''}</small>`;
   kartta.piirra();
-  if (kartta.valittu) naytaPiste(kartta.valittu[0], kartta.valittu[1]);
+  if (kartta.valittu && !kartta.valittuOma) naytaPiste(kartta.valittu[0], kartta.valittu[1]);
 }
 function siirraAikaa(d) {
   if (!kartta || !nakyma || paivaLatautuu) return;   // päivän vaihto kesken: painallus ohitetaan
@@ -1021,10 +1022,11 @@ function piirraSaaliit() {
   $('saalisTila').textContent = l.length ? `${l.length} pistettä tallessa tässä puhelimessa.` : 'Ei tallennettuja pisteitä.';
   if (kartta) { kartta.havainnot = kaikkiHavainnot(); kartta.piirra(); }
 }
-function suljePiste() { $('karttaTieto').hidden = true; if (kartta) { kartta.valittu = null; kartta.piirra(); } mitoitaKartta(); }
+function suljePiste() { $('karttaTieto').hidden = true; if (kartta) { kartta.valittu = null; kartta.valittuOma = false; paivitaOmaKartalle(); kartta.piirra(); } mitoitaKartta(); }
 function naytaPiste(lat, lon) {
   const el = $('karttaTieto');
-  if (lat === null) { suljePiste(); return; }
+  if (lat === null) { if (kartta && kartta.valittuOma) asetaLohiTaalla(false); suljePiste(); return; }   // profiilin × veneen kohdalla
+  if (kartta) kartta.valittuOma = false;
   el.hidden = false;
   if (!nakyma) {   // ei meridataa (esim. Porin edusta): syvyys, väylä ja omat havainnot silti
     const osat = [jalkiTeksti(lat, lon), aisTeksti(lat, lon), matalikkoTeksti(lat, lon), syvyysTeksti(lat, lon), vaylaTeksti(lat, lon), havaintoTeksti(lat, lon)].filter(Boolean);
@@ -1135,7 +1137,7 @@ function lueLohiVali() {
   if (asetukset.lohiMin > asetukset.lohiMax) [asetukset.lohiMin, asetukset.lohiMax] = [asetukset.lohiMax, asetukset.lohiMin];
   tallennaLS('mlt_asetukset', asetukset);
   piirraAsetukset(); piirraLohiRivi();
-  if (kartta) { kartta.lohiVali = [asetukset.lohiMin, asetukset.lohiMax]; kartta.naytaSelite(3000); if (kartta.valittu) naytaPiste(kartta.valittu[0], kartta.valittu[1]); }
+  if (kartta) { kartta.lohiVali = [asetukset.lohiMin, asetukset.lohiMax]; kartta.naytaSelite(3000); if (kartta.valittu && !kartta.valittuOma) naytaPiste(kartta.valittu[0], kartta.valittu[1]); }
 }
 function avaaKarttaNakyma() {
   const c = $('karttaCanvas');
@@ -1150,13 +1152,14 @@ function avaaKarttaNakyma() {
     if (tila.tasot) Object.assign(kartta.tasot, tila.tasot);
     kartta.tasot.tausta = true; kartta.tasot.syvyys = true;   // Hannu 10.11.: aina päällä, ei nappia
     kartta.syvyys = syvyys; kartta.vaylat = vaylat; laskeMatalikot();
+    kartta.lohiTaalla = lohiTaalla; $('lohiTaalla').classList.toggle('paalla', lohiTaalla);
     document.querySelectorAll('#sirut button').forEach(b => {
       b.classList.toggle('paalla', !!kartta.tasot[b.dataset.taso]);
       b.addEventListener('click', () => {
         kartta.tasot[b.dataset.taso] = !kartta.tasot[b.dataset.taso]; b.classList.toggle('paalla');
         if (b.dataset.taso === 'ais') { if (kartta.tasot.ais) haeAis(true); piirraMeriTila(); }
         piirraLohiRivi(); mitoitaKartta(); kartta.naytaSelite(3000); tallennaKarttaTila();
-        if (kartta.valittu) naytaPiste(kartta.valittu[0], kartta.valittu[1]);
+        if (kartta.valittu && !kartta.valittuOma) naytaPiste(kartta.valittu[0], kartta.valittu[1]);
       });
     });
     c.addEventListener('pointerup', () => setTimeout(tallennaKarttaTila, 50));
@@ -1207,9 +1210,22 @@ async function vaihdaAlue(tunnus, kasin) {
   await lataaMeri();   // hakee myös syvyyskäyrät ja väylät
   if (al === valittuAlue && kartta && !meri) { $('karttaAika').innerHTML = `${al.nimi}<small>ei meridataa vielä (ⓘ)</small>`; kartta.piirra(); }
 }
+// v24 (Hannu 14.11.: "Saako lohikerroksen tarvittaessa näkymään kohdalla missä on menossa?"): 🐟-napista profiili ja
+// teksti "lohi 0,0–3,7 m" seuraavat omaa paikkaa kartan valitulla ajalla. Napautus muualle näyttää sen pisteen; kun tieto
+// suljetaan, profiili palaa veneen kohdalle. Profiilin × sammuttaa toiminnon.
+let lohiTaalla = lue('mlt_lohitaalla') === true;
+function asetaLohiTaalla(paalla) {
+  lohiTaalla = !!paalla; tallennaLS('mlt_lohitaalla', lohiTaalla);
+  $('lohiTaalla').classList.toggle('paalla', lohiTaalla);
+  if (!kartta) return;
+  kartta.lohiTaalla = lohiTaalla;
+  if (!lohiTaalla && kartta.valittuOma) { kartta.valittu = null; kartta.valittuOma = false; }
+  paivitaOmaKartalle(); kartta.piirra();
+}
 function paivitaOmaKartalle() {
   if (!kartta || !sijainti) return;
   kartta.oma = { lat: sijainti.lat, lon: sijainti.lon, suunta: Nopeus.suunta(gpsPisteet) };
+  if (lohiTaalla && $('karttaTieto').hidden) { kartta.valittu = [sijainti.lat, sijainti.lon]; kartta.valittuOma = true; }
   if (karttaAuki()) kartta.piirra();
 }
 // Kartta avataan historiaan, jotta puhelimen takaisin-ele palaa Vesillä-ruutuun.
@@ -1240,6 +1256,13 @@ $('lohiMin').addEventListener('change', lueLohiVali);
 $('lohiMax').addEventListener('change', lueLohiVali);
 $('zoomPlus').addEventListener('click', () => { kartta.zoomaa(0.5); tallennaKarttaTila(); });
 $('zoomMiinus').addEventListener('click', () => { kartta.zoomaa(-0.5); tallennaKarttaTila(); });
+$('lohiTaalla').addEventListener('click', () => {
+  asetaLohiTaalla(!lohiTaalla);
+  if (!lohiTaalla) return;
+  const g = gpsAlue();
+  if (sijainti && g) { if (g !== valittuAlue) vaihdaAlue(g.tunnus, true); kartta.keskita(sijainti.lat, sijainti.lon); tallennaKarttaTila(); kartta.piirra(); }
+  else { const el = $('karttaTieto'); el.hidden = false; el.textContent = 'Lohikerros täällä: oma sijainti ei ole kalastusalueella (tai GPS puuttuu) – näkyy, kun olet alueella.  ✕'; mitoitaKartta(); }
+});
 $('keskitaOma').addEventListener('click', () => {
   const g = gpsAlue();
   if (g) { if (g !== valittuAlue) vaihdaAlue(g.tunnus, true); kartta.keskita(sijainti.lat, sijainti.lon); }

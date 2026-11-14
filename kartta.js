@@ -506,6 +506,7 @@
       this.havainnot = opts.havainnot || [];   // havainnot.js
       this.jalki = opts.jalki || [];   // oma reittijälki 24 h (v20)
       this.matalikot = []; this.matalikkoVali = '10–20';
+      this.lohiTaalla = false; this.valittuOma = false;   // v24: lohikerros omalla kohdalla (profiili seuraa venettä)
       this.ais = [];   // AIS-kohteet (v23): [{ lat, lon, t, sog, cog, suunta, liikkuu, vari, nimi }]   // matalikot()-tuloksen lista ja selitteen väli (v21)
       this.laatat = new Map(); this.onNapautus = opts.onNapautus || (() => {});
       this.osoittimet = new Map(); this.raahattu = false;
@@ -839,7 +840,8 @@
       g.save();
       g.fillStyle = 'rgba(5,15,28,0.88)'; g.fillRect(X, Y, W, H);
       g.strokeStyle = 'rgba(255,255,255,0.25)'; g.strokeRect(X + 0.5, Y + 0.5, W - 1, H - 1);
-      g.font = 'bold 12px sans-serif'; g.fillStyle = '#e9f1f7'; g.fillText('Profiili (malli)', X + 6, Y + 15);
+      g.font = 'bold 12px sans-serif'; g.fillStyle = this.valittuOma ? '#7ed957' : '#e9f1f7';
+      g.fillText(this.valittuOma ? 'Täällä (malli)' : 'Profiili (malli)', X + 6, Y + 15);
       g.font = 'bold 15px sans-serif'; g.fillStyle = '#8fa6ba'; g.fillText('×', X + W - 14, Y + 15);   // napautus sulkee
       this._profiiliAlue = { x: X, y: Y, w: W, h: H };
       // lämpöväli
@@ -1102,12 +1104,30 @@
         }
         g.fillStyle = '#4fc3ff'; g.strokeStyle = '#fff'; g.lineWidth = 2.5;
         g.beginPath(); g.arc(x, y, 7, 0, Math.PI * 2); g.fill(); g.stroke();
+        this._varaa(x - 9, y - 9, 18, 18);
+        const lt = this.lohiTaalla ? this.lohiKohdalla(this.oma.lat, this.oma.lon) : null;   // v24: "lohi 0,0–3,7 m" veneen vieressä
+        if (lt) this._nimi(lt.teksti, [[x + 12, y + 20], [x + 12, y - 12], [x - 110, y + 20], [x - 110, y - 12]], lt.loytyi ? '#7ed957' : '#c3cedd', 0,
+          { font: 'bold 14px sans-serif', reuna: 'rgba(0,0,0,0.9)', rk: 16 });
       }
-      if (this.valittu) {
+      if (this.valittu && !this.valittuOma) {
         const [x, y] = this.ruutu(this.valittu[0], this.valittu[1]);
         g.strokeStyle = '#fff'; g.lineWidth = 2; g.beginPath(); g.arc(x, y, 10, 0, Math.PI * 2); g.stroke();
       }
       g.restore();
+    }
+
+    /** Lohikerros pisteessä kartan valitulla ajalla (v24): { teksti, loytyi } tai null (ei meridataa). */
+    lohiKohdalla(lat, lon) {
+      const d = this.data;
+      if (!d || !d.phy || !d.phy.profiili) return null;
+      const pr = profiiliPisteessa(d.phy, this.aika, lat, lon);
+      if (!pr) return null;
+      const [a, b] = this.lohiVali, k = kerros(pr.arvot, pr.syvyydet, a, b);
+      if (!k) return null;
+      const f = x => x.toFixed(1).replace('.', ',');
+      if (!k.loytyi) return { teksti: 'ei lohikerrosta', loytyi: false };
+      const ala = k.pohjaan ? (k.taysi ? 'yli ' + f(k.pohja) + ' m' : 'pohja') : f(k.ala) + ' m';
+      return { teksti: `lohi ${f(k.yla)}–${ala}`, loytyi: true };
     }
 
     /** Matalikot (v21): huippurengas hiekanvärisenä (huippu min–max m vahvempana, muu nousu haaleana katkoviivalla)
