@@ -497,7 +497,7 @@
       this.data = null; this.aika = 0; this.askel = opts.askel || 0.2;
       this.lohiVali = opts.lohiVali || [6.6, 8.8];
       this.aaltoRajat = opts.aaltoRajat || [0.35, 0.5];   // merkitsevä aallonkorkeus (m)
-      this.tasot = { lampo: true, lohi: true, syvyys: true, tuuli: true, vaylat: true, havainnot: true, aaltoraja: true, jalki: true, matalikot: true, sst: false, virta: true, aalto: false, tausta: true };
+      this.tasot = { lampo: true, lohi: true, syvyys: true, tuuli: true, vaylat: true, havainnot: true, aaltoraja: true, jalki: true, matalikot: true, ais: false, sst: false, virta: true, aalto: false, tausta: true };
       this.syvyys = null;   // puraSyvyys()-tulos
       this.vaylat = null;   // puraVaylat()-tulos
       this.ylaVara = 0; this.alaVara = 0;   // ohjainten peittämä osa ylhäällä ja alhaalla (px)
@@ -505,7 +505,8 @@
       this.merkit = opts.merkit || []; this.oma = null; this.valittu = null;
       this.havainnot = opts.havainnot || [];   // havainnot.js
       this.jalki = opts.jalki || [];   // oma reittijälki 24 h (v20)
-      this.matalikot = []; this.matalikkoVali = '10–20';   // matalikot()-tuloksen lista ja selitteen väli (v21)
+      this.matalikot = []; this.matalikkoVali = '10–20';
+      this.ais = [];   // AIS-kohteet (v23): [{ lat, lon, t, sog, cog, suunta, liikkuu, vari, nimi }]   // matalikot()-tuloksen lista ja selitteen väli (v21)
       this.laatat = new Map(); this.onNapautus = opts.onNapautus || (() => {});
       this.osoittimet = new Map(); this.raahattu = false;
       this._kuuntele();
@@ -621,6 +622,7 @@
       if (d && this.tasot.virta && d.phy) this._virta();
       if (d && this.tasot.tuuli && d.tuuli) this._tuuli();
       if (this.tasot.jalki && this.jalki.length > 1) this._jalki();   // nuolten päälle, merkkien alle
+      if (this.tasot.ais && this.ais.length) this._ais();
       this._merkit();
       this._piirraNimet();   // kaikkien tasojen numerot ja nimet tärkeysjärjestyksessä, ei päällekkäin (v16)
       this._profiiliAlue = null;
@@ -689,6 +691,7 @@
       const osat = ['© OpenStreetMap'];
       if (this.tasot.syvyys && this.syvyys) osat.push('syvyys Traficom');
       if (this.tasot.vaylat && this.vaylat) osat.push('väylät Väylävirasto');
+      if (this.tasot.ais && this.ais.length) osat.push('AIS Fintraffic');
       if (this.syvyys || this.vaylat) osat.push('ei navigointiin');
       const g = this.ctx, txt = osat.join(' · ');
       g.save(); g.font = '10px sans-serif'; g.textAlign = 'right';
@@ -1130,6 +1133,38 @@
       g.restore();
     }
 
+    /** AIS-kohteet (v23): liikkuva alus kolmiona kulkusuuntaan ja 6 min nopeusviiva, paikallaan oleva ympyränä.
+     *  Yli 10 min vanha sijainti haaleana, yli 60 min ei piirretä. Väri alustyypin mukaan (ais.js). */
+    _ais() {
+      const g = this.ctx, nyt = Date.now();
+      g.save(); g.lineJoin = 'round';
+      for (const k of this.ais) {
+        const ikaMin = (nyt - k.t) / 60000;
+        if (!(ikaMin <= 60)) continue;
+        const [x, y] = this.ruutu(k.lat, k.lon);
+        if (x < -40 || y < -40 || x > this.w + 40 || y > this.h + 40) continue;
+        g.globalAlpha = ikaMin > 10 ? 0.45 : 1;
+        if (k.liikkuu && isFinite(k.cog) && k.sog > 0) {   // 6 min nopeusviiva (sog solmua)
+          const m = k.sog * 1852 / 10, c = k.cog * Math.PI / 180;
+          const [x2, y2] = this.ruutu(k.lat + m * Math.cos(c) / 110574, k.lon + m * Math.sin(c) / (111320 * Math.cos(k.lat * Math.PI / 180)));
+          g.strokeStyle = 'rgba(0,0,0,0.6)'; g.lineWidth = 4; g.beginPath(); g.moveTo(x, y); g.lineTo(x2, y2); g.stroke();
+          g.strokeStyle = k.vari; g.lineWidth = 2; g.beginPath(); g.moveTo(x, y); g.lineTo(x2, y2); g.stroke();
+        }
+        g.fillStyle = k.vari; g.strokeStyle = '#000'; g.lineWidth = 1.5; g.beginPath();
+        if (k.liikkuu && isFinite(k.suunta)) {
+          const a = k.suunta * Math.PI / 180, s = Math.sin(a), c = Math.cos(a);
+          const p = (dx, dy) => [x + dx * c - dy * s, y + dx * s + dy * c];   // dy < 0 = keula
+          const [ax, ay] = p(0, -10), [bx, by] = p(5, 7), [cx, cy] = p(-5, 7);
+          g.moveTo(ax, ay); g.lineTo(bx, by); g.lineTo(cx, cy); g.closePath();
+        } else g.arc(x, y, 5, 0, Math.PI * 2);
+        g.fill(); g.stroke();
+        this._varaa(x - 8, y - 10, 16, 18);
+        if (k.nimi && this.z >= 10) this._nimi(k.nimi, [[x + 10, y - 6], [x + 10, y + 12], [x - 12, y - 14]], k.vari, 2.5,
+          { font: '11px sans-serif', reuna: 'rgba(0,0,0,0.85)', ryhma: 'ais', max: 12 });
+      }
+      g.restore();
+    }
+
     /** Oma reittijälki (v20): punainen, haalenee 24 tunnissa. Janat ryhmitellään tunnin ikäluokkiin
      *  (24 polkua), jotta tuhansien pisteiden jälki piirtyy nopeasti myös kartan liikkuessa. */
     _jalki() {
@@ -1177,6 +1212,11 @@
         ['kylmä', '#e9f1f7', 'rgb(' + havaintoVari('kylma') + ')'], ['saalis', '#e9f1f7', 'rgb(' + havaintoVari('saalis') + ')']]);
       if (this.tasot.matalikot && this.matalikot.length) rivit.push([['Matalikko (käyristä) ▲matalin', '#ffe0a0'], ['huippu ' + this.matalikkoVali + ' m', '#e9f1f7', 'rgba(255,196,90,0.85)'],
         ['muu nousu', '#e9f1f7', 'rgba(255,196,90,0.4)']]);
+      if (this.tasot.ais) {
+        rivit.push([['AIS', '#9fd0ff'], ['rahti', '#e9f1f7', '#9fd0ff'], ['matkustaja', '#e9f1f7', '#ffffff'], ['säiliö', '#e9f1f7', '#ffb36b'],
+          ['luotsi', '#e9f1f7', '#ffe066'], ['pelastus', '#e9f1f7', '#ff6b6b']]);
+        rivit.push([['viiva 6 min · ei huviveneitä, ei kalastusaluksia · ei törmäyksenestoon', '#c3cedd']]);
+      }
       if (this.tasot.jalki && this.jalki.length > 1) rivit.push([['Oma jälki 24 h', '#ff6b61'], ['nyt', '#e9f1f7', 'rgba(255,59,48,1)'],
         ['12 h', '#e9f1f7', 'rgba(255,59,48,' + jalkiAlfa(43200).toFixed(2) + ')'], ['24 h sitten', '#e9f1f7', 'rgba(255,59,48,' + jalkiAlfa(86400).toFixed(2) + ')']]);
       if (this.tasot.lampo && d.phy) rivit.push([['Lämpö (malli) ' + f(this.askel) + ' °C välein', '#ffb24a']]);

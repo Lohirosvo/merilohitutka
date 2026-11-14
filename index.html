@@ -183,6 +183,7 @@
           <button data-taso="havainnot">Havainnot</button>
           <button data-taso="jalki">Jälki</button>
           <button data-taso="matalikot">Matalikot</button>
+          <button data-taso="ais">AIS</button>
           <button data-taso="lampo">Lämpö</button>
           <button data-taso="virta">Virta</button>
           <button data-taso="aaltoraja">Aaltoraja</button>
@@ -235,6 +236,18 @@
     <div class="kortti">
       <h2>Reissut</h2>
       <div id="reissut" class="pieni">Ei vielä reissuja.</div>
+    </div>
+    <div class="kortti">
+      <details>
+        <summary>Venepuhelin: klooni tästä puhelimesta</summary>
+        <p class="pieni">Tekee tiedoston, jossa ovat asetukset, omat saalispisteet, karttatasot, alue ja reissut. 24 h jälki ja
+          viimeisin sijainti jäävät pois (kummallakin puhelimella omansa). Lähetä tiedosto venepuhelimeen (Quick Share tai Bluetooth),
+          avaa siellä lohirosvo.github.io/merilohitutka ja valitse Raportit → Lue klooni. Tiedostossa ovat yksityiset saalispisteet:
+          älä laita sitä GitHubiin.</p>
+        <div class="napit"><button class="sininen" id="kloonaa">Tee klooni</button><button id="lueKlooni">Lue klooni</button></div>
+        <input type="file" id="klooniTiedosto" accept=".txt,.json,text/plain,application/json" hidden>
+        <div class="pieni" id="klooniTila"></div>
+      </details>
     </div>
     <div class="kortti">
       <details>
@@ -298,12 +311,13 @@
   <button data-v="v-raportit">⋯<br>RAPORTIT</button>
 </nav>
 
-<script src="alueet.js?v=22"></script>
+<script src="alueet.js?v=23"></script>
 <script src="havainnot.js?v=15"></script>
-<script src="malli.js?v=13"></script>
+<script src="malli.js?v=23"></script>
 <script src="fmi.js?v=13"></script>
 <script src="nopeus.js?v=20"></script>
-<script src="kartta.js?v=21"></script>
+<script src="kartta.js?v=23"></script>
+<script src="ais.js?v=23"></script>
 <script>
 'use strict';
 // ---------- Apufunktiot ----------
@@ -325,6 +339,7 @@ const KENTAT = [
   ['tuuliEnnakkoMin', 'Tuulihälytyksen ennakko, muut alueet (min)'],
   ['alueSadeKm', 'Luoto: kalastusalue, säde kohteesta (km)'],
   ['kohdeNimi', 'Luoto: paluukohde', 'teksti'], ['kohdeLat', 'Kohde lat'], ['kohdeLon', 'Kohde lon'],
+  ['kohde2Nimi', 'Luoto: paluukohde 2 (tyhjä = ei käytössä)', 'teksti'], ['kohde2Lat', 'Kohde 2 lat'], ['kohde2Lon', 'Kohde 2 lon'],
   ['asema1', 'Luoto: asema 1 (numero tai Nimi@lat,lon)', 'teksti'], ['asema2', 'Luoto: asema 2 (numero tai Nimi@lat,lon)', 'teksti'],
   ['tasausS', 'Nopeuden tasaus (s)'], ['halytysViiveS', 'Hälytysviive (s)'], ['toistoS', 'Hälytyksen toisto (s)'],
   ['pysahdysKmh', 'Ei hälytystä alle (km/h)'],
@@ -433,7 +448,7 @@ function avaa(v) {
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('auki', b.dataset.v === v || (v === 'v-kartta' && b.dataset.v === 'v-vesilla')));
   tallennaLS('mlt_valilehti', v);
   window.scrollTo(0, 0);
-  if (v === 'v-kartta') { avaaKarttaNakyma(); pidaNaytto(); }
+  if (v === 'v-kartta') { avaaKarttaNakyma(); pidaNaytto(); setTimeout(() => haeAis(false), 300); }
   else if (oliKartta && !uistelu) vapautaNaytto();
 }
 function karttaAuki() { const s = document.getElementById('v-kartta'); return !!(s && s.classList.contains('auki')); }
@@ -600,9 +615,9 @@ function piirra() {
   const oma = dataAlue === al.tunnus, havainnot = oma ? havaintoData : [], ennuste = oma ? ennusteData : [];
   let t, otsikot, lahto;
   if (al.paluuikkuna) {
-    t = Malli.arvioi({ nyt, sijainti, asetukset, havainnot, ennuste });
+    t = Malli.arvioi({ nyt, sijainti, asetukset: paluuAsetukset(), havainnot, ennuste });
     otsikot = { vihrea: 'Kalastus jatkuu', keltainen: 'Valmistaudu lähtöön', punainen: 'LÄHDE NYT', tuntematon: 'Ei tietoa', kaukana: 'Ei hälytyksiä' };
-    lahto = t.kaukana ? `Yli ${asetukset.alueSadeKm} km kohteesta – tiedot ilman hälytystä`
+    lahto = t.kaukana ? `Yli ${asetukset.alueSadeKm} km paluukohteista – tiedot ilman hälytystä`
       : t.lahtoViimeistaan
         ? (t.minuuttiaLahtoon > 0 ? `Lähde viimeistään klo ${klo(t.lahtoViimeistaan)} (${min(t.minuuttiaLahtoon)})` : `Viimeinen lähtöhetki oli klo ${klo(t.lahtoViimeistaan)}`)
         : (t.ylitys ? '' : (ennuste.length ? 'Raja ei ylity ennustejaksolla' : ''));
@@ -620,7 +635,7 @@ function piirra() {
   $('tilaLahto').textContent = lahto;
   $('tilaSyyt').innerHTML = t.syyt.concat(virheet).map(s => `<li>${s}</li>`).join('');
 
-  $('otsikko').textContent = al.paluuikkuna ? `Merilohitutka · paluu → ${asetukset.kohdeNimi}` : `Merilohitutka · ${al.nimi} · tuulihälytys`;
+  $('otsikko').textContent = al.paluuikkuna ? `Merilohitutka · paluu → ${paluuAsetukset().kohdeNimi}` : `Merilohitutka · ${al.nimi} · tuulihälytys`;
   $('ennusteOtsikko').textContent = 'Ennuste 48 h · ' + al.nimi;
   $('vPaluu').hidden = !al.paluuikkuna;
   document.querySelectorAll('.paluurivi').forEach(e => { e.hidden = !al.paluuikkuna; });
@@ -681,8 +696,9 @@ async function haeKaikki() {
   const pisteet = [];
   let omaMukana = false;
   if (al.paluuikkuna) {
-    pisteet.push([asetukset.kohdeLat, asetukset.kohdeLon]);
-    omaMukana = !!sijainti && Malli.etaisyysKm(sijainti.lat, sijainti.lon, asetukset.kohdeLat, asetukset.kohdeLon) <= asetukset.alueSadeKm;
+    const pk = paluuAsetukset();   // v23: lähin paluukohde (Köpmanholmen tai Ohtakari)
+    pisteet.push([pk.kohdeLat, pk.kohdeLon]);
+    omaMukana = !!sijainti && Malli.etaisyysKm(sijainti.lat, sijainti.lon, pk.kohdeLat, pk.kohdeLon) <= asetukset.alueSadeKm;
   } else {
     // muut alueet: ennuste asemien kohdista (ulkosaaret, merellä) ja omasta sijainnista, suurin arvo
     for (const a of asemat) { const m = String(a).match(/@\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*$/); if (m) pisteet.push([parseFloat(m[1]), parseFloat(m[2])]); }
@@ -880,6 +896,7 @@ function piirraMeriTila() {
   if (matalikkoTulos) { const t = matalikkoTulos, v = t.matalikot.filter(m => m.luokka === 'vali').length;
     osat.push(`Matalikot käyristä: ${t.matalikot.length} (huippu ${luku(t.min, 0)}–${luku(t.max, 0)} m: ${v}, muu nousu ≥ ${luku(t.nousuM, 0)} m: ${t.matalikot.length - v}); suljettuja käyriä ${t.renkaita}, mäkiä ${t.maki}, kuoppia ${t.kuoppa}, epäselviä ${t.epaselva}`); }
   if (vaylat) osat.push(`Väylät: Väylävirasto, vesiväyläaineisto (CC BY 4.0). Ei navigointikäyttöön`);
+  if (typeof aisTila === 'function' && aisTila()) osat.push(aisTila());
   if (meri.virheet && meri.virheet.length) osat.push('virheet: ' + meri.virheet.join(' | '));
   osat.push('Todisteen taso: malli (lämpö, lohikerros, virta, aalto), satelliitti (SST), sääennuste (tuuli). Ennusteen tarkkuus heikkenee loppua kohti. E.U. Copernicus Marine Service Information.');
   el.textContent = osat.join(' · ');
@@ -1010,7 +1027,7 @@ function naytaPiste(lat, lon) {
   if (lat === null) { suljePiste(); return; }
   el.hidden = false;
   if (!nakyma) {   // ei meridataa (esim. Porin edusta): syvyys, väylä ja omat havainnot silti
-    const osat = [jalkiTeksti(lat, lon), matalikkoTeksti(lat, lon), syvyysTeksti(lat, lon), vaylaTeksti(lat, lon), havaintoTeksti(lat, lon)].filter(Boolean);
+    const osat = [jalkiTeksti(lat, lon), aisTeksti(lat, lon), matalikkoTeksti(lat, lon), syvyysTeksti(lat, lon), vaylaTeksti(lat, lon), havaintoTeksti(lat, lon)].filter(Boolean);
     el.textContent = 'Ei meridataa tässä' + (osat.length ? ' · ' + osat.join(' · ') : '.') + '  ✕'; mitoitaKartta(); return;
   }
   const n = nakyma, t = kartta.aika, osat = [];
@@ -1018,6 +1035,8 @@ function naytaPiste(lat, lon) {
   if (jt) osat.push(jt);
   const mt = matalikkoTeksti(lat, lon);
   if (mt) osat.push(mt);
+  const at = aisTeksti(lat, lon);
+  if (at) osat.push(at);
   const lohi = lohiTeksti(lat, lon);
   if (lohi) osat.push(lohi);
   const syv = syvyysTeksti(lat, lon);
@@ -1047,10 +1066,10 @@ function naytaPiste(lat, lon) {
     }
   }
   if (valittuAlue.paluuikkuna) {
-    const etK = Malli.etaisyysKm(lat, lon, asetukset.kohdeLat, asetukset.kohdeLon);
-    osat.push(`${luku(etK)} km ${asetukset.kohdeNimi}iin`);
+    const pk = Malli.lahinKohde(asetukset, { lat, lon }), etK = Malli.etaisyysKm(lat, lon, pk.kohdeLat, pk.kohdeLon);
+    osat.push(`${luku(etK)} km ${Malli.illatiivi(pk.kohdeNimi)}`);
   }
-  el.textContent = (osat.length > (jt ? 2 : 1) + (mt ? 1 : 0) ? '' : 'Ei dataa tässä pisteessä (maa tai alueen ulkopuolella) · ') + osat.join(' · ') + '  ✕';
+  el.textContent = (osat.length > (jt ? 2 : 1) + (mt ? 1 : 0) + (at ? 1 : 0) ? '' : 'Ei dataa tässä pisteessä (maa tai alueen ulkopuolella) · ') + osat.join(' · ') + '  ✕';
   mitoitaKartta();
 }
 function mitoitaKartta() {
@@ -1098,6 +1117,8 @@ function matalikkoTeksti(lat, lon) {
   const f = d => luku(d, d % 1 ? 1 : 0);
   return `matalikko: matalin kohta ${f(m.ala)}–${f(m.d)} m` + (m.nousu > 0 ? `, ympärillä yli ${f(m.ymparisto)} m (nousu yli ${f(m.nousu)} m)` : ', ympärillä syvempää') + ' (Traficomin käyristä)';
 }
+/** Paluuikkunan asetukset lähimmällä paluukohteella (v23: Köpmanholmen tai Ohtakari). */
+function paluuAsetukset() { return Malli.lahinKohde(asetukset, sijainti); }
 function aaltoRajat() {
   const a = isFinite(asetukset.aaltoRaja1) ? asetukset.aaltoRaja1 : 0.35, b = isFinite(asetukset.aaltoRaja2) ? asetukset.aaltoRaja2 : 0.5;
   return a <= b ? [a, b] : [b, a];
@@ -1133,6 +1154,7 @@ function avaaKarttaNakyma() {
       b.classList.toggle('paalla', !!kartta.tasot[b.dataset.taso]);
       b.addEventListener('click', () => {
         kartta.tasot[b.dataset.taso] = !kartta.tasot[b.dataset.taso]; b.classList.toggle('paalla');
+        if (b.dataset.taso === 'ais') { if (kartta.tasot.ais) haeAis(true); piirraMeriTila(); }
         piirraLohiRivi(); mitoitaKartta(); kartta.naytaSelite(3000); tallennaKarttaTila();
         if (kartta.valittu) naytaPiste(kartta.valittu[0], kartta.valittu[1]);
       });
@@ -1225,6 +1247,128 @@ $('keskitaOma').addEventListener('click', () => {
   tallennaKarttaTila();
 });
 
+// ---------- AIS (v23, Hannu 14.11.2026: "Tehdään AIS") ----------
+// Digitraffic (Fintraffic): vain A-luokka; ei huviveneitä eikä kalastusaluksia. Haetaan minuutin välein vain, kun AIS-siru on
+// päällä, kartta auki ja sivu näkyvissä: muuten ei dataliikennettä. Ei törmäyksenestoon (veneen AIS-VHF on se).
+const ais = { kohteet: [], meta: lue('mlt_ais_meta') || {}, viimeksi: 0, virhe: '', otsake: true, from: true, kesken: false,
+              haettu: null, kutsuja: 0, metaTapa: 'mmsi' };
+function aisPaalla() { return !!(kartta && kartta.tasot.ais && karttaAuki() && document.visibilityState === 'visible'); }
+function aisSade() {   // näkymän puolilävistäjä km, 5–60
+  const mpp = 156543.03 * Math.cos(kartta.lat * Math.PI / 180) / Math.pow(2, kartta.z);
+  return Math.max(5, Math.min(60, Math.hypot(kartta.w, kartta.h) / 2 * mpp / 1000));
+}
+async function aisHae(url) {
+  let r;
+  try { ais.kutsuja++; r = await fetch(url, ais.otsake ? { headers: { 'Digitraffic-User': AIS.KAYTTAJA } } : {}); }
+  catch (e) {   // selain esti (CORS) tai ei verkkoa: kerran uudelleen ilman otsaketta
+    if (ais.otsake) { ais.otsake = false; return aisHae(url); }
+    throw new Error('ei yhteyttä tai selain esti haun (' + e.message + ')');
+  }
+  if (r.status === 400 && /&from=\d+/.test(url)) { ais.from = false; return aisHae(url.replace(/&from=\d+/, '')); }
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+async function aisMeta() {   // tunnistetiedot (nimi, tyyppi) aluskohtaisesti, talteen puhelimeen; enintään 10 uutta kerralla
+  if (ais.metaTapa !== 'mmsi') return;
+  const puuttuu = ais.kohteet.map(k => k.mmsi).filter(m => !ais.meta[m] || Date.now() - ais.meta[m].t > 30 * 86400e3).slice(0, 10);
+  let virheita = 0;
+  for (const m of puuttuu) {
+    try {
+      const j = await aisHae(`${AIS.OSOITE}/vessels/${m}`), x = AIS.jasennaMeta(j)[m];
+      ais.meta[m] = Object.assign({ nimi: '', tyyppi: NaN, kohde: '' }, x || {}, { t: Date.now() });
+    } catch (e) { virheita++; ais.meta[m] = { nimi: '', tyyppi: NaN, kohde: '', t: Date.now() - 29 * 86400e3 }; }   // uusi yritys vuorokauden päästä
+  }
+  if (puuttuu.length >= 3 && virheita === puuttuu.length) ais.metaTapa = 'ei';   // aluskohtainen haku ei toimi: ei yritetä tällä käynnillä
+  const avaimet = Object.keys(ais.meta);
+  if (avaimet.length > 600) avaimet.sort((a, b) => ais.meta[a].t - ais.meta[b].t).slice(0, avaimet.length - 600).forEach(k => delete ais.meta[k]);
+  tallennaLS('mlt_ais_meta', ais.meta);
+}
+async function haeAis(pakota) {
+  if (!aisPaalla() || ais.kesken || (!pakota && Date.now() - ais.viimeksi < 55000)) return;
+  ais.kesken = true; ais.viimeksi = Date.now();
+  try {
+    const j = await aisHae(AIS.osoite(kartta.lat, kartta.lon, aisSade(), ais.from ? Date.now() - 3600e3 : NaN));
+    ais.kohteet = AIS.jasenna(j, Date.now(), 60); ais.virhe = ''; ais.haettu = new Date();
+    await aisMeta();
+  } catch (e) { ais.virhe = e.message; }
+  ais.kesken = false;
+  paivitaAisKartalle(); piirraMeriTila();
+}
+function paivitaAisKartalle() {
+  if (!kartta) return;
+  kartta.ais = ais.kohteet.map(k => {
+    const m = ais.meta[k.mmsi] || {}, ty = AIS.tyyppi(m.tyyppi);
+    return Object.assign({}, k, { nimi: m.nimi || '', kohde: m.kohde || '', tyyppiNimi: ty.nimi, vari: ty.vari, liikkuu: !AIS.paikallaan(k),
+                                  suunta: isFinite(k.heading) ? k.heading : k.cog });
+  });
+  if (karttaAuki()) kartta.piirra();
+}
+function aisTila() {
+  if (!kartta || !kartta.tasot.ais) return '';
+  const n = ais.kohteet.length, nimet = ais.kohteet.filter(k => ais.meta[k.mmsi] && ais.meta[k.mmsi].nimi).length;
+  return `AIS: Fintraffic Digitraffic (CC BY 4.0), vain A-luokka – ei huviveneitä eikä kalastusaluksia, viivettä, ei törmäyksenestoon; `
+    + (ais.haettu ? `${n} alusta (nimi ${nimet}/${n}), haettu klo ${klo(ais.haettu)}` : 'ei vielä haettu')
+    + (ais.virhe ? ` · VIRHE: ${ais.virhe}` : '') + (ais.otsake ? '' : ' · ilman Digitraffic-User-otsaketta') + (ais.metaTapa === 'ei' ? ' · nimihaku ei toimi' : '');
+}
+/** Napautus: lähin AIS-kohde alle 24 px:n päässä. */
+function aisTeksti(lat, lon) {
+  if (!kartta || !kartta.tasot.ais || !kartta.ais.length) return '';
+  const b = kartta.ruutu(lat, lon);
+  let paras = null, pd = 24;
+  for (const k of kartta.ais) { const a = kartta.ruutu(k.lat, k.lon), d = Math.hypot(a[0] - b[0], a[1] - b[1]); if (d < pd && Date.now() - k.t <= 3600e3) { pd = d; paras = k; } }
+  if (!paras) return '';
+  const k = paras, ika = (Date.now() - k.t) / 60000;
+  let t = `AIS: ${k.nimi || 'MMSI ' + k.mmsi} (${k.tyyppiNimi}${k.kohde ? ', määränpää ' + k.kohde : ''}), `
+    + (k.liikkuu ? `${luku(k.sog * AIS.SOLMU)} km/h (${luku(k.sog)} kn) kohti ${Math.round(k.cog)}°` : 'paikallaan');
+  if (sijainti && gpsAlue()) {
+    const s = Nopeus.suunta(gpsPisteet), v = Nopeus.tasattuNopeus(gpsPisteet, Date.now(), asetukset.tasausS);
+    const o = AIS.lahinOhitus({ lat: sijainti.lat, lon: sijainti.lon, kmh: v, suunta: s }, k);
+    t += `, ${etaisyys(o.nytM)} veneestä` + (k.liikkuu && o.tcpaMin > 0 && o.tcpaMin < 120 ? `; lähin ohitus ${etaisyys(o.cpaM)} ${min(o.tcpaMin)} päästä` : '');
+  }
+  return t + `; sijainti ${ika < 1 ? 'alle 1 min' : min(ika)} vanha`;
+}
+setInterval(() => haeAis(false), 15000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') haeAis(false); });
+
+// ---------- Klooni venepuhelimeen (v23, Hannu 14.11.2026) ----------
+// Asetukset, omat saalispisteet, karttatasot, alue ja reissut tiedostoon; venepuhelin lukee sen. Laitekohtaiset jäävät pois.
+const KLOONI_POIS = ['mlt_jalki', 'mlt_sijainti', 'mlt_uistelu', 'mlt_valilehti', 'mlt_data', 'mlt_meri', 'mlt_ais_meta'];
+function teeKlooni() {
+  const tiedot = {};
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith('mlt_') && !KLOONI_POIS.includes(k)) tiedot[k] = localStorage.getItem(k);
+  }
+  return { sovellus: 'merilohitutka', muoto: 1, tehty: new Date().toISOString(), tiedot };
+}
+function klooniNimi(d = new Date()) {
+  const p = x => String(x).padStart(2, '0');
+  return `merilohitutka_klooni_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.txt`;
+}
+async function jaaKlooni() {
+  const k = teeKlooni(), nimi = klooniNimi(), teksti = JSON.stringify(k), n = Object.keys(k.tiedot).length;
+  const blob = new Blob([teksti], { type: 'text/plain' });
+  let file = null; try { file = new File([blob], nimi, { type: 'text/plain' }); } catch (e) {}
+  if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: 'Merilohitutka: klooni' }); $('klooniTila').textContent = `Jaettu: ${nimi} (${n} kohdetta).`; return; }
+    catch (e) { if (e && e.name === 'AbortError') { $('klooniTila').textContent = 'Jako peruttu.'; return; } }
+  }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nimi;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  $('klooniTila').textContent = `Tallennettu latauksiin: ${nimi} (${n} kohdetta). Lähetä se venepuhelimeen.`;
+}
+function lueKlooni(teksti) {
+  let k;
+  try { k = JSON.parse(teksti); } catch (e) { return 'Tiedosto ei ole kloonitiedosto (ei JSONia).'; }
+  if (!k || k.sovellus !== 'merilohitutka' || !k.tiedot || typeof k.tiedot !== 'object') return 'Tiedosto ei ole Merilohitutkan klooni.';
+  const avaimet = Object.keys(k.tiedot).filter(x => x.startsWith('mlt_') && !KLOONI_POIS.includes(x) && typeof k.tiedot[x] === 'string');
+  if (!avaimet.length) return 'Kloonissa ei ole tietoja.';
+  if (!confirm(`Korvataanko tämän puhelimen asetukset ja omat tiedot kloonilla (${avaimet.length} kohdetta, tehty ${new Date(k.tehty).toLocaleString('fi-FI')})?`)) return 'Peruttu.';
+  for (const x of avaimet) localStorage.setItem(x, k.tiedot[x]);
+  setTimeout(() => location.reload(), 300);
+  return `Luettu ${avaimet.length} kohdetta. Sivu latautuu uudelleen.`;
+}
+
 // ---------- Käynnistys ----------
 $('paivita').addEventListener('click', paivita);
 $('saalisTallenna').addEventListener('click', () => {
@@ -1233,6 +1377,12 @@ $('saalisTallenna').addEventListener('click', () => {
   tallennaLS('mlt_saaliit', uudet); $('saalisTeksti').value = ''; piirraSaaliit();
 });
 $('saalisTyhjenna').addEventListener('click', () => { tallennaLS('mlt_saaliit', []); piirraSaaliit(); });
+$('kloonaa').addEventListener('click', () => { jaaKlooni(); });
+$('lueKlooni').addEventListener('click', () => $('klooniTiedosto').click());
+$('klooniTiedosto').addEventListener('change', async e => {
+  const f = e.target.files && e.target.files[0]; if (!f) return;
+  $('klooniTila').textContent = lueKlooni(await f.text()); e.target.value = '';
+});
 $('jalkiPoista').addEventListener('click', () => {
   jalki = []; jalkiMuuttui = true; tallennaJalki(true);
   if (kartta) { kartta.jalki = jalki; kartta.piirra(); }

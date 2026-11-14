@@ -1,4 +1,4 @@
-/* Merilohitutka – alueet.js (v22)
+/* Merilohitutka – alueet.js (v23)
  * Kalastusalueet. Yksi lähde: sovellus lataa tämän skriptinä ja hae_copernicus.py lukee saman tiedoston.
  * Hakasulkeiden [ ] välissä on oltava puhdasta JSONia (ei kommentteja, ei pilkkua viimeisen alkion jälkeen).
  *
@@ -22,6 +22,7 @@
  * luontoon.fi; saariryhmän laajuus arvioitu) ja Luoto itään Lohtajalle (Lohtaja 64,0236 23,5056 ja Ohtakari 64,0905 23,4053,
  * Wikipedia). tuulipisteetLisaa: kiinteiden pisteiden lisäksi haku lisää mallin meriruuduista pisteet alueen osiin,
  * jotka ovat yli 10 km:n päässä kiinteistä (Lohtajan suunta).
+ * v23: Ohtakari toiseksi paluukohteeksi (Hannu 14.11.); merkki satamaan 64,08944 23,40594 (predictwind.com), paluukohteen tyyli.
  */
 (typeof window !== 'undefined' ? window : globalThis).ALUEET = [
   {
@@ -36,7 +37,7 @@
       { "nimi": "Kolmoispatti", "lat": 63.830822, "lon": 22.506817, "muoto": "kolmio", "vari": "#ff9d3a" },
       { "nimi": "Kallan", "lat": 63.751469, "lon": 22.522764, "vari": "#ffffff" },
       { "nimi": "Tankar", "lat": 63.951, "lon": 22.845, "vari": "#ffffff" },
-      { "nimi": "Ohtakari", "lat": 64.0905, "lon": 23.4053, "vari": "#ffffff" }
+      { "nimi": "Ohtakari", "lat": 64.08944, "lon": 23.40594, "muoto": "nelio", "vari": "#ffd54a" }
     ]
   },
   {

@@ -9,6 +9,11 @@
     kohdeNimi: 'Köpmanholmen',
     kohdeLat: 63.806844,   // 63°48'24.64" N (Hannun antama)
     kohdeLon: 22.671069,   // 22°40'15.85" E
+    // v23 (Hannu 14.11.2026: "Lisätään Ohtakari"): toinen paluukohde Lohtajan vesille; paluu lasketaan lähempään.
+    // Ohtakarin venesatama 64,08944 23,40594 (predictwind.com); tyhjä nimi = ei käytössä.
+    kohde2Nimi: 'Ohtakari',
+    kohde2Lat: 64.08944,
+    kohde2Lon: 23.40594,
     rajaKeskituuli: 10,    // m/s, Hannun raja
     rajaPuuska: 14,        // m/s, ehdotus (säädettävä)
     nopeusNouseva: 25,     // km/h, Hannun 25–35 alapää: tällä lasketaan lähtöhetki
@@ -245,7 +250,30 @@
     return null;
   }
 
-  const Malli = { OLETUKSET, etaisyysKm, aikaMin, ylitysHetki, arvoHetkella, yhdistaEnnusteet, arvioi, tuulihalytys, alueSijainnille };
+  /** Paluukohteet asetuksista: [{ nimi, lat, lon }]; toinen vain, jos sillä on nimi ja koordinaatit. */
+  function paluukohteet(a) {
+    const k = [{ nimi: a.kohdeNimi, lat: a.kohdeLat, lon: a.kohdeLon }];
+    if (a.kohde2Nimi && String(a.kohde2Nimi).trim() && isFinite(a.kohde2Lat) && isFinite(a.kohde2Lon))
+      k.push({ nimi: String(a.kohde2Nimi).trim(), lat: a.kohde2Lat, lon: a.kohde2Lon });
+    return k;
+  }
+  /** Asetukset, joissa kohde = sijaintia lähin paluukohde (v23). Ilman sijaintia ensimmäinen kohde. */
+  function lahinKohde(a, sijainti) {
+    const k = paluukohteet(Object.assign({}, OLETUKSET, a || {}));
+    let paras = k[0];
+    if (sijainti && isFinite(sijainti.lat) && isFinite(sijainti.lon))
+      for (const x of k) if (etaisyysKm(sijainti.lat, sijainti.lon, x.lat, x.lon) < etaisyysKm(sijainti.lat, sijainti.lon, paras.lat, paras.lon)) paras = x;
+    return Object.assign({}, a, { kohdeNimi: paras.nimi, kohdeLat: paras.lat, kohdeLon: paras.lon });
+  }
+  /** Paikannimi illatiivissa: "Köpmanholmen" → "Köpmanholmeniin", "Ohtakari" → "Ohtakariin". */
+  function illatiivi(nimi) {
+    const n = String(nimi || '').trim(), v = n.slice(-1).toLowerCase();
+    if (!n) return n;
+    return 'aeiouyäö'.includes(v) ? n + n.slice(-1) + 'n' : n + 'iin';
+  }
+
+  const Malli = { OLETUKSET, etaisyysKm, aikaMin, ylitysHetki, arvoHetkella, yhdistaEnnusteet, arvioi, tuulihalytys, alueSijainnille,
+                  paluukohteet, lahinKohde, illatiivi };
   if (typeof module !== 'undefined' && module.exports) module.exports = Malli;
   else root.Malli = Malli;
 })(typeof window !== 'undefined' ? window : this);
