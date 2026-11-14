@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b1726">
 <title>Merilohitutka</title>
+<!-- v28 (Hannu 14.11.2026 "1 2 3 kerralla"): nousun lämpöraja (48 h -välilehti, ⓘ), 48 h aikajana aallolla ja lohikerroksella, nopeushälytys 3 m:n virrasta (valinta) -->
 <!-- v27 (Hannu 14.11.2026): lohikerroksen reuna haalenee rajan molemmin puolin (asetus lohiReuna, oletus 0,4 °C) ja rajaviiva: sininen liian kylmä, punainen liian lämmin -->
 <!-- v26 (Hannu 14.11.2026 "Tehdään"): service worker sw.js, sovellus käynnistyy ilman verkkoa -->
 <!-- v25 (Hannu 14.11.2026): kuvake ja aloitusnäyttö (manifest, oma ikkuna ilman osoiteriviä) -->
@@ -40,6 +41,10 @@
   td, th { padding:3px 4px; text-align:right; } th { color:var(--himmea); font-weight:600; }
   td:first-child, th:first-child { text-align:left; }
   tr.paiva td { color:var(--syaani); font-weight:700; padding-top:8px; text-align:left; }
+  tr.hyva td:first-child { box-shadow:inset 3px 0 0 #6fe39a; padding-left:8px; }   /* v28: tuuli ja aalto alle rajojen */
+  .nousu { font-size:19px; font-weight:700; margin:4px 0 6px; }
+  .rajat select { width:100%; margin-top:4px; font-size:22px; padding:9px 4px; background:#0d1b2b; color:var(--teksti);
+    border:1px solid var(--reuna); border-radius:8px; }
 
   .rajat { display:flex; gap:12px; }
   .rajat label { flex:1; display:block; color:var(--himmea); font-size:15px; }
@@ -154,6 +159,7 @@
       <div class="rajat">
         <label>Minimi (Hanaa)<input id="nopeusMin" inputmode="decimal"></label>
         <label>Maksimi (Himmaa)<input id="nopeusMax" inputmode="decimal"></label>
+        <label style="flex:0.8">Virta<select id="halytysSyvyys"><option value="pinta">pinta</option><option value="3m">3 m</option></select></label>
       </div>
       <div class="halytystila" id="halytystila">Aloita uistelu, niin hälytys on päällä.</div>
     </div>
@@ -211,10 +217,17 @@
   <!-- ===== 48H SUUNNITTELU ===== -->
   <section class="valilehti" id="v-48h">
     <div class="kortti">
+      <h2>Nousun lämpöraja</h2>
+      <div class="nousu" id="nousuTila">–</div>
+      <div class="pieni" id="nousuLisa"></div>
+    </div>
+    <div class="kortti">
       <h2 id="ennusteOtsikko">Ennuste 48 h</h2>
       <div class="rivi"><span>Raja ylittyy</span><span id="ylitys">–</span></div>
       <div class="pieni" id="ennusteLahde"></div>
-      <table id="ennusteTaulu"><thead><tr><th>Klo</th><th>Keski</th><th>Puuska</th><th>Suunta</th></tr></thead><tbody></tbody></table>
+      <div class="pieni" id="aikajanaTila"></div>
+      <table id="ennusteTaulu"><thead><tr><th>Klo</th><th>Keski</th><th>Puuska</th><th>Suunta</th><th>Aalto</th><th>Lohi m</th></tr></thead><tbody></tbody></table>
+      <div class="pieni" id="aikajanaSelite"></div>
     </div>
 
     <div class="kortti">
@@ -332,7 +345,7 @@
 
 <script src="alueet.js?v=23"></script>
 <script src="havainnot.js?v=15"></script>
-<script src="malli.js?v=23"></script>
+<script src="malli.js?v=24"></script>
 <script src="fmi.js?v=13"></script>
 <script src="nopeus.js?v=20"></script>
 <script src="kartta.js?v=25"></script>
@@ -365,13 +378,14 @@ const KENTAT = [
   ['lampoAskel', 'Lämpökäyrien väli (°C)'],
   ['lohiMin', 'Lohikerros, alin lämpö (°C)'], ['lohiMax', 'Lohikerros, ylin lämpö (°C)'],
   ['lohiReuna', 'Lohikerros: reunan haalennus rajan molemmin puolin (°C, 0 = terävä)'],
+  ['nousuLampo', 'Nousun lämpöraja: alueen pintavesi (°C)'],
   ['aaltoRaja1', 'Aaltoraja 1, merkitsevä aallonkorkeus (m)'], ['aaltoRaja2', 'Aaltoraja 2, merkitsevä aallonkorkeus (m)'],
   ['matalikkoMin', 'Matalikko: huippukäyrä vähintään (m)'], ['matalikkoMax', 'Matalikko: huippukäyrä enintään (m)'],
   ['nousuM', 'Matalikko muuten: nousu ympäristöstä vähintään (m)']
 ];
 function oletukset() {
   return Object.assign({}, Malli.OLETUKSET, Nopeus.OLETUKSET,
-    { asema1: Malli.OLETUKSET.asemat[0], asema2: Malli.OLETUKSET.asemat[1], lampoAskel: 0.2, lohiMin: 6.6, lohiMax: 8.8, lohiReuna: 0.4,
+    { asema1: Malli.OLETUKSET.asemat[0], asema2: Malli.OLETUKSET.asemat[1], lampoAskel: 0.2, lohiMin: 6.6, lohiMax: 8.8, lohiReuna: 0.4, nousuLampo: 6.6, halytysSyvyys: 'pinta',
       aaltoRaja1: 0.35, aaltoRaja2: 0.5,   // Hannu 13.11.: merkitsevä aallonkorkeus
       matalikkoMin: 10, matalikkoMax: 20, nousuM: 5 });   // Hannu 13.11.: "10 m matalikko–20 m tai poikkeaa ympäristöstä merkittävästi" (5 m = oletus)
 }
@@ -388,6 +402,7 @@ function piirraAsetukset() {
   ).join('');
   $('nopeusMin').value = luku(asetukset.nopeusMin);
   $('nopeusMax').value = luku(asetukset.nopeusMax);
+  $('halytysSyvyys').value = asetukset.halytysSyvyys === '3m' ? '3m' : 'pinta';   // v28
 }
 function lueAsetukset() {
   for (const [k, , tyyppi] of KENTAT) {
@@ -540,6 +555,7 @@ $('uistelu').addEventListener('click', () => {
 });
 $('nopeusMin').addEventListener('change', lueRajat);
 $('nopeusMax').addEventListener('change', lueRajat);
+$('halytysSyvyys').addEventListener('change', e => { asetukset.halytysSyvyys = e.target.value; tallennaLS('mlt_asetukset', asetukset); piirraNopeus(); });   // v28
 
 // ---------- GPS ja nopeus ----------
 function piirraGps() {
@@ -557,7 +573,10 @@ function piirraNopeus() {
   $('suunta').textContent = isFinite(s) ? Math.round(s) + '°' : '';
   const vesi = piirraVesiNopeus(kmh, s, nyt);
   // v18 (Hannu 13.11.): hälytys veden suhteen, kun virtatieto on; muuten maanopeus. Pysähdys (vesi ei laskettavissa) -> maanopeus.
-  const vedessa = !!vesi && isFinite(vesi.kmh), kaytetty = vedessa ? vesi.kmh : kmh, kohde = vedessa ? $('vesiKmh') : $('kmh');
+  // v28 (Hannu 14.11.): valinta "Virta 3 m" → hälytys 3 m:n veden suhteen nopeudesta (vieheet syvemmällä kuin pinta); ilman 3 m:n virtaa pinnasta
+  const vedessa = !!vesi && isFinite(vesi.kmh), syvalla = asetukset.halytysSyvyys === '3m', v3 = vedessa && syvalla && isFinite(vesi.kmh3);
+  const kaytetty = v3 ? vesi.kmh3 : vedessa ? vesi.kmh : kmh;
+  const kohde = v3 ? ($('vesiKmh').querySelector('.syva') || $('vesiKmh')) : vedessa ? $('vesiKmh') : $('kmh');
   const el = $('halytystila');
   $('kmh').style.color = ''; $('vesiKmh').style.color = '';
   if (!uistelu) { el.className = 'halytystila'; el.textContent = 'Aloita uistelu, niin hälytys on päällä.'; return; }
@@ -567,7 +586,7 @@ function piirraNopeus() {
   el.className = 'halytystila ' + r.luokka;
   kohde.style.color = r.luokka === 'hidas' ? '#f2b33d' : r.luokka === 'nopea' ? '#f05aa0' : '';
   el.textContent = tekstit[r.luokka] + ` (${luku(asetukset.nopeusMin)}–${luku(asetukset.nopeusMax)} km/h ` +
-    (vedessa ? 'veden suhteen)' : 'maan suhteen – ei virtatietoa)');
+    (v3 ? 'veden suhteen 3 m:ssä)' : vedessa ? (syvalla ? 'veden suhteen pinnassa – 3 m:n virtaa ei ole)' : 'veden suhteen)') : 'maan suhteen – ei virtatietoa)');
   if (r.puhu) puhu(r.puhu);
 }
 
@@ -578,6 +597,7 @@ async function lataaNykyPaiva() {
   const al = valittuAlue;
   const n = meri && meri.paivat ? await haePaiva(tamaPaiva()) : null;
   if (al === valittuAlue) nykyData = n;
+  lataaAikajana();   // v28
 }
 function virtaNyt(lat, lon, ms, ku = 'u', kv = 'v') {   // v21: ku/kv = 'u3'/'v3' → virta 3 m:ssä
   const p = nykyData && nykyData.phy; if (!p || !p.ajat || !p.ajat.length || !p[ku] || !p[kv]) return null;
@@ -676,14 +696,25 @@ function piirra() {
   const alku = nyt.getTime() - 3600000;
   const rivit = ennuste.filter(r => r.t.getTime() >= alku).filter((r, i) => i < 13 || r.t.getHours() % 3 === 0);
   let edPaiva = null;
-  $('ennusteTaulu').querySelector('tbody').innerHTML = rivit.map(r => {
+  // v28: aalto ja lohikerros valitussa kohdassa (Copernicus 3 h välein, lähin aika ±1,5 h); vihreä reuna = tuuli ja aalto alle rajojen
+  const kohta = aikajanaKohta(), aR = asetukset.aaltoRaja1;
+  const tiedot = rivit.map(r => {
+    const m = kohta ? aikajanaArvot(r.t.getTime(), kohta.lat, kohta.lon) : null;
+    const hs = m && isFinite(m.hs) ? m.hs : NaN;
+    return { r, m, hs, hyva: r.ws < asetukset.rajaKeskituuli && r.wg < asetukset.rajaPuuska && !(hs >= aR) };
+  });
+  $('ennusteTaulu').querySelector('tbody').innerHTML = tiedot.map(({ r, m, hs, hyva }) => {
     const p = r.t.toDateString(); let otsake = '';
-    if (p !== edPaiva) { otsake = `<tr class="paiva"><td colspan="4">${pvm(r.t)}</td></tr>`; edPaiva = p; }
-    return otsake + `<tr><td>${klo(r.t)}</td>
+    if (p !== edPaiva) { otsake = `<tr class="paiva"><td colspan="6">${pvm(r.t)}</td></tr>`; edPaiva = p; }
+    return otsake + `<tr class="${hyva ? 'hyva' : ''}"><td>${klo(r.t)}</td>
       <td class="${r.ws >= asetukset.rajaKeskituuli ? 'yli' : ''}">${luku(r.ws)}</td>
       <td class="${r.wg >= asetukset.rajaPuuska ? 'yli' : ''}">${luku(r.wg)}</td>
-      <td>${isFinite(r.wd) ? Math.round(r.wd) + '°' : '–'}</td></tr>`;
+      <td>${isFinite(r.wd) ? Math.round(r.wd) + '°' : '–'}</td>
+      <td class="${hs >= aR ? 'yli' : ''}">${isFinite(hs) ? luku(hs) : '–'}</td>
+      <td>${m ? lohiLyhyt(m.lohi) : '–'}</td></tr>`;
   }).join('');
+  piirraAikajanaTila(kohta, tiedot);
+  piirraNousu();
 
   $('asemaLista').innerHTML = havainnot.length ? havainnot.map(h => `
     <div class="rivi"><span>${h.nimi} <span class="pieni">klo ${klo(h.aika)}</span></span>
@@ -903,6 +934,7 @@ function esilataa() {   // tänään ja huomenna valmiiksi puhelimeen (merellä 
   Promise.all(meri.paivat.slice(i, i + 2).map(p => haePaiva(p.pvm))).then(paivitaOfflineTila);   // v26
 }
 function piirraMeriTila() {
+  piirraNousu();   // v28
   const el = $('dataTila');
   if (!meri) { el.textContent = `${valittuAlue.nimi}: meridataa ei ole (ajastettu haku ei ole vielä tuottanut tiedostoa tai verkkoa ei ole).`; return; }
   const luotu = new Date(meri.luotu), ika = (Date.now() - luotu) / 3600000;
@@ -920,6 +952,7 @@ function piirraMeriTila() {
   if (vaylat) osat.push(`Väylät: Väylävirasto, vesiväyläaineisto (CC BY 4.0). Ei navigointikäyttöön`);
   if (typeof aisTila === 'function' && aisTila()) osat.push(aisTila());
   if (meri.virheet && meri.virheet.length) osat.push('virheet: ' + meri.virheet.join(' | '));
+  if (nousuTeksti) osat.push(nousuTeksti);       // v28
   if (offlineTeksti) osat.push(offlineTeksti);   // v26
   osat.push('Todisteen taso: malli (lämpö, lohikerros, virta, aalto), satelliitti (SST), sääennuste (tuuli). Ennusteen tarkkuus heikkenee loppua kohti. E.U. Copernicus Marine Service Information.');
   el.textContent = osat.join(' · ');
@@ -1163,7 +1196,7 @@ function lueLohiVali() {
   if (isFinite(b)) asetukset.lohiMax = b;
   if (asetukset.lohiMin > asetukset.lohiMax) [asetukset.lohiMin, asetukset.lohiMax] = [asetukset.lohiMax, asetukset.lohiMin];
   tallennaLS('mlt_asetukset', asetukset);
-  piirraAsetukset(); piirraLohiRivi();
+  piirraAsetukset(); piirraLohiRivi(); piirra();
   if (kartta) { kartta.lohiVali = [asetukset.lohiMin, asetukset.lohiMax]; kartta.naytaSelite(3000); if (kartta.valittu && !kartta.valittuOma) naytaPiste(kartta.valittu[0], kartta.valittu[1]); }
 }
 function avaaKarttaNakyma() {
@@ -1219,7 +1252,7 @@ async function vaihdaAlue(tunnus, kasin) {
   if (al === valittuAlue) return;
   tallennaKarttaTila();
   valittuAlue = al; tallennaLS('mlt_alue', al.tunnus);
-  meri = null; syvyys = null; vaylat = null; nakyma = null; valittuPvm = null; nykyData = null;
+  meri = null; syvyys = null; vaylat = null; nakyma = null; valittuPvm = null; nykyData = null; aikajanaPaivat = [];
   latausNro++; paivaLatautuu = false;   // edellisen alueen kesken jäänyt päivä ei enää näy
   if (kartta) {
     const nk = alueenNakyma(al);
@@ -1417,6 +1450,99 @@ function lueKlooni(teksti) {
   for (const x of avaimet) localStorage.setItem(x, k.tiedot[x]);
   setTimeout(() => location.reload(), 300);
   return `Luettu ${avaimet.length} kohdetta. Sivu latautuu uudelleen.`;
+}
+
+// ---------- Nousun lämpöraja ja 48 h aikajana (v28, Hannu 14.11.2026: "1 2 3 kerralla") ----------
+// 1) Nousun lämpöraja: hakemiston phy.pinta (hae_copernicus.pintalampo) = alueen meriruutujen pintalämmön 10/50/90 %
+//    koko datajaksolta; ylitys mediaanista (Malli.lampoYlitys). Ei vaadi päivätiedostoja.
+let nousuTeksti = '';
+function piirraNousu() {
+  const el = $('nousuTila'), lisa = $('nousuLisa'), raja = asetukset.nousuLampo, nimi = valittuAlue.nimi;
+  const r = meri && meri.phy && meri.phy.pinta ? Malli.lampoYlitys(meri.phy.pinta, raja, Date.now()) : null;
+  if (!r) {
+    el.textContent = `Raja ${luku(raja)} °C: ${meri ? 'odottaa seuraavaa datahakua' : 'ei meridataa'}`;
+    lisa.textContent = `${nimi}: pintaveden lämpö tulee meridatan mukana (hakuajo 3 h välein).`; nousuTeksti = ''; return;
+  }
+  const hetki = d => `${pvm(d)} klo ${klo(d)}`, vrk = d => luku(Math.max(0, d.getTime() - Date.now()) / 86400000) + ' vrk';
+  let paa;
+  if (!r.yli) paa = r.seuraava ? `Ylittyy ennusteen mukaan ${hetki(r.seuraava.t)} (${vrk(r.seuraava.t)})` : `Ei ylity ennustejaksolla (${pvm(r.loppu)} asti)`;
+  else paa = (r.edellinen ? `Ylittyi ${hetki(r.edellinen.t)}` : 'Yli rajan koko datajakson') + (r.seuraava ? ` · laskee alle ${hetki(r.seuraava.t)} (${vrk(r.seuraava.t)})` : '');
+  el.textContent = paa;
+  const osat = [`${nimi}: pintavesi nyt ${luku(r.nyt.p50)} °C (vaihtelu ${luku(r.nyt.p10)}–${luku(r.nyt.p90)} °C)`, `raja ${luku(raja)} °C`];
+  if (!r.yli && r.osaYli) osat.push('lämpimin kymmenes alueesta jo yli');
+  if (r.trendi !== null) osat.push(`suunta ${r.trendi >= 0 ? '+' : '−'}${luku(Math.abs(r.trendi))} °C/vrk (viim. 3 vrk)`);
+  lisa.textContent = osat.join(' · ') + '. Copernicus-malli: alueen meriruutujen pintakerros (0,5 m), mediaani. Raja: Raportit → Asetukset.';
+  nousuTeksti = `Nousun raja ${luku(raja)} °C: ${paa.charAt(0).toLowerCase()}${paa.slice(1)} (pintavesi nyt ${luku(r.nyt.p50)} °C)`;
+}
+// 2) 48 h aikajana: aalto ja lohikerros tänään, huomenna ja ylihuomenna (päivätiedostot, sama välimuisti kuin kartalla).
+let aikajanaPaivat = [];
+function pvmAvain(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+async function lataaAikajana() {
+  const al = valittuAlue;
+  if (!meri || !meri.paivat) { aikajanaPaivat = []; return; }
+  const nyt = Date.now(), pvt = [0, 1, 2].map(k => pvmAvain(new Date(nyt + k * 86400000))).filter(pv => meri.paivat.some(p => p.pvm === pv));
+  const paivat = await Promise.all(pvt.map(pv => haePaiva(pv)));
+  if (al !== valittuAlue) return;
+  aikajanaPaivat = paivat.filter(Boolean);
+  piirra();
+}
+/** Kohta, jolle aalto ja lohikerros näytetään: oma sijainti meressä, muuten kartalta valittu piste, muuten alueen keskipiste. */
+function aikajanaKohta() {
+  const d = aikajanaPaivat.find(x => x && x.phy && x.phy.lampo && x.phy.lampo.length);
+  if (!d) return null;
+  const meressa = (lat, lon) => isFinite(KarttaMalli.lahinArvo(d.phy, 'lampo', 0, lat, lon));
+  if (sijainti && meressa(sijainti.lat, sijainti.lon)) return { lat: sijainti.lat, lon: sijainti.lon, nimi: 'oma sijainti' };
+  if (kartta && kartta.valittu && !kartta.valittuOma && meressa(kartta.valittu[0], kartta.valittu[1])) return { lat: kartta.valittu[0], lon: kartta.valittu[1], nimi: 'kartalta valittu piste' };
+  const k = valittuAlue.keski;
+  if (k && meressa(k[0], k[1])) return { lat: k[0], lon: k[1], nimi: 'alueen keskipiste' };
+  return null;
+}
+function lahinIndeksiAjoista(ajat, ms, raja) {
+  let paras = -1, ero = Infinity;
+  (ajat || []).forEach((a, i) => { const e = Math.abs(Date.parse(a) - ms); if (e < ero) { ero = e; paras = i; } });
+  return ero <= raja ? paras : -1;
+}
+/** Aalto (merkitsevä, m) ja lohikerros kohdassa hetkellä ms: lähin Copernicus-aika enintään 1,5 h päässä. */
+function aikajanaArvot(ms, lat, lon) {
+  for (const d of aikajanaPaivat) {
+    if (!d || !d.phy) continue;
+    const i = lahinIndeksiAjoista(d.phy.ajat, ms, 5400000);
+    if (i < 0) continue;
+    const pr = KarttaMalli.profiiliPisteessa(d.phy, i, lat, lon);
+    const lohi = pr ? KarttaMalli.kerros(pr.arvot, pr.syvyydet, asetukset.lohiMin, asetukset.lohiMax) : null;
+    const wi = d.wav ? lahinIndeksiAjoista(d.wav.ajat, ms, 5400000) : -1;
+    return { lohi, hs: wi >= 0 ? KarttaMalli.lahinArvo(d.wav, 'hs', wi, lat, lon) : NaN };
+  }
+  return null;
+}
+function lohiLyhyt(k) {
+  if (!k) return '–';
+  if (!k.loytyi) return 'ei';
+  const ala = k.pohjaan ? (k.taysi ? '12+' : 'pohja') : luku(k.ala, 0);
+  return luku(k.yla, 0) + '–' + ala;
+}
+function piirraAikajanaTila(kohta, tiedot) {
+  const nyt = Date.now() - 3600000;
+  // ensimmäinen vähintään kahden rivin jakso, jossa tuuli ja aalto alle rajojen
+  let ikkuna = null;
+  for (let i = 0; i < tiedot.length && !ikkuna; i++) {
+    if (!tiedot[i].hyva || tiedot[i].r.t.getTime() < nyt) continue;
+    let j = i; while (j + 1 < tiedot.length && tiedot[j + 1].hyva) j++;
+    if (j > i) ikkuna = [tiedot[i], tiedot[j]];
+    i = j;
+  }
+  const aR = luku(asetukset.aaltoRaja1, 2).replace(/0$/, '');
+  let teksti = '';
+  if (ikkuna) {
+    const [a, b] = ikkuna, sama = a.r.t.toDateString() === b.r.t.toDateString();
+    teksti = `Paras keli-ikkuna: ${pvm(a.r.t)} klo ${klo(a.r.t)}–${sama ? '' : pvm(b.r.t) + ' '}${klo(b.r.t)}` +
+      (a.m && a.m.lohi ? ` · lohikerros alussa ${lohiLyhyt(a.m.lohi)} m` : '');
+  } else teksti = 'Ei yhtenäistä keli-ikkunaa (tuuli ja aalto alle rajojen) 48 h:n aikana.';
+  $('aikajanaTila').textContent = teksti;
+  $('aikajanaSelite').textContent = (kohta ? `Aalto ja lohikerros: ${kohta.nimi} (${luku(kohta.lat, 3)}, ${luku(kohta.lon, 3)}), Copernicus-malli 3 h välein. `
+    : 'Aalto ja lohikerros: ei meridataa tälle jaksolle. ') +
+    `Aalto = merkitsevä aallonkorkeus m (raja ${aR}). Lohi = lohikerroksen syvyys m (${luku(asetukset.lohiMin)}–${luku(asetukset.lohiMax)} °C). ` +
+    `Vihreä reuna: tuuli alle ${luku(asetukset.rajaKeskituuli, 0)}/${luku(asetukset.rajaPuuska, 0)} m/s ja aalto alle rajan. Tuuli: ennusteen pisteet yllä.`;
 }
 
 // ---------- Ilman verkkoa: service worker (v26, Hannu 14.11.2026: "Tehdään") ----------

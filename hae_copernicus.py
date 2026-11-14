@@ -95,6 +95,29 @@ def kokonaisluvut(taulukko, kerroin=KERROIN):
     return i.tolist()
 
 
+def pintalampo(phy):
+    """v27 (Hannu 14.11.2026): alueen pintaveden lämpö ajan funktiona nousun lämpörajaa varten.
+    Ylimmän tason (thetao[aika, 0]) meriruudut; 10., 50. ja 90. prosenttipiste joka ajalle (°C, 2 desim.).
+    Pieni (n. 80 aikaa) ja kulkee hakemistossa, joten puhelimen ei tarvitse ladata kaikkia päivätiedostoja.
+    Palauttaa dict(ajat, p10, p50, p90, n) tai None."""
+    t = np.ma.filled(np.ma.asarray(phy["thetao"], dtype=float), np.nan)
+    if t.ndim != 4 or not t.shape[0]:
+        return None
+    ajat, p10, p50, p90 = [], [], [], []
+    for i in range(t.shape[0]):
+        v = t[i, 0]
+        v = v[np.isfinite(v)]
+        if not v.size:
+            continue
+        q = np.percentile(v, [10, 50, 90])
+        ajat.append(iso(np.datetime64(phy["ajat"][i])))
+        p10.append(round(float(q[0]), 2)); p50.append(round(float(q[1]), 2)); p90.append(round(float(q[2]), 2))
+    if not ajat:
+        return None
+    n = int(np.isfinite(t[0, 0]).sum())
+    return {"ajat": ajat, "p10": p10, "p50": p50, "p90": p90, "n": n}
+
+
 def iso(t):
     """numpy datetime64 / datetime -> 'YYYY-MM-DDTHH:MM:SSZ'."""
     if isinstance(t, np.datetime64):
@@ -147,6 +170,9 @@ def rakenna(phy, wav, sst, luotu, virheet, syvyys=None, tuuli=None, vaylat=None,
         t_paivat = paivittain([np.datetime64(a.replace("Z", "")) for a in tuuli["ajat"]])
     hakemisto["phy"] = {"dataset": phy["dataset"], "lat": pyorista(phy["lat"], 4), "lon": pyorista(phy["lon"], 4),
                         "syvyydet": pyorista(phy["syvyydet"], 2)}
+    pinta = pintalampo(phy)   # v27: nousun lämpöraja (alueen pintavesi koko ennustejaksolta)
+    if pinta:
+        hakemisto["phy"]["pinta"] = pinta
     syva = phy.get("u3") is not None and phy.get("v3") is not None
     if syva:
         hakemisto["phy"]["virtaSyv"] = VIRTA_SYV   # päivätiedostoissa u3/v3 = virta tällä syvyydellä

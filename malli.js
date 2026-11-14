@@ -272,8 +272,44 @@
     return 'aeiouyäö'.includes(v) ? n + n.slice(-1) + 'n' : n + 'iin';
   }
 
+  /**
+   * v27 (Hannu 14.11.2026: "Nousun alku seuraa lämpötilaa ja kalenteria"): alueen pintaveden lämmön ja rajan ylitys.
+   * sarja = hakemiston phy.pinta { ajat: [ISO], p10, p50, p90 } (meriruutujen prosenttipisteet), raja °C, nytMs.
+   * Ylitys ja alitus mediaanista (p50), väliltä lineaarisesti. Palauttaa null (ei dataa) tai
+   * { nyt: {p10, p50, p90}, yli, edellinen: {t, suunta} | null, seuraava: {t, suunta} | null, loppu: Date,
+   *   trendi: °C/vrk viimeiseltä 72 h:lta ennen nykyhetkeä (null, jos alle 24 h dataa), osaYli: p90 ≥ raja }.
+   * suunta = 'ylos' (nousee rajan yli) tai 'alas' (laskee alle).
+   */
+  function lampoYlitys(sarja, raja, nytMs) {
+    if (!sarja || !sarja.ajat || !sarja.ajat.length || !isFinite(raja)) return null;
+    const t = sarja.ajat.map(a => Date.parse(a)), n = t.length;
+    const arvo = (k, ms) => {
+      const v = sarja[k];
+      if (ms <= t[0]) return v[0];
+      if (ms >= t[n - 1]) return v[n - 1];
+      let i = 0; while (i + 1 < n && t[i + 1] <= ms) i++;
+      const w = (ms - t[i]) / (t[i + 1] - t[i]);
+      return v[i] + w * (v[i + 1] - v[i]);
+    };
+    const p = sarja.p50, ylitykset = [];
+    for (let i = 0; i + 1 < n; i++) {
+      const a = p[i] - raja, b = p[i + 1] - raja;
+      if ((a < 0 && b >= 0) || (a >= 0 && b < 0)) {
+        const w = a === b ? 0 : a / (a - b);
+        ylitykset.push({ t: new Date(t[i] + w * (t[i + 1] - t[i])), suunta: b >= 0 ? 'ylos' : 'alas' });
+      }
+    }
+    const nyt = { p10: arvo('p10', nytMs), p50: arvo('p50', nytMs), p90: arvo('p90', nytMs) };
+    const ennen = ylitykset.filter(y => y.t.getTime() <= nytMs), jalkeen = ylitykset.filter(y => y.t.getTime() > nytMs);
+    let trendi = null;
+    const alku = Math.max(t[0], nytMs - 72 * 3600000), loppuT = Math.min(nytMs, t[n - 1]);
+    if (loppuT - alku >= 24 * 3600000) trendi = (arvo('p50', loppuT) - arvo('p50', alku)) / ((loppuT - alku) / 86400000);
+    return { nyt, yli: nyt.p50 >= raja, edellinen: ennen.length ? ennen[ennen.length - 1] : null, seuraava: jalkeen[0] || null,
+             loppu: new Date(t[n - 1]), trendi, osaYli: nyt.p90 >= raja };
+  }
+
   const Malli = { OLETUKSET, etaisyysKm, aikaMin, ylitysHetki, arvoHetkella, yhdistaEnnusteet, arvioi, tuulihalytys, alueSijainnille,
-                  paluukohteet, lahinKohde, illatiivi };
+                  paluukohteet, lahinKohde, illatiivi, lampoYlitys };
   if (typeof module !== 'undefined' && module.exports) module.exports = Malli;
   else root.Malli = Malli;
 })(typeof window !== 'undefined' ? window : this);
