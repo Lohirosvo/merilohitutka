@@ -370,13 +370,46 @@
     const alku = V.solmut.length, am = lk.m, L = Math.hypot(V.solmut[lk.b][0] - V.solmut[lk.a][0], V.solmut[lk.b][1] - V.solmut[lk.a][1]);
     V.solmut.push([lk.x, lk.y, P.lat(lk.y), P.lon(lk.x)]); V.naapurit.push([{ j: lk.a, m: lk.f * L }, { j: lk.b, m: (1 - lk.f) * L }]);
     V.naapurit[lk.a].push({ j: alku, m: lk.f * L }); V.naapurit[lk.b].push({ j: alku, m: (1 - lk.f) * L });
-    try { return reittiVerkossa(); } finally { V.naapurit[lk.a].pop(); V.naapurit[lk.b].pop(); V.naapurit.pop(); V.solmut.pop(); }
+    // v36 (Hannu 15.11.: "Väyliä pitkin pitäisi päästä paikasta toiseen jos väylään klikkaa"): kohde enintään vaylallaM
+    // väylästä → kohteen kohta väylällä väliaikaiseksi solmuksi ja reitti väylää pitkin perille
+    const vaylallaM = isFinite(o.vaylallaM) ? o.vaylallaM : 200;
+    const lq = vaylallaM > 0 ? lahinVayla(V, qx, qy, vaylallaM) : null;
+    let ks = -1, samaKaari = false;
+    if (lq) {
+      ks = V.solmut.length;
+      const Lq = Math.hypot(V.solmut[lq.b][0] - V.solmut[lq.a][0], V.solmut[lq.b][1] - V.solmut[lq.a][1]);
+      V.solmut.push([lq.x, lq.y, P.lat(lq.y), P.lon(lq.x)]);
+      const nq = [{ j: lq.a, m: lq.f * Lq }, { j: lq.b, m: (1 - lq.f) * Lq }];
+      samaKaari = (lq.a === lk.a && lq.b === lk.b) || (lq.a === lk.b && lq.b === lk.a);
+      if (samaKaari) {   // satama ja kohde samalla janalla: suora yhteys janaa pitkin
+        const fs = lq.a === lk.a ? lk.f : 1 - lk.f, m = Math.abs(fs - lq.f) * Lq;
+        nq.push({ j: alku, m }); V.naapurit[alku].push({ j: ks, m });
+      }
+      V.naapurit.push(nq); V.naapurit[lq.a].push({ j: ks, m: lq.f * Lq }); V.naapurit[lq.b].push({ j: ks, m: (1 - lq.f) * Lq });
+    }
+    try { return reittiVerkossa(); }
+    finally {
+      if (lq) { V.naapurit[lq.b].pop(); V.naapurit[lq.a].pop(); V.naapurit.pop(); if (samaKaari) V.naapurit[alku].pop(); V.solmut.pop(); }
+      V.naapurit[lk.a].pop(); V.naapurit[lk.b].pop(); V.naapurit.pop(); V.solmut.pop();
+    }
     function reittiVerkossa() {
     const { d, ed } = dijkstra(V, alku);
+    if (ks >= 0 && isFinite(d[ks])) {   // v36: kohde väylällä
+      const polku = []; for (let n = ks; n >= 0; n = ed[n]) polku.push(n);
+      polku.reverse();
+      const vaylaM = am + d[ks];
+      return { pisteet: [[S.lat, S.lon]].concat(polku.map(n => [V.solmut[n][2], V.solmut[n][3]]), [[Q.lat, Q.lon]]), m: vaylaM + lq.m, vaylaM, suoraM: lq.m,
+               tapa: 'vayla', vaylalla: true, poistuminen: { lat: P.lat(lq.y), lon: P.lon(lq.x) }, kayra, syvaan: false, kierto: 0, varoitus: null };
+    }
     // väyläpuu etäisyysjärjestyksessä: syva = polku satamasta on ylittänyt poistumiskäyrän
     const jarj = []; for (let i = 0; i < V.solmut.length; i++) if (isFinite(d[i])) jarj.push(i);
     jarj.sort((a, b) => d[a] - d[b]);
     const syva = new Uint8Array(V.solmut.length), ehd = [];
+    // v36: jos satama → väylä -liitos ylittää poistumiskäyrän, väylä on käyrän takana alusta asti (ennen ylitys jäi huomaamatta
+    // ja reitti haki käyrän ylityksen kauempaa, Hannun Eckerön kuva 15.11.: "näyttää väkisin käyvän 10 m vedessä")
+    { const [x1, y1] = V.solmut[alku];
+      for (const n of kayraInd.ehdokkaat(sx, sy, x1, y1)) { const [cx, cy, dx, dy] = kayraInd.janat[n];
+        if (leikkaus(sx, sy, x1, y1, cx, cy, dx, dy) !== null) { syva[alku] = 1; ehd.push({ x: x1, y: y1, kautta: alku, pitkin: 0, solmu: true }); break; } } }
     for (const b of jarj) {
       const a = ed[b]; if (a < 0) continue;
       const [ax, ay] = V.solmut[a], [bx, by] = V.solmut[b], len = d[b] - d[a];
@@ -551,7 +584,7 @@
     if (!r) L.push(meno ? 'Menoreittiä ei voitu laskea.' : 'Paluureittiä ei voitu laskea: sijaintia tai paluukohdetta ei ole.');
     else {
       const minne = meno ? `Menomatka ${d.lahtoMista ? d.lahtoMista + ' ' : ''}kohteeseen` : `Paluu ${d.kohdeNimiIllatiivi || 'satamaan'}`;
-      L.push(`${minne} ${km(r.m)}` + (r.kautta ? `, ${r.kautta}` : '') + (r.tapa === 'vayla' ? `, josta väylää ${km(r.vaylaM)}${r.syvaan !== false && r.kayra ? ` ${luku0(r.kayra)} metrin veteen` : ''}` : '') +
+      L.push(`${minne} ${km(r.m)}` + (r.kautta ? `, ${r.kautta}` : '') + (r.tapa === 'vayla' ? (r.vaylalla ? ', väylää pitkin' : `, josta väylää ${km(r.vaylaM)}${r.syvaan !== false && r.kayra ? ` ${luku0(r.kayra)} metrin veteen` : ''}`) : '') +
         (r.kierto ? ', matalikot kiertäen syvän veden kautta' : '') +
         (isFinite(d.minuutit) ? `, noin ${Math.round(d.minuutit)} minuuttia ${Math.round(d.nopeus)} kilometrin tuntinopeudella.` : '.'));
       if (!meno && d.jatko) L.push(`Sieltä ${d.jatko.minne} ${km(d.jatko.m)}.`);

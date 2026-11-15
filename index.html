@@ -396,7 +396,7 @@
 <script src="nopeus.js?v=20"></script>
 <script src="kartta.js?v=28"></script>
 <script src="sillat.js?v=1"></script>
-<script src="reitti.js?v=5"></script>
+<script src="reitti.js?v=6"></script>
 <script src="ais.js?v=23"></script>
 <script>
 'use strict';
@@ -434,6 +434,7 @@ const KENTAT = [
   ['kovaKeli', 'Kova keli: paluu lähimmän turvallisen veden pisteen kautta, keskituuli vähintään (m/s)'],
   ['suoraMatala', 'Merisää: väylältä suoraan vain, jos suora osuus ei ylitä tämän syvyisiä tai matalampia käyriä (m)'],
   ['suoraPaino', 'Merisää: väyläpainotteisuus, suora osuus painaa × (1 = lyhin reitti)'],
+  ['vaylallaM', 'Merisää: kohde väylällä, kun enintään näin kaukana väylästä → väylää pitkin perille (m, 0 = pois)'],
   ['veneKorkeus', 'Sillat: veneen korkeus vesirajasta (m)'], ['siltaVara', 'Sillat: turvavara veneen korkeuden päälle (m)'],
   ['aaltoRaja1', 'Aaltoraja 1, merkitsevä aallonkorkeus (m)'], ['aaltoRaja2', 'Aaltoraja 2, merkitsevä aallonkorkeus (m)'],
   ['matalikkoMin', 'Matalikko: huippukäyrä vähintään (m)'], ['matalikkoMax', 'Matalikko: huippukäyrä enintään (m)'],
@@ -446,6 +447,7 @@ function oletukset() {
       vaylaSyvyys: 10,                  // v30: Hannu 15.11. "väyliä käytetään 10–20 m vedelle asti", oletus 10 m
       vastavirtaRaja: 15,               // v30: arvio (≈ Tp 2 s ja 0,1 m/s), säädettävä
       suoraMatala: 6, suoraPaino: 1.5,  // v32: Hannu 15.11. "Parempi väyläpainotteinen"; arvoja ei kalibroitu
+      vaylallaM: 200,                   // v36: Hannu 15.11. "Väyliä pitkin pitäisi päästä paikasta toiseen jos väylään klikkaa"; 200 m = arvio sormen tarkkuudesta
       veneKorkeus: 2.6, siltaVara: 0,   // v35: Hannu 15.11. mitattu trailerilla vesirajan likajäljestä 2,5–2,6 m; "Ei varaa"
       merisaaPuhe: true, puheAani: '',
       aaltoRaja1: 0.35, aaltoRaja2: 0.5,   // Hannu 13.11.: merkitsevä aallonkorkeus
@@ -1890,7 +1892,7 @@ function laskeReitti(piste, kohde) {
                            matalaRaja: asetukset.suoraMatala, suoraPaino: asetukset.suoraPaino });
   const alku = piste.kautta || piste;
   const r = Reitti.reitti({ satama: alku, kohde, vaylat, syvyys, rajaSyvyys: isFinite(asetukset.vaylaSyvyys) ? asetukset.vaylaSyvyys : 10, verkko: vaylaVerkko(),
-                            matalaRaja: asetukset.suoraMatala, suoraPaino: asetukset.suoraPaino });   // v32: väyläpainotteinen
+                            matalaRaja: asetukset.suoraMatala, suoraPaino: asetukset.suoraPaino, vaylallaM: asetukset.vaylallaM });   // v32: väyläpainotteinen; v36: kohde väylällä
   if (piste.kautta) {
     const lisa = Reitti.etaisyysM(piste.lat, piste.lon, alku.lat, alku.lon);
     r.pisteet = [[piste.lat, piste.lon]].concat(r.pisteet); r.m += lisa; r.vaylaM += lisa; r.kautta = piste.kautta.teksti || (piste.kautta.nimi + ' kautta');
@@ -2062,7 +2064,8 @@ function puheMin(m) { if (m < 90) return `${Math.round(m)} minuuttia`; const h =
 function merisaaHuomiot(d) {
   const o = [];
   if (d.piste) o.push(`${d.tyyppi === 'meno' ? 'Lähtöpiste' : 'Paluupiste'}: ${d.piste.piste.nimi} (${d.piste.syy}).`);
-  if (d.reitti) o.push(d.reitti.tapa === 'vayla' ? `Reitti: ${d.reitti.kautta ? d.reitti.kautta + ', ' : ''}väylä ${luku(d.reitti.vaylaM / 1000)} km` +
+  if (d.reitti) o.push(d.reitti.vaylalla ? `Reitti: ${d.reitti.kautta ? d.reitti.kautta + ', ' : ''}väylää pitkin ${luku(d.reitti.vaylaM / 1000)} km, kohde ${luku(d.reitti.suoraM, 0)} m väylästä.`
+    : d.reitti.tapa === 'vayla' ? `Reitti: ${d.reitti.kautta ? d.reitti.kautta + ', ' : ''}väylä ${luku(d.reitti.vaylaM / 1000)} km` +
       (d.reitti.syvaan ? ` (${luku(d.reitti.kayra, 0)} m:n käyrä ylitetty)` : '') + `, ${d.reitti.kierto ? 'syvän veden kautta' : 'suoraan'} ${luku(d.reitti.suoraM / 1000)} km.`
     : d.reitti.tapa === 'turva' ? (d.reitti.kierto ? `Reitti: turvallisen veden pisteestä syvän veden kautta (${d.reitti.kierto} käännöstä), matalikot kiertäen.` : 'Reitti: suoraan turvallisen veden pisteestä.')
     : 'Reitti: suora viiva.');
