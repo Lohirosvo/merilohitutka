@@ -564,7 +564,7 @@
     }
     koko() {
       const r = this.c.getBoundingClientRect(), d = window.devicePixelRatio || 1;
-      this.w = r.width; this.h = r.height;
+      this.w = r.width; this.h = r.height; this.d = d;
       this.c.width = Math.round(r.width * d); this.c.height = Math.round(r.height * d);
       this.ctx.setTransform(d, 0, 0, d, 0, 0);
       this.piirra();
@@ -594,9 +594,18 @@
       const c = this.c;
       c.style.touchAction = 'none';
       c.addEventListener('pointerdown', e => {
-        c.setPointerCapture(e.pointerId);
+        // v41: ensimmäinen sormi aloittaa uuden kosketuksen → vanhat (kadonneet) osoittimet pois. Jos järjestelmä vei kosketuksen
+        // (kuvakaappauseleet, ilmoitukset) eikä pointerup/cancel tullut, jäänyt osoitin teki jokaisesta vedosta "nipistyksen".
+        if (e.isPrimary) this.osoittimet.clear();
+        try { c.setPointerCapture(e.pointerId); } catch (virhe) {}
         this.osoittimet.set(e.pointerId, { x: e.offsetX, y: e.offsetY, x0: e.offsetX, y0: e.offsetY });
         this.raahattu = false;
+      });
+      c.addEventListener('lostpointercapture', e => this.osoittimet.delete(e.pointerId));
+      c.addEventListener('contextlost', e => e.preventDefault());   // v41: selain saa palauttaa piirtoalueen
+      c.addEventListener('contextrestored', () => this.koko());
+      if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') this.osoittimet.clear(); else this.koko();
       });
       c.addEventListener('pointermove', e => {
         const p = this.osoittimet.get(e.pointerId); if (!p) return;
@@ -610,7 +619,7 @@
           p.x = e.offsetX; p.y = e.offsetY;
           const jalkeen = Math.hypot(a.x - b.x, a.y - b.y);
           this.raahattu = true;
-          if (ennen > 0 && jalkeen > 0) this.zoomaa(Math.log2(jalkeen / ennen), (a.x + b.x) / 2, (a.y + b.y) / 2);
+          if (ennen > 0 && jalkeen > 0) this.zoomaa(Math.max(-0.5, Math.min(0.5, Math.log2(jalkeen / ennen))), (a.x + b.x) / 2, (a.y + b.y) / 2);   // v41: enintään ½ tasoa kerralla
         }
       });
       const loppu = e => {
@@ -652,7 +661,17 @@
     }
 
     _piirra() {
+      // v41 (Hannun kuva 21.19: "Zoomi karkaa välillä eikä palaudu"): kuvassa kartta piirtyi pienenä vasempaan yläkulmaan ja muualle
+      // jäi raitoja = piirtomuunnos oli palautunut 1:1:ksi (todennäköisesti selain palautti kadonneen piirtoalueen, jolloin muunnos
+      // nollautuu). Muunnos asetetaan joka kerta ja koko tarkistetaan; ensin koko bittikartta tyhjäksi.
+      if (!this.d || this.c.width !== Math.round(this.w * this.d) || this.c.height !== Math.round(this.h * this.d)) {
+        const r = this.c.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+        this.w = r.width; this.h = r.height; this.d = d;
+        this.c.width = Math.round(r.width * d); this.c.height = Math.round(r.height * d);
+      }
       const g = this.ctx, w = this.w, h = this.h;
+      g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, this.c.width, this.c.height);
+      g.setTransform(this.d, 0, 0, this.d, 0, 0);
       g.fillStyle = '#0d2236'; g.fillRect(0, 0, w, h);
       this._aloitaNimet();
       if (this.tasot.tausta) this._tausta();
