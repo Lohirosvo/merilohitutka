@@ -291,6 +291,7 @@
   /** Tuulen väri: Hannun paluuraja 10 m/s punaisena. */
   /** Omat havainnot (havainnot.js ja puhelimeen tallennetut saaliit): värit lajin mukaan. */
   const HAVAINTOVARIT = { lammin: '255,122,69', kylma: '77,163,255', muu: '190,150,255', saalis: '255,77,109' };
+  const SILTAVARIT = { mahtuu: '#5be37d', ei: '#ff5252', tuntematon: '#c3cedd' };   // v35
   function havaintoVari(laji) { return HAVAINTOVARIT[laji] || HAVAINTOVARIT.muu; }
   const KM_LAT = 110.574;
   function kmLon(lat) { return 111.32 * Math.cos(lat * Math.PI / 180); }
@@ -549,6 +550,7 @@
       this.ylaVara = 0; this.alaVara = 0;   // ohjainten peittämä osa ylhäällä ja alhaalla (px)
       this._seliteAsti = 0;
       this.merkit = opts.merkit || []; this.oma = null; this.valittu = null;
+      this.sillat = [];   // v35: [{ lat, lon, nimi, korkeus, alikulku (m tai NaN), tila: 'mahtuu'|'ei'|'tuntematon' }]
       this.reitit = []; this.kohde = null;   // v30: merisään reitit [{ pisteet: [[lat,lon]…], vari, nimi, katko }] ja menomatkan kohde { lat, lon }
       this.havainnot = opts.havainnot || [];   // havainnot.js
       this.jalki = opts.jalki || [];   // oma reittijälki 24 h (v20)
@@ -586,6 +588,7 @@
       this.lon = xLon(lonX(this.lon, this.z) + dx, this.z);
     }
     keskita(lat, lon) { this.lat = lat; this.lon = lon; this.piirra(); }
+    _nakyvissa(lat, lon) { const [x, y] = this.ruutu(lat, lon); return x >= 0 && y >= 0 && x <= this.w && y <= this.h; }
 
     _kuuntele() {
       const c = this.c;
@@ -672,6 +675,7 @@
       if (this.tasot.jalki && this.jalki.length > 1) this._jalki();   // nuolten päälle, merkkien alle
       if (this.tasot.ais && this.ais.length) this._ais();
       if (this.reitit.length || this.kohde) this._reitit();   // v30
+      if (this.sillat.length) this._sillat();   // v35
       this._merkit();
       this._piirraNimet();   // kaikkien tasojen numerot ja nimet tärkeysjärjestyksessä, ei päällekkäin (v16)
       this._profiiliAlue = null;
@@ -1237,6 +1241,26 @@
       g.restore();
     }
 
+    /** v35: sillat. Kaari ja kansi; vihreä = vene mahtuu nyt, punainen = ei mahdu, harmaa = ei vedenkorkeutta.
+     *  Nimi: "2,5 → 2,41 m" (merkitty → todellinen nyt). */
+    _sillat() {
+      const g = this.ctx, f = (x, d) => x.toFixed(d).replace('.', ',');
+      g.save(); g.lineCap = 'round';
+      for (const s of this.sillat) {
+        const [x, y] = this.ruutu(s.lat, s.lon);
+        if (x < -40 || y < -40 || x > this.w + 40 || y > this.h + 40) continue;
+        const vari = SILTAVARIT[s.tila] || SILTAVARIT.tuntematon;
+        const muoto = () => { g.beginPath(); g.arc(x, y + 5, 8, Math.PI, 0); g.moveTo(x - 11, y - 3); g.lineTo(x + 11, y - 3); };
+        g.strokeStyle = 'rgba(0,0,0,0.9)'; g.lineWidth = 6; muoto(); g.stroke();
+        g.strokeStyle = vari; g.lineWidth = 3; muoto(); g.stroke();
+        this._varaa(x - 13, y - 7, 26, 14);
+        const arvo = isFinite(s.alikulku) ? f(s.korkeus, 1) + ' → ' + f(s.alikulku, 2) + ' m' : f(s.korkeus, 1) + ' m';
+        const rivit = this.z >= 10.5 ? [s.nimi, arvo] : [arvo];
+        this._nimi(rivit, [[x + 14, y + 4], [x + 14, y - 10], [x - 14, y + 20]], vari, 0.5, { font: 'bold 12px sans-serif' });
+      }
+      g.restore();
+    }
+
     /** Lohikerros pisteessä kartan valitulla ajalla (v24): { teksti, loytyi } tai null (ei meridataa). */
     lohiKohdalla(lat, lon) {
       const d = this.data;
@@ -1364,6 +1388,8 @@
         ['12 h', '#e9f1f7', 'rgba(255,59,48,' + jalkiAlfa(43200).toFixed(2) + ')'], ['24 h sitten', '#e9f1f7', 'rgba(255,59,48,' + jalkiAlfa(86400).toFixed(2) + ')']]);
       if (this.reitit.length || this.kohde) rivit.push([['Merisää', '#e9f1f7'], ['paluu', '#e9f1f7', '#ffffff'], ['meno', '#e9f1f7', '#ffd54a'],
         ['▲ suurin aalto', '#ff3c3c'], ['▲ jyrkin', '#b07cff']]);   // v30
+      if (this.sillat.some(s => this._nakyvissa(s.lat, s.lon))) rivit.push([['Silta: alikulku → nyt', '#e9f1f7'], ['mahtuu', '#e9f1f7', SILTAVARIT.mahtuu],
+        ['ei mahdu', '#e9f1f7', SILTAVARIT.ei], ['ei vedenkorkeutta', '#e9f1f7', SILTAVARIT.tuntematon]]);   // v35
       if (this.tasot.lampo && d.phy) rivit.push([['Lämpö (malli) ' + f(this.askel) + ' °C välein', '#ffb24a']]);
       if (this.tasot.sst && d.sst) rivit.push([['Satelliitti: katkoviiva', '#ffffff']]);
       if (this.tasot.virta && d.phy) rivit.push([['Virta: nuoli ≈ 0,9 km/h (0,25 m/s)', '#78ebff']]);

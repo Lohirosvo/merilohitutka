@@ -136,6 +136,13 @@
   .karttanapit button { width:46px; height:46px; padding:0; font-size:22px; background:rgba(13,27,43,0.85); }
   .karttanapit button.paalla { border-color:#7ed957; background:rgba(40,90,40,0.85); }   /* v24: lohikerros täällä päällä */
   .kartta-ala { position:absolute; left:0; right:0; bottom:0; }
+  /* v35: meriveden korkeus (Hannu 15.11.: pienenä lukuna, 30 s avaamisen jälkeen, 5 s napautuksesta; 12 h ennustekäyrä) */
+  .vesilaatikko { position:absolute; right:62px; top:150px; background:rgba(11,23,38,0.88); border:1px solid var(--reuna); border-radius:8px;
+                  padding:3px 6px 2px; font-size:11px; color:var(--himmea); line-height:1.25; max-width:164px; }
+  .vesilaatikko[hidden] { display:none; }
+  .vesilaatikko b { font-size:16px; color:#78ebff; white-space:nowrap; }
+  .vesilaatikko .yla { white-space:nowrap; color:var(--teksti); font-size:13px; }
+  .vesilaatikko svg { display:block; margin-top:2px; }
   .kartta-tieto, .datatila { background:rgba(11,23,38,0.92); border-top:1px solid var(--reuna); padding:6px 10px;
                              max-height:34vh; overflow-y:auto; line-height:1.3; }
   .kartta-tieto { font-size:14px; color:var(--teksti); }
@@ -234,8 +241,9 @@
         </div>
       </div>
       <div class="karttanapit" id="karttaNapit">
-        <button id="zoomPlus">+</button><button id="zoomMiinus">−</button><button id="keskitaOma">◎</button><button id="lohiTaalla" title="Lohikerros omalla kohdalla">🐟</button><button id="kohdeNappi" title="Menomatkan kohde: napauta kohdepiste">🎯</button>
+        <button id="zoomPlus">+</button><button id="zoomMiinus">−</button><button id="keskitaOma">◎</button><button id="lohiTaalla" title="Lohikerros omalla kohdalla">🐟</button><button id="kohdeNappi" title="Menomatkan kohde: napauta kohdepiste">🎯</button><button id="vesiNappi" title="Meriveden korkeus ja 12 h ennuste">🌊</button>
       </div>
+      <div class="vesilaatikko" id="vesiLaatikko" hidden></div>
       <div class="kartta-ala" id="karttaAla">
         <div class="datatila" id="dataTila" hidden>Meridataa ei ole vielä haettu.</div>
         <div class="kartta-tieto" id="karttaTieto" hidden></div>
@@ -384,9 +392,10 @@
 <script src="alueet.js?v=24"></script>
 <script src="havainnot.js?v=15"></script>
 <script src="malli.js?v=25"></script>
-<script src="fmi.js?v=13"></script>
+<script src="fmi.js?v=14"></script>
 <script src="nopeus.js?v=20"></script>
-<script src="kartta.js?v=27"></script>
+<script src="kartta.js?v=28"></script>
+<script src="sillat.js?v=1"></script>
 <script src="reitti.js?v=5"></script>
 <script src="ais.js?v=23"></script>
 <script>
@@ -425,6 +434,7 @@ const KENTAT = [
   ['kovaKeli', 'Kova keli: paluu lähimmän turvallisen veden pisteen kautta, keskituuli vähintään (m/s)'],
   ['suoraMatala', 'Merisää: väylältä suoraan vain, jos suora osuus ei ylitä tämän syvyisiä tai matalampia käyriä (m)'],
   ['suoraPaino', 'Merisää: väyläpainotteisuus, suora osuus painaa × (1 = lyhin reitti)'],
+  ['veneKorkeus', 'Sillat: veneen korkeus vesirajasta (m)'], ['siltaVara', 'Sillat: turvavara veneen korkeuden päälle (m)'],
   ['aaltoRaja1', 'Aaltoraja 1, merkitsevä aallonkorkeus (m)'], ['aaltoRaja2', 'Aaltoraja 2, merkitsevä aallonkorkeus (m)'],
   ['matalikkoMin', 'Matalikko: huippukäyrä vähintään (m)'], ['matalikkoMax', 'Matalikko: huippukäyrä enintään (m)'],
   ['nousuM', 'Matalikko muuten: nousu ympäristöstä vähintään (m)']
@@ -436,6 +446,7 @@ function oletukset() {
       vaylaSyvyys: 10,                  // v30: Hannu 15.11. "väyliä käytetään 10–20 m vedelle asti", oletus 10 m
       vastavirtaRaja: 15,               // v30: arvio (≈ Tp 2 s ja 0,1 m/s), säädettävä
       suoraMatala: 6, suoraPaino: 1.5,  // v32: Hannu 15.11. "Parempi väyläpainotteinen"; arvoja ei kalibroitu
+      veneKorkeus: 2.6, siltaVara: 0,   // v35: Hannu 15.11. mitattu trailerilla vesirajan likajäljestä 2,5–2,6 m; "Ei varaa"
       merisaaPuhe: true, puheAani: '',
       aaltoRaja1: 0.35, aaltoRaja2: 0.5,   // Hannu 13.11.: merkitsevä aallonkorkeus
       matalikkoMin: 10, matalikkoMax: 20, nousuM: 5 });   // Hannu 13.11.: "10 m matalikko–20 m tai poikkeaa ympäristöstä merkittävästi" (5 m = oletus)
@@ -1006,7 +1017,8 @@ function esilataa() {   // tänään ja huomenna valmiiksi puhelimeen (merellä 
 function piirraMeriTila() {
   piirraNousu();   // v28
   const el = $('dataTila');
-  if (!meri) { el.textContent = `${valittuAlue.nimi}: meridataa ei ole (ajastettu haku ei ole vielä tuottanut tiedostoa tai verkkoa ei ole).`; return; }
+  if (!meri) { el.textContent = `${valittuAlue.nimi}: meridataa ei ole (ajastettu haku ei ole vielä tuottanut tiedostoa tai verkkoa ei ole).`
+    + (typeof vesiTilaTeksti === 'function' && vesiTilaTeksti() ? ' · ' + vesiTilaTeksti() : ''); return; }
   const luotu = new Date(meri.luotu), ika = (Date.now() - luotu) / 3600000;
   const osat = [`Alue ${valittuAlue.nimi}`, `Copernicus-data haettu ${pvm(luotu)} klo ${klo(luotu)} (${ika < 1 ? 'alle 1' : Math.round(ika)} h sitten)`];
   if (ika > 12) osat.push('⚠ data vanhaa');
@@ -1021,6 +1033,7 @@ function piirraMeriTila() {
     osat.push(`Matalikot käyristä: ${t.matalikot.length} (huippu ${luku(t.min, 0)}–${luku(t.max, 0)} m: ${v}, muu nousu ≥ ${luku(t.nousuM, 0)} m: ${t.matalikot.length - v}); suljettuja käyriä ${t.renkaita}, mäkiä ${t.maki}, kuoppia ${t.kuoppa}, epäselviä ${t.epaselva}`); }
   if (vaylat) osat.push(`Väylät: Väylävirasto, vesiväyläaineisto (CC BY 4.0). Ei navigointikäyttöön`);
   if (typeof aisTila === 'function' && aisTila()) osat.push(aisTila());
+  if (typeof vesiTilaTeksti === 'function' && vesiTilaTeksti()) osat.push(vesiTilaTeksti());   // v35
   if (meri.virheet && meri.virheet.length) osat.push('virheet: ' + meri.virheet.join(' | '));
   if (nousuTeksti) osat.push(nousuTeksti);       // v28
   if (offlineTeksti) osat.push(offlineTeksti);   // v26
@@ -1183,11 +1196,13 @@ function naytaPiste(lat, lon) {
   if (lat === null) { if (kartta && kartta.valittuOma) asetaLohiTaalla(false); suljePiste(); return; }   // profiilin × veneen kohdalla
   if (kartta) kartta.valittuOma = false;
   el.hidden = false;
+  const st = siltaTeksti(lat, lon);   // v35: silta ensin
+  if (st) naytaVesi(5000);
   if (!nakyma) {   // ei meridataa (esim. Porin edusta): syvyys, väylä ja omat havainnot silti
-    const osat = [jalkiTeksti(lat, lon), aisTeksti(lat, lon), matalikkoTeksti(lat, lon), syvyysTeksti(lat, lon), vaylaTeksti(lat, lon), havaintoTeksti(lat, lon)].filter(Boolean);
-    el.textContent = 'Ei meridataa tässä' + (osat.length ? ' · ' + osat.join(' · ') : '.') + '  ✕'; mitoitaKartta(); return;
+    const osat = [st, jalkiTeksti(lat, lon), aisTeksti(lat, lon), matalikkoTeksti(lat, lon), syvyysTeksti(lat, lon), vaylaTeksti(lat, lon), havaintoTeksti(lat, lon)].filter(Boolean);
+    el.textContent = (st ? osat.join(' · ') : 'Ei meridataa tässä' + (osat.length ? ' · ' + osat.join(' · ') : '.')) + '  ✕'; mitoitaKartta(); return;
   }
-  const n = nakyma, t = kartta.aika, osat = [];
+  const n = nakyma, t = kartta.aika, osat = st ? [st] : [];
   const jt = jalkiTeksti(lat, lon);
   if (jt) osat.push(jt);
   const mt = matalikkoTeksti(lat, lon);
@@ -1237,7 +1252,7 @@ function naytaPiste(lat, lon) {
     const pk = Malli.lahinKohde(asetukset, { lat, lon }), etK = Malli.etaisyysKm(lat, lon, pk.kohdeLat, pk.kohdeLon);
     osat.push(`${luku(etK)} km ${Malli.illatiivi(pk.kohdeNimi)}`);
   }
-  el.textContent = (osat.length > (jt ? 2 : 1) + (mt ? 1 : 0) + (at ? 1 : 0) ? '' : 'Ei dataa tässä pisteessä (maa tai alueen ulkopuolella) · ') + osat.join(' · ') + '  ✕';
+  el.textContent = (osat.length > (jt ? 2 : 1) + (mt ? 1 : 0) + (at ? 1 : 0) + (st ? 1 : 0) ? '' : 'Ei dataa tässä pisteessä (maa tai alueen ulkopuolella) · ') + osat.join(' · ') + '  ✕';
   mitoitaKartta();
 }
 function mitoitaKartta() {
@@ -1246,6 +1261,7 @@ function mitoitaKartta() {
   const palkki = document.querySelector('.alapalkki').offsetHeight || 50;
   alue.style.bottom = palkki + 'px';
   $('karttaNapit').style.top = (yla + 8) + 'px';
+  $('vesiLaatikko').style.top = (yla + 8) + 'px';
   if (kartta) {
     const muuttui = kartta.ylaVara !== yla || kartta.alaVara !== ala;
     kartta.ylaVara = yla; kartta.alaVara = ala;
@@ -1348,6 +1364,7 @@ function avaaKarttaNakyma() {
   }
   kartta.naytaSelite(3000);
   paivitaOmaKartalle();
+  paivitaSillatKartalle(); haeVesi(false); naytaVesi(30000);   // v35: 30 s avaamisen jälkeen
 }
 /** Kartan näkymä muistetaan alueittain (v12:n tallennus on Luodon näkymä). */
 function alueenNakyma(al) {
@@ -1527,6 +1544,134 @@ function aisTeksti(lat, lon) {
 }
 setInterval(() => haeAis(false), 15000);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') haeAis(false); });
+
+// ---------- v35: meriveden korkeus ja sillat ----------
+// Hannu 15.11.: siltojen alikulku vedenkorkeus huomioiden kartalle; meriveden korkeus kartalla pienenä lukuna 30 s kartan
+// avaamisen jälkeen, muuten 5 s napautuksesta (🌊 tai silta), ja 12 h ennustekäyrä. Lähde: Ilmatieteen laitos, avoin data
+// (CC BY 4.0), haetaan puhelimesta. Havainto enintään minuutin välein (mareografin aika-askel 1 min), ennuste 30 min välein.
+const vesi = {};   // fmisid -> { asema, havainto, ennuste, ennusteRivit, haettuH, haettuE, virheH, virheE, kesken }
+const VESI_HAV_MS = 60000, VESI_ENN_MS = 30 * 60000;
+const cm = m => { const n = Math.round(m * 100); return (n > 0 ? '+' : n < 0 ? '−' : '±') + Math.abs(n) + ' cm'; };
+function vesiAsema() {   // kartan keskikohdan lähin mareografi
+  const [la, lo] = kartta ? [kartta.lat, kartta.lon] : valittuAlue.keski;
+  return Sillat.lahinMareografi(la, lo);
+}
+function vesiAsemalle(lat, lon) { const m = Sillat.lahinMareografi(lat, lon); return vesi[m.fmisid] || { asema: m }; }
+function tarvittavatAsemat() {   // keskikohdan asema ja näkyvien siltojen asemat (näkymä + puolet reunoilla)
+  const a = vesiAsema(), kaikki = new Map([[a.fmisid, a]]);
+  if (kartta) {
+    const [laY, loV] = kartta.paikka(-kartta.w / 2, -kartta.h / 2), [laA, loO] = kartta.paikka(kartta.w * 1.5, kartta.h * 1.5);
+    for (const s of Sillat.SILLAT) if (s.lat <= laY && s.lat >= laA && s.lon >= loV && s.lon <= loO) { const m = Sillat.lahinMareografi(s.lat, s.lon); kaikki.set(m.fmisid, m); }
+  }
+  return [...kaikki.values()];
+}
+async function haeVesiAsema(m, pakota) {
+  const v = vesi[m.fmisid] = vesi[m.fmisid] || { asema: m };
+  if (v.kesken) return;
+  const nyt = new Date(), hav = pakota || !v.haettuH || nyt - v.haettuH >= VESI_HAV_MS, enn = !v.haettuE || nyt - v.haettuE >= VESI_ENN_MS;
+  if (!hav && !enn) return;
+  v.kesken = true;
+  try {
+    if (hav) {
+      try { const h = Sillat.havainto(await FMI.haeVesiHavainto(m.fmisid, nyt)); if (h) v.havainto = h; v.virheH = h ? null : 'ei havaintoa 30 min ajalta'; }
+      catch (e) { v.virheH = verkkoVirhe(e); }
+      v.haettuH = nyt;
+    }
+    if (enn) {
+      try { v.ennusteRivit = await FMI.haeVesiEnnuste(m.fmisid, m.lat, m.lon, nyt); v.haettuE = nyt; v.virheE = null; }
+      catch (e) { v.virheE = verkkoVirhe(e); v.haettuE = new Date(nyt.getTime() - VESI_ENN_MS + 5 * 60000); }   // uusi yritys 5 min päästä
+    }
+    if (v.ennusteRivit) v.ennuste = Sillat.ennuste(v.ennusteRivit, v.havainto);
+  } finally { v.kesken = false; }
+  paivitaSillatKartalle(); piirraVesi(); piirraMeriTila();
+}
+function verkkoVirhe(e) { return e instanceof TypeError || /fetch|network/i.test(e.message) ? 'ei yhteyttä Ilmatieteen laitokseen' : e.message; }
+function haeVesi(pakota) {
+  if (!window.FMI || !window.Sillat) return Promise.resolve();
+  return Promise.all(tarvittavatAsemat().map(m => haeVesiAsema(m, pakota)));
+}
+function paivitaSillatKartalle() {
+  if (!kartta || !window.Sillat) return;
+  const nyt = new Date();
+  kartta.sillat = Sillat.SILLAT.map(s => { const a = Sillat.arvio(s, vesiAsemalle(s.lat, s.lon), asetukset.veneKorkeus, asetukset.siltaVara, nyt);
+    return { lat: s.lat, lon: s.lon, nimi: s.nimi, korkeus: s.korkeus, alikulku: a.alikulku, tila: a.tila }; });
+  if (karttaAuki()) kartta.piirra();
+}
+let vesiAjastin = null;
+/** Vedenkorkeus näkyviin ms millisekunniksi (avaaminen 30 s, napautus 5 s). */
+function naytaVesi(ms) {
+  const el = $('vesiLaatikko'); if (!el) return;
+  clearTimeout(vesiAjastin);
+  el.hidden = false; piirraVesi();
+  vesiAjastin = setTimeout(() => { el.hidden = true; }, ms);
+}
+function piirraVesi() {
+  const el = $('vesiLaatikko'); if (!el || el.hidden || !window.Sillat) return;
+  const m = vesiAsema(), v = vesi[m.fmisid] || {}, h = v.havainto;
+  let html = `<div class="yla">🌊 ${m.nimi} `;
+  if (h && isFinite(h.n2000)) html += `<b>${cm(h.n2000)}</b></div>N2000 · klo ${klo(h.t)}`;   // keskivesi ⓘ-tiedossa
+  else if (h && isFinite(h.mw)) html += `<b>${cm(h.mw)}</b></div>keskivedestä klo ${klo(h.t)}, N2000 puuttuu`;
+  else html += '</div>' + (v.virheH ? 'ei havaintoa: ' + v.virheH.slice(0, 70) : v.haettuH ? 'ei havaintoa' : 'haetaan…');
+  el.innerHTML = html + vesiKayra(v);
+}
+/** 12 h ennustekäyrä (N2000) ja havainto pisteenä. */
+function vesiKayra(v) {
+  const nyt = Date.now(), e = v.ennuste, h = v.havainto, sarja = e ? Sillat.jakso(e.sarja, nyt, 12) : [];
+  if (sarja.length < 2) return '<div>ennuste 12 h: ' + (v.virheE ? 'ei saatu' : v.haettuE ? 'ei arvoja' : 'haetaan…') + '</div>';
+  const W = 150, H = 50, x0 = 3, x1 = W - 3, y0 = 14, y1 = H - 13, TUNNIT = 12 * 3600e3;
+  const arvot = sarja.map(r => r.n2000).concat(h && isFinite(h.n2000) ? [h.n2000] : []);
+  let lo = Math.min(...arvot), hi = Math.max(...arvot);
+  if (hi - lo < 0.1) { const k = (hi + lo) / 2; lo = k - 0.05; hi = k + 0.05; }
+  const X = t => Math.max(x0, Math.min(x1, x0 + (t - nyt) / TUNNIT * (x1 - x0))), Y = a => y0 + (hi - a) / (hi - lo) * (y1 - y0);
+  const pts = sarja.map(r => X(+r.t).toFixed(1) + ',' + Y(r.n2000).toFixed(1)).join(' ');
+  const ala = sarja.reduce((p, r) => r.n2000 < p.n2000 ? r : p), yla = sarja.reduce((p, r) => r.n2000 > p.n2000 ? r : p);
+  let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-label="vedenkorkeusennuste 12 h">`
+    + `<line x1="${x0}" y1="${y1 + 1}" x2="${x1}" y2="${y1 + 1}" stroke="#36506b" stroke-width="1"/>`
+    + [0, 6, 12].map(t => `<line x1="${X(nyt + t * 3600e3)}" y1="${y1 + 1}" x2="${X(nyt + t * 3600e3)}" y2="${y1 + 4}" stroke="#5d7690"/>`).join('')
+    + `<polyline points="${pts}" fill="none" stroke="#78ebff" stroke-width="2" stroke-linejoin="round"/>`
+    + [ala, yla].map(r => `<circle cx="${X(+r.t)}" cy="${Y(r.n2000)}" r="2.5" fill="#ffd54a"/><text x="${Math.max(12, Math.min(W - 12, X(+r.t)))}" y="${Y(r.n2000) - 5}" `
+      + `font-size="10" fill="#ffd54a" text-anchor="middle">${cm(r.n2000).replace(' cm', '')}</text>`).join('');   // alin ja ylin
+  if (h && isFinite(h.n2000)) svg += `<circle cx="${X(+h.t)}" cy="${Y(h.n2000)}" r="3.5" fill="#fff" stroke="#000"/>`;
+  svg += `<text x="${x0}" y="${H - 2}" font-size="9" fill="#8fa6ba">nyt</text><text x="${X(nyt + 6 * 3600e3)}" y="${H - 2}" font-size="9" fill="#8fa6ba" text-anchor="middle">+6 h</text>`
+    + `<text x="${x1}" y="${H - 2}" font-size="9" fill="#8fa6ba" text-anchor="end">+12 h</text></svg>`;
+  const huom = [e.arvattu ? 'yksikkö oletettu' : '', e.muunnettu ? 'keskivedestä muunnettu' : ''].filter(Boolean).join(', ');
+  return svg + (huom ? `<div>ennuste: ${huom}</div>` : '');
+}
+/** Napautus sillan kohdalla (26 px): merkitty ja todellinen alikulku, veneen mahtuminen nyt ja 12 h ennusteella. */
+function siltaTeksti(lat, lon) {
+  if (!window.Sillat || !kartta) return '';
+  const b = kartta.ruutu(lat, lon); let s = null, pd = 26;
+  for (const x of Sillat.SILLAT) { const a = kartta.ruutu(x.lat, x.lon), d = Math.hypot(a[0] - b[0], a[1] - b[1]); if (d < pd) { pd = d; s = x; } }
+  if (!s) return '';
+  const v = vesiAsemalle(s.lat, s.lon), vene = asetukset.veneKorkeus, vara = asetukset.siltaVara || 0;
+  if (!v.haettuH && !v.kesken) haeVesiAsema(v.asema, false).then(() => {   // aseman ensimmäinen haku: teksti päivittyy haun jälkeen
+    if (!$('karttaTieto').hidden && $('karttaTieto').textContent.startsWith(s.nimi + ' (')) naytaPiste(lat, lon); });
+  const a = Sillat.arvio(s, v, vene, vara, new Date()), tarve = `vene ${luku(vene, 2)} m` + (vara ? ` + vara ${luku(vara, 2)} m` : '');
+  let t = `${s.nimi} (${s.tunnus}): alikulku ${luku(s.korkeus)} m (${s.vertaus})` + (isFinite(s.taulukko) ? `, taulukossa ${luku(s.taulukko)} m` : '');
+  if (isFinite(a.alikulku)) {
+    t += ` · meri nyt ${cm(a.vesi)} N2000 (${v.asema.nimi} klo ${klo(v.havainto.t)}) → todellinen ${luku(a.alikulku, 2)} m · ${tarve}: `
+      + (a.tila === 'mahtuu' ? `MAHTUU, väliä ${luku(a.ero, 2)} m` : `EI MAHDU, puuttuu ${luku(-a.ero, 2)} m`);
+  } else t += v.haettuH ? ` · meriveden korkeutta ei saatu (${v.asema.nimi}${v.virheH ? ': ' + v.virheH : ''}): todellista alikulkua ei voi laskea` : ` · meriveden korkeus haetaan (${v.asema.nimi})…`;
+  if (a.pienin) {
+    t += ` · 12 h ennusteella alin ${luku(a.pienin.m, 2)} m klo ${klo(a.pienin.t)}, ylin ${luku(a.suurin.m, 2)} m klo ${klo(a.suurin.t)}`;
+    if (a.tila === 'mahtuu' && a.eiMahdu) t += ` – ⚠ ei mahdu klo ${klo(a.eiMahdu.t)} alkaen`;
+    if (v.ennuste.arvattu) t += ' (ennusteen yksikkö oletettu mm)';
+    if (v.ennuste.muunnettu) t += ' (ennuste keskivedestä N2000:een havainnon erolla)';
+  }
+  return t + ` · vertaustaso ${Sillat.VERTAUS[s.vertaus].selite}${s.huom ? '; ' + s.huom : ''} · lähde: ${s.lahde} · ei navigointiin, katso sillan korkeusmerkki`;
+}
+function vesiTilaTeksti() {
+  const osat = Object.values(vesi).map(v => `${v.asema.nimi} (${v.asema.fmisid}): `
+    + (v.havainto ? `${cm(isFinite(v.havainto.n2000) ? v.havainto.n2000 : v.havainto.mw)} ${isFinite(v.havainto.n2000) ? 'N2000' : 'keskivedestä'} klo ${klo(v.havainto.t)} [${v.havainto.parametrit.nimet.join(', ')}]` : 'ei havaintoa')
+    + (v.virheH ? ' – ' + v.virheH : '')
+    + (v.ennuste ? `; ennuste ${v.ennuste.sarja.length} arvoa [${v.ennuste.parametrit.nimet.join(', ')}; ${v.ennuste.yksikko}${v.ennuste.arvattu ? ' oletettu' : ' havainnosta'}${v.ennuste.muunnettu ? '; keskivedestä muunnettu' : ''}]` : v.virheE ? '; ennuste: ' + v.virheE : ''));
+  if (!osat.length) return '';
+  return 'Meriveden korkeus: Ilmatieteen laitos, avoin data (CC BY 4.0), mareografi (1 min) ja vedenkorkeusennuste; ' + osat.join(' | ')
+    + `. Sillat: todellinen alikulku = merkitty + vertaustaso − meri nyt (N2000); vene ${luku(asetukset.veneKorkeus, 2)} m, vara ${luku(asetukset.siltaVara || 0, 2)} m. Ei navigointiin`;
+}
+$('vesiNappi').addEventListener('click', () => { haeVesi(false); naytaVesi(5000); });
+$('vesiLaatikko').addEventListener('click', () => { clearTimeout(vesiAjastin); $('vesiLaatikko').hidden = true; });
+setInterval(() => { if (karttaAuki() && document.visibilityState === 'visible') haeVesi(false); }, 30000);
 
 // ---------- Klooni venepuhelimeen (v23, Hannu 14.11.2026) ----------
 // Asetukset, omat saalispisteet, karttatasot, alue ja reissut tiedostoon; venepuhelin lukee sen. Laitekohtaiset jäävät pois.
@@ -1725,7 +1870,7 @@ $('jalkiPoista').addEventListener('click', () => {
   jalki = []; jalkiMuuttui = true; tallennaJalki(true);
   if (kartta) { kartta.jalki = jalki; kartta.piirra(); }
 });
-$('tallenna').addEventListener('click', () => { lueAsetukset(); piirraAsetukset(); piirra(); laskeMatalikot(); piirraMeriTila(); if (kartta) { kartta.askel = asetukset.lampoAskel; kartta.lohiVali = [asetukset.lohiMin, asetukset.lohiMax]; kartta.lohiReuna = asetukset.lohiReuna; kartta.jyrkka = jyrkkaRajat(); kartta.aaltoRajat = aaltoRajat(); piirraLohiRivi(); kartta.piirra(); } paivita(); });
+$('tallenna').addEventListener('click', () => { lueAsetukset(); piirraAsetukset(); piirra(); laskeMatalikot(); piirraMeriTila(); if (kartta) { kartta.askel = asetukset.lampoAskel; kartta.lohiVali = [asetukset.lohiMin, asetukset.lohiMax]; kartta.lohiReuna = asetukset.lohiReuna; kartta.jyrkka = jyrkkaRajat(); kartta.aaltoRajat = aaltoRajat(); piirraLohiRivi(); kartta.piirra(); } paivitaSillatKartalle(); paivita(); });
 $('palauta').addEventListener('click', () => { asetukset = oletukset(); asetukset.asemat = [asetukset.asema1, asetukset.asema2]; tallennaLS('mlt_asetukset', asetukset); piirraAsetukset(); piirra(); });
 
 // ---------- Merisää (v30, Hannu 15.11.2026) ----------

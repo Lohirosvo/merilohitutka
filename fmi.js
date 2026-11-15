@@ -180,7 +180,37 @@
     throw new Error('Ennustetta ei saatu. ' + virheet.join(' | '));
   }
 
-  const FMI = { haeLahinAsema, jasennaSimple, aikasarjaksi, viimeisimmat, haeHavainnot, haeEnnuste, isoAika };
+  // ---------------------------------------------------------------- v35: meriveden korkeus
+  // Havainto: fmi::observations::mareograph::instant::simple (IL: "Time step is 1 minute"), oletusparametrit
+  // WATLEV, TW, WLEVN2K_PT1S_INSTANT (vastauksen observedProperty). Jos nimetyt parametrit hylätään, haetaan oletuksilla.
+  const MAREO = 'fmi::observations::mareograph::instant::simple';
+  const VESIENNUSTE = 'fmi::forecast::sealevel::point::simple';
+
+  /** Mareografin rivit viimeiseltä minuutit-ajalta (jäsentämättä sarjaksi: Sillat.havainto). */
+  async function haeVesiHavainto(fmisid, nyt, minuutit = 30) {
+    const p = { storedquery_id: MAREO, fmisid: String(fmisid), starttime: isoAika(new Date(nyt.getTime() - minuutit * 60000)), endtime: isoAika(nyt) };
+    try {
+      const rivit = await hae(Object.assign({ parameters: 'WATLEV,WLEVN2K_PT1S_INSTANT' }, p));
+      if (rivit.some(r => isFinite(r.arvo))) return rivit;
+    } catch (e) { if (!/^FMI/.test(e.message)) throw e; }   // verkkovirhe heti ulos; parametrivirhe → oletusparametrit
+    return hae(p);
+  }
+
+  /** Vedenkorkeusennuste: tunnin ennen – tunnit eteenpäin. Kysely hyväksyy paikan; kokeillaan fmisid, sitten lat,lon. */
+  async function haeVesiEnnuste(fmisid, lat, lon, nyt, tunnit = 13) {
+    const aika = { starttime: isoAika(new Date(nyt.getTime() - 3600000)), endtime: isoAika(new Date(nyt.getTime() + tunnit * 3600000)) };
+    const virheet = [];
+    for (const paikka of [{ fmisid: String(fmisid) }, { latlon: lat.toFixed(4) + ',' + lon.toFixed(4) }]) {
+      try {
+        const rivit = await hae(Object.assign({ storedquery_id: VESIENNUSTE }, paikka, aika));
+        if (rivit.some(r => isFinite(r.arvo))) return rivit;
+        virheet.push(Object.keys(paikka)[0] + ': tyhjä');
+      } catch (e) { virheet.push(Object.keys(paikka)[0] + ': ' + e.message); if (!/^FMI/.test(e.message)) break; }
+    }
+    throw new Error('Vedenkorkeusennustetta ei saatu. ' + virheet.join(' | '));
+  }
+
+  const FMI = { haeLahinAsema, jasennaSimple, aikasarjaksi, viimeisimmat, haeHavainnot, haeEnnuste, isoAika, haeVesiHavainto, haeVesiEnnuste };
   if (typeof module !== 'undefined' && module.exports) module.exports = FMI;
   else root.FMI = FMI;
 })(typeof window !== 'undefined' ? window : this);
