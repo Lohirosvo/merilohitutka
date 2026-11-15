@@ -363,7 +363,19 @@
    * Jyrkkyys = Hs / L. Copernicuksen aaltomalli sisältää jo pintavirran vaikutuksen aallokkoon.
    */
   const PAINOVOIMA = 9.81;
-  function aallonPituus(T) { return isFinite(T) && T > 0 ? PAINOVOIMA * T * T / (2 * Math.PI) : NaN; }
+  /** Aallonpituus m. Ilman syvyyttä syvän veden kaava gT²/2π; syvyydellä h (m) lineaarinen dispersio ω² = g·k·tanh(k·h) (v30). */
+  function aallonPituus(T, h) {
+    if (!(isFinite(T) && T > 0)) return NaN;
+    const L0 = PAINOVOIMA * T * T / (2 * Math.PI);
+    if (!(isFinite(h) && h > 0)) return L0;
+    const w2 = (2 * Math.PI / T) ** 2;
+    let k = Math.max(2 * Math.PI / L0, w2 / PAINOVOIMA / Math.sqrt(Math.tanh(w2 * h / PAINOVOIMA)));
+    for (let i = 0; i < 30; i++) {
+      const th = Math.tanh(k * h), f = PAINOVOIMA * k * th - w2, df = PAINOVOIMA * (th + k * h * (1 - th * th));
+      const dk = f / df; k -= dk; if (Math.abs(dk) < 1e-10 * k) break;
+    }
+    return 2 * Math.PI / k;
+  }
   function aaltoJyrkkyys(hs, T) { const L = aallonPituus(T); return isFinite(hs) && hs >= 0 && L > 0 ? hs / L : NaN; }
   /** Jyrkkä: merkitsevä aallonkorkeus ≥ minHs ja jyrkkyys ≥ raja (osuus, esim. 0,05 = 5 %). */
   function onJyrkka(hs, T, minHs, raja) { const s = aaltoJyrkkyys(hs, T); return isFinite(s) && hs >= minHs - 1e-9 && s >= raja - 1e-12; }
@@ -537,6 +549,7 @@
       this.ylaVara = 0; this.alaVara = 0;   // ohjainten peittämä osa ylhäällä ja alhaalla (px)
       this._seliteAsti = 0;
       this.merkit = opts.merkit || []; this.oma = null; this.valittu = null;
+      this.reitit = []; this.kohde = null;   // v30: merisään reitit [{ pisteet: [[lat,lon]…], vari, nimi, katko }] ja menomatkan kohde { lat, lon }
       this.havainnot = opts.havainnot || [];   // havainnot.js
       this.jalki = opts.jalki || [];   // oma reittijälki 24 h (v20)
       this.matalikot = []; this.matalikkoVali = '10–20';
@@ -658,6 +671,7 @@
       if (d && this.tasot.tuuli && d.tuuli) this._tuuli();
       if (this.tasot.jalki && this.jalki.length > 1) this._jalki();   // nuolten päälle, merkkien alle
       if (this.tasot.ais && this.ais.length) this._ais();
+      if (this.reitit.length || this.kohde) this._reitit();   // v30
       this._merkit();
       this._piirraNimet();   // kaikkien tasojen numerot ja nimet tärkeysjärjestyksessä, ei päällekkäin (v16)
       this._profiiliAlue = null;
@@ -1192,6 +1206,37 @@
       g.restore();
     }
 
+    /** v30: merisään reitti (väylä + suora osuus) ja menomatkan kohde. */
+    _reitit() {
+      const g = this.ctx;
+      g.save(); g.lineJoin = 'round'; g.lineCap = 'round';
+      for (const r of this.reitit) {
+        if (!r.pisteet || r.pisteet.length < 2) continue;
+        const polku = () => { g.beginPath(); r.pisteet.forEach(([la, lo], i) => { const [x, y] = this.ruutu(la, lo); i ? g.lineTo(x, y) : g.moveTo(x, y); }); };
+        g.setLineDash([]); g.strokeStyle = 'rgba(0,0,0,0.75)'; g.lineWidth = 6; polku(); g.stroke();
+        g.setLineDash(r.katko ? [10, 7] : []); g.strokeStyle = r.vari || '#ffffff'; g.lineWidth = 3; polku(); g.stroke();
+        for (const k of r.kohdat || []) {   // pahin ja jyrkin kohta
+          const [x, y] = this.ruutu(k.lat, k.lon);
+          g.setLineDash([]); g.fillStyle = k.vari || '#ff3c3c'; g.strokeStyle = '#000'; g.lineWidth = 1.5;
+          g.beginPath(); g.moveTo(x, y - 9); g.lineTo(x + 8, y + 6); g.lineTo(x - 8, y + 6); g.closePath(); g.fill(); g.stroke();
+          this._varaa(x - 9, y - 10, 18, 17);
+          if (k.nimi) this._nimi(k.nimi, [[x + 11, y + 4], [x + 11, y - 10], [x - 90, y + 4]], k.vari || '#ff3c3c', 1, { font: 'bold 12px sans-serif' });
+        }
+        if (r.nimi) { const [la, lo] = r.pisteet[Math.floor(r.pisteet.length / 2)], [x, y] = this.ruutu(la, lo);
+          this._nimi(r.nimi, [[x + 8, y - 8], [x + 8, y + 16]], r.vari || '#fff', 2); }
+      }
+      if (this.kohde) {
+        const [x, y] = this.ruutu(this.kohde.lat, this.kohde.lon);
+        g.setLineDash([]); g.strokeStyle = '#000'; g.lineWidth = 5;
+        g.beginPath(); g.arc(x, y, 11, 0, Math.PI * 2); g.moveTo(x - 16, y); g.lineTo(x + 16, y); g.moveTo(x, y - 16); g.lineTo(x, y + 16); g.stroke();
+        g.strokeStyle = '#ffd54a'; g.lineWidth = 2.5;
+        g.beginPath(); g.arc(x, y, 11, 0, Math.PI * 2); g.moveTo(x - 16, y); g.lineTo(x + 16, y); g.moveTo(x, y - 16); g.lineTo(x, y + 16); g.stroke();
+        this._varaa(x - 17, y - 17, 34, 34);
+        this._nimi('kohde', [[x + 14, y - 12], [x + 14, y + 22]], '#ffd54a', 0);
+      }
+      g.restore();
+    }
+
     /** Lohikerros pisteessä kartan valitulla ajalla (v24): { teksti, loytyi } tai null (ei meridataa). */
     lohiKohdalla(lat, lon) {
       const d = this.data;
@@ -1317,6 +1362,8 @@
       }
       if (this.tasot.jalki && this.jalki.length > 1) rivit.push([['Oma jälki 24 h', '#ff6b61'], ['nyt', '#e9f1f7', 'rgba(255,59,48,1)'],
         ['12 h', '#e9f1f7', 'rgba(255,59,48,' + jalkiAlfa(43200).toFixed(2) + ')'], ['24 h sitten', '#e9f1f7', 'rgba(255,59,48,' + jalkiAlfa(86400).toFixed(2) + ')']]);
+      if (this.reitit.length || this.kohde) rivit.push([['Merisää', '#e9f1f7'], ['paluu', '#e9f1f7', '#ffffff'], ['meno', '#e9f1f7', '#ffd54a'],
+        ['▲ suurin aalto', '#ff3c3c'], ['▲ jyrkin', '#b07cff']]);   // v30
       if (this.tasot.lampo && d.phy) rivit.push([['Lämpö (malli) ' + f(this.askel) + ' °C välein', '#ffb24a']]);
       if (this.tasot.sst && d.sst) rivit.push([['Satelliitti: katkoviiva', '#ffffff']]);
       if (this.tasot.virta && d.phy) rivit.push([['Virta: nuoli ≈ 0,9 km/h (0,25 m/s)', '#78ebff']]);

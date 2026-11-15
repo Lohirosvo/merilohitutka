@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b1726">
 <title>Merilohitutka</title>
+<!-- v30 (Hannu 15.11.2026 "Tehdään kaikki mutta merisään muodossa"): merisää paluureitille (väylä 10 m:iin, sitten suoraan), ääneen uistelun aikana 2 h välein, menomatkan kohde kartalta, vastavirta aaltoja vastaan, huippujakso VTPK, mukavuusarvio 1–5 -->
 <!-- v29 (Hannu 14.11.2026 "0.3 m mukavuus kärsii tehdään"): jyrkkä aallokko aallonjaksosta (VTM10): kartta, napautus, 48 h; tuuli virtaa vastaan -huomautus -->
 <!-- v28 (Hannu 14.11.2026 "1 2 3 kerralla"): nousun lämpöraja (48 h -välilehti, ⓘ), 48 h aikajana aallolla ja lohikerroksella, nopeushälytys 3 m:n virrasta (valinta) -->
 <!-- v27 (Hannu 14.11.2026): lohikerroksen reuna haalenee rajan molemmin puolin (asetus lohiReuna, oletus 0,4 °C) ja rajaviiva: sininen liian kylmä, punainen liian lämmin -->
@@ -63,6 +64,16 @@
   .iso { width:100%; font-size:28px; letter-spacing:1px; padding:18px; border:2px solid var(--syaani); color:var(--syaani); background:transparent; }
   .iso.kaynnissa { border-color:var(--punainen); color:#fff; background:var(--punainen); }
   .sininen { background:#2f6fa3; border-color:#2f6fa3; }
+  /* v30: merisää ja mukavuusarvio */
+  .merisaa { font-size:16px; line-height:1.4; color:var(--teksti); margin:4px 0 8px; }
+  .merisaa .aika { color:var(--himmea); font-size:13px; display:block; margin-bottom:2px; }
+  .merisaa-asetus { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px; font-size:14px; color:var(--himmea); }
+  .merisaa-asetus select { font-size:14px; max-width:60vw; }
+  .napit.pienet button { font-size:15px; padding:8px 10px; }
+  .peite { position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:50; display:flex; align-items:center; justify-content:center; padding:16px; }
+  .peite[hidden] { display:none; }
+  .peite .kortti { max-width:420px; width:100%; }
+  .mukavuusnapit button { flex:1; font-size:24px; padding:14px 0; }
 
   details summary { cursor:pointer; color:var(--himmea); font-weight:600; padding:6px 0; }
   .asetus { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:4px 0; font-size:16px; }
@@ -156,6 +167,17 @@
       <div class="rivi"><span id="vLblKova">Kova keli</span><span id="vKova">–</span></div>
     </div>
 
+    <div class="kortti" id="vMerisaa">
+      <h2>Merisää</h2>
+      <div class="merisaa" id="merisaaTeksti">Merisää luetaan ääneen uistelun alussa ja parillisina tasatunteina (8, 10, 12 …), kun sovellus on auki ja näyttö päällä.</div>
+      <div class="napit pienet"><button id="merisaaLue">🔊 Lue nyt</button><button id="merisaaHiljaa">■ Hiljaa</button><button id="merisaaKartta">🗺 Reitti kartalle</button></div>
+      <div class="merisaa-asetus">
+        <label><input type="checkbox" id="merisaaPuhe"> ääneen uistelun aikana</label>
+        <label>Ääni <select id="puheAani"><option value="">automaattinen</option></select></label>
+      </div>
+      <p class="pieni" id="merisaaAani"></p>
+    </div>
+
     <div class="kortti">
       <h2>Nopeushälytys</h2>
       <div class="rajat">
@@ -207,7 +229,7 @@
         </div>
       </div>
       <div class="karttanapit" id="karttaNapit">
-        <button id="zoomPlus">+</button><button id="zoomMiinus">−</button><button id="keskitaOma">◎</button><button id="lohiTaalla" title="Lohikerros omalla kohdalla">🐟</button>
+        <button id="zoomPlus">+</button><button id="zoomMiinus">−</button><button id="keskitaOma">◎</button><button id="lohiTaalla" title="Lohikerros omalla kohdalla">🐟</button><button id="kohdeNappi" title="Menomatkan kohde: napauta kohdepiste">🎯</button>
       </div>
       <div class="kartta-ala" id="karttaAla">
         <div class="datatila" id="dataTila" hidden>Meridataa ei ole vielä haettu.</div>
@@ -339,6 +361,15 @@
   <span class="suunta" id="suunta"></span>
   <span class="lisa" id="gpsLisa">GPS odotetaan</span>
 </div>
+<div class="peite" id="mukavuus" hidden>
+  <div class="kortti">
+    <h2>Miltä keli tuntui?</h2>
+    <p class="pieni" id="mukavuusKeli"></p>
+    <div class="napit mukavuusnapit"><button data-m="1">1</button><button data-m="2">2</button><button data-m="3">3</button><button data-m="4">4</button><button data-m="5">5</button></div>
+    <p class="pieni">1 = epämukava, 5 = mukava. Tallentuu reissuun aallokon ja tuulen kanssa (vain tähän puhelimeen).</p>
+    <button id="mukavuusOhita">Ohita</button>
+  </div>
+</div>
 <nav>
   <button data-v="v-vesilla">▲<br>VESILLÄ</button>
   <button data-v="v-48h">48H<br>SUUNNITTELU</button>
@@ -350,7 +381,8 @@
 <script src="malli.js?v=24"></script>
 <script src="fmi.js?v=13"></script>
 <script src="nopeus.js?v=20"></script>
-<script src="kartta.js?v=26"></script>
+<script src="kartta.js?v=27"></script>
+<script src="reitti.js?v=1"></script>
 <script src="ais.js?v=23"></script>
 <script>
 'use strict';
@@ -383,6 +415,8 @@ const KENTAT = [
   ['nousuLampo', 'Nousun lämpöraja: alueen pintavesi (°C)'],
   ['jyrkkaHs', 'Jyrkkä aallokko: merkitsevä aallonkorkeus vähintään (m)'],
   ['jyrkkyysRaja', 'Jyrkkä aallokko: korkeus vähintään % aallonpituudesta'],
+  ['vaylaSyvyys', 'Merisää: väylää pitkin syvyyskäyrälle, sitten suoraan (m, 10–20)'],
+  ['vastavirtaRaja', 'Merisää: vastavirran jyrkennys mainitaan vähintään (%)'],
   ['aaltoRaja1', 'Aaltoraja 1, merkitsevä aallonkorkeus (m)'], ['aaltoRaja2', 'Aaltoraja 2, merkitsevä aallonkorkeus (m)'],
   ['matalikkoMin', 'Matalikko: huippukäyrä vähintään (m)'], ['matalikkoMax', 'Matalikko: huippukäyrä enintään (m)'],
   ['nousuM', 'Matalikko muuten: nousu ympäristöstä vähintään (m)']
@@ -391,6 +425,9 @@ function oletukset() {
   return Object.assign({}, Malli.OLETUKSET, Nopeus.OLETUKSET,
     { asema1: Malli.OLETUKSET.asemat[0], asema2: Malli.OLETUKSET.asemat[1], lampoAskel: 0.2, lohiMin: 6.6, lohiMax: 8.8, lohiReuna: 0.4, nousuLampo: 6.6, halytysSyvyys: 'pinta',
       jyrkkaHs: 0.3, jyrkkyysRaja: 5,   // v29: Hannu 14.11. "0.3 m mukavuus kärsii"; 5 % = arvio, säädettävä
+      vaylaSyvyys: 10,                  // v30: Hannu 15.11. "väyliä käytetään 10–20 m vedelle asti", oletus 10 m
+      vastavirtaRaja: 15,               // v30: arvio (≈ Tp 2 s ja 0,1 m/s), säädettävä
+      merisaaPuhe: true, puheAani: '',
       aaltoRaja1: 0.35, aaltoRaja2: 0.5,   // Hannu 13.11.: merkitsevä aallonkorkeus
       matalikkoMin: 10, matalikkoMax: 20, nousuM: 5 });   // Hannu 13.11.: "10 m matalikko–20 m tai poikkeaa ympäristöstä merkittävästi" (5 m = oletus)
 }
@@ -541,22 +578,33 @@ function piirraUistelu() {
   $('edellinen').textContent = uistelu ? 'Uistelu käynnissä klo ' + klo(new Date(uistelu.alku)) + ' alkaen.'
     : (e ? `Edellinen reissu ${new Date(e.alku).toLocaleDateString('fi-FI')}: ${Math.round(e.kestoMin)} min, ${e.kalat} kalaa.` : '');
   $('reissut').innerHTML = reissut.length ? reissut.slice().reverse().map(r =>
-    `<div class="rivi"><span>${new Date(r.alku).toLocaleDateString('fi-FI')} klo ${klo(new Date(r.alku))}</span><span>${Math.round(r.kestoMin)} min · ${r.kalat} kalaa</span></div>`).join('') : 'Ei vielä reissuja.';
+    `<div class="rivi"><span>${new Date(r.alku).toLocaleDateString('fi-FI')} klo ${klo(new Date(r.alku))}</span><span>${Math.round(r.kestoMin)} min · ${r.kalat} kalaa` +
+    `${r.mukavuus ? ' · mukavuus ' + r.mukavuus + '/5' : ''}${r.keli ? ' · ' + keliTeksti(r.keli) : ''}</span></div>`).join('') : 'Ei vielä reissuja.';
 }
 $('uistelu').addEventListener('click', () => {
+  let arvioi = null;
   if (!uistelu) {
     uistelu = { alku: Date.now() };
     piippaa(660); // avaa äänen käyttöön käyttäjän painalluksella
     pidaNaytto();
+    // v30: merisää heti (painallus avaa puheen selaimessa); parillisen tunnin alkupuolella se kattaa tämän tunnin raportin
+    const nyt = new Date(); if (nyt.getHours() % 2 === 0 && nyt.getMinutes() < 30) uistelu.merisaaViim = merisaaAvain(nyt);
+    tallennaLS('mlt_uistelu', uistelu);
+    merisaa(asetukset.merisaaPuhe !== false);
   } else {
+    kirjaaKeli(null);   // v30: viimeinen kelinäyte
     const reissut = lue('mlt_reissut') || [];
-    reissut.push({ alku: uistelu.alku, loppu: Date.now(), kestoMin: (Date.now() - uistelu.alku) / 60000, kalat: 0 });
+    const r = { alku: uistelu.alku, loppu: Date.now(), kestoMin: (Date.now() - uistelu.alku) / 60000, kalat: 0 };
+    if (uistelu.keli) r.keli = uistelu.keli;
+    reissut.push(r); arvioi = r;
     tallennaLS('mlt_reissut', reissut.slice(-200));
     uistelu = null; halytysTila = null;
+    try { speechSynthesis.cancel(); } catch (e) {}
     if (!karttaAuki()) vapautaNaytto();
   }
   tallennaLS('mlt_uistelu', uistelu);
   piirraUistelu(); piirraNopeus();
+  if (arvioi) kysyMukavuus(arvioi);   // v30: mukavuus 1–5
 });
 $('nopeusMin').addEventListener('change', lueRajat);
 $('nopeusMax').addEventListener('change', lueRajat);
@@ -892,7 +940,7 @@ async function lataaSyvyys() {
   if (!muuttui) return;
   laskeMatalikot();
   piirraMeriTila();
-  if (kartta) { kartta.syvyys = syvyys; kartta.vaylat = vaylat; kartta.piirra(); }
+  if (kartta) { kartta.syvyys = syvyys; kartta.vaylat = vaylat; paivitaReititKartalle(); kartta.piirra(); }
 }
 
 function puraPaiva(p, meri) {   // meri: hakemisto, jonka mukaan päivä haettiin (alue voi vaihtua haun aikana)
@@ -906,7 +954,8 @@ function puraPaiva(p, meri) {   // meri: hakemisto, jonka mukaan päivä haettii
     if (p.phy.u3 && p.phy.v3) Object.assign(n.phy, { u3: jaa(p.phy.u3), v3: jaa(p.phy.v3), virtaSyv: meri.phy.virtaSyv || 3 });   // v21
   }
   if (p.wav && meri.wav) n.wav = { lat: meri.wav.lat, lon: meri.wav.lon, ajat: p.wav.ajat, hs: jaa(p.wav.hs), suunta: p.wav.suunta,
-                                   jakso: p.wav.jakso ? jaa(p.wav.jakso) : null };   // v29: aallonjakso Tm-1,0 (s)
+                                   jakso: p.wav.jakso ? jaa(p.wav.jakso) : null,      // v29: aallonjakso Tm-1,0 (s)
+                                   huippu: p.wav.huippu ? jaa(p.wav.huippu) : null };  // v30: huippujakso Tp (s)
   if (p.tuuli && meri.tuuli) n.tuuli = Object.assign({ pisteet: meri.tuuli.pisteet }, p.tuuli);
   return n;
 }
@@ -1051,21 +1100,28 @@ function syvyysTeksti(lat, lon) {
 const ILMANSUUNNAT = ['pohjoisesta', 'koillisesta', 'idästä', 'kaakosta', 'etelästä', 'lounaasta', 'lännestä', 'luoteesta'];
 // v29: jyrkän aallokon rajat asetuksista: [Hs vähintään m, jyrkkyys osuutena]
 function jyrkkaRajat() { return [asetukset.jyrkkaHs, asetukset.jyrkkyysRaja / 100]; }
-/** Tuuli puhaltaa pintavirtaa vastaan (ero ≥ 135°, virta ≥ 0,1 m/s): jyrkentää aallokkoa. Aaltomalli huomioi virran jo. */
-function vastatuuliTeksti(lat, lon, t) {
-  const n = nakyma, tu = n && n.tuuli;
-  if (!tu || !tu.ajat || !tu.ajat.length || !n.phy || !n.phy.u) return null;
+/** v30: virta aaltojen kulkusuuntaa vastaan jyrkentää aallokkoa (Longuet-Higgins & Stewart, syvä vesi). Korvaa v29:n
+ *  "tuuli virtaa vastaan, ero ≥ 135°" -säännön. Aaltomalli on ajettu virtojen kanssa: luvut sisältävät vaikutuksen. */
+function vastavirtaTeksti(lat, lon, t) {
+  const n = nakyma;
+  if (!n || !n.wav || !n.wav.suunta || !n.phy || !n.phy.u) return null;
+  const tw = KarttaMalli.lahinAika(n.wav.ajat, Date.parse(karttaAjat()[t]));
+  const hs = KarttaMalli.lahinArvo(n.wav, 'hs', tw, lat, lon), suunta = KarttaMalli.lahinArvo(n.wav, 'suunta', tw, lat, lon);
   const u = KarttaMalli.lahinArvo(n.phy, 'u', t, lat, lon), v = KarttaMalli.lahinArvo(n.phy, 'v', t, lat, lon);
-  if (!isFinite(u) || !isFinite(v)) return null;
-  const vi = KarttaMalli.virta(u, v); if (vi.nopeus < 0.1) return null;
-  const ti = KarttaMalli.lahinAika(tu.ajat, Date.parse(karttaAjat()[t]));
-  let paras = -1, pd = Infinity;
-  tu.pisteet.forEach(([la, lo], i) => { const d = Malli.etaisyysKm(lat, lon, la, lo); if (d < pd) { pd = d; paras = i; } });
-  const wd = tu.wd[ti] && tu.wd[ti][paras], ws = tu.ws[ti] && tu.ws[ti][paras];
-  if (wd === null || wd === undefined || !isFinite(wd) || !(ws >= 3)) return null;
-  const ero = Math.abs(((wd + 180 - vi.suunta) % 360 + 540) % 360 - 180);   // tuulen kulkusuunta vs. virran suunta
-  return ero >= 135 ? `tuuli virtaa vastaan (virta ${luku(vi.nopeus, 2)} m/s, ero ${Math.round(ero)}°): jyrkentää aallokkoa, sisältyy aaltoennusteeseen` : null;
+  if (![hs, suunta, u, v].every(isFinite) || hs < 0.1) return null;
+  const tp = aallonHuippujakso(n.wav, tw, lat, lon);
+  const vasta = Reitti.vastaKomponentti(suunta, u, v), k = Reitti.vastavirtaKerroin(tp.T, vasta);
+  if (!(k - 1 >= asetukset.vastavirtaRaja / 100 - 1e-9)) return null;
+  return `virta aaltoja vastaan ${luku(vasta, 2)} m/s: jyrkentää noin ${Math.round((k - 1) * 100)} % (huippujakso ${luku(tp.T)} s${tp.arvio ? ', arvio' : ''}), sisältyy aaltoennusteeseen`;
 }
+/** Huippujakso Tp: VTPK, jos haettu; muuten 1,107 × Tm-1,0 (JONSWAP-oletus, ehdollinen). { T, arvio } */
+function aallonHuippujakso(wav, tw, lat, lon) {
+  const tp = wav.huippu ? KarttaMalli.lahinArvo(wav, 'huippu', tw, lat, lon) : NaN;
+  if (isFinite(tp) && tp > 0) return { T: tp, arvio: false };
+  const tm = wav.jakso ? KarttaMalli.lahinArvo(wav, 'jakso', tw, lat, lon) : NaN;
+  return { T: isFinite(tm) ? tm * TP_KERROIN : NaN, arvio: true };
+}
+const TP_KERROIN = 1.107;   // Tp / Tm-1,0, JONSWAP γ = 3,3 (laskettu 15.11.; ei päde kaksihuippuiseen merenkäyntiin)
 function tuuliTeksti(lat, lon) {
   const tu = nakyma && nakyma.tuuli;
   if (!tu || !kartta.tasot.tuuli || !tu.ajat.length) return null;
@@ -1108,6 +1164,7 @@ function piirraSaaliit() {
 }
 function suljePiste() { $('karttaTieto').hidden = true; if (kartta) { kartta.valittu = null; kartta.valittuOma = false; paivitaOmaKartalle(); kartta.piirra(); } mitoitaKartta(); }
 function naytaPiste(lat, lon) {
+  if (kohdeValinta && lat !== null) { valitseKohde(lat, lon); return; }   // v30: menomatkan kohde
   const el = $('karttaTieto');
   if (lat === null) { if (kartta && kartta.valittuOma) asetaLohiTaalla(false); suljePiste(); return; }   // profiilin × veneen kohdalla
   if (kartta) kartta.valittuOma = false;
@@ -1154,11 +1211,13 @@ function naytaPiste(lat, lon) {
         const [mh, mr] = jyrkkaRajat(), sj = KarttaMalli.aaltoJyrkkyys(h, T);
         txt += `, jakso ${luku(T)} s, pituus ${luku(KarttaMalli.aallonPituus(T), 0)} m, jyrkkyys ${luku(sj * 100)} %` +
           (KarttaMalli.onJyrkka(h, T, mh, mr) ? ' – JYRKKÄ' : '');
+        const tp = n.wav.huippu ? KarttaMalli.lahinArvo(n.wav, 'huippu', tw, lat, lon) : NaN;   // v30: VTPK vertailuksi
+        if (isFinite(tp)) txt += `, huippujakso ${luku(tp)} s`;
       }
       osat.push(txt);
     }
   }
-  const vv = vastatuuliTeksti(lat, lon, t);   // v29
+  const vv = vastavirtaTeksti(lat, lon, t);   // v30
   if (vv) osat.push(vv);
   if (valittuAlue.paluuikkuna) {
     const pk = Malli.lahinKohde(asetukset, { lat, lon }), etK = Malli.etaisyysKm(lat, lon, pk.kohdeLat, pk.kohdeLon);
@@ -1245,6 +1304,7 @@ function avaaKarttaNakyma() {
     if (tila.tasot) Object.assign(kartta.tasot, tila.tasot);
     kartta.tasot.tausta = true; kartta.tasot.syvyys = true;   // Hannu 10.11.: aina päällä, ei nappia
     kartta.syvyys = syvyys; kartta.vaylat = vaylat; laskeMatalikot();
+    paivitaReititKartalle();   // v30
     kartta.lohiTaalla = lohiTaalla; $('lohiTaalla').classList.toggle('paalla', lohiTaalla);
     document.querySelectorAll('#sirut button').forEach(b => {
       b.classList.toggle('paalla', !!kartta.tasot[b.dataset.taso]);
@@ -1518,6 +1578,7 @@ async function lataaAikajana() {
   if (al !== valittuAlue) return;
   aikajanaPaivat = paivat.filter(Boolean);
   piirra();
+  if (kartta && menoKohde) { viimeisinMeno = null; paivitaReititKartalle(); }   // v30: menoennuste uudella datalla
 }
 /** Kohta, jolle aalto ja lohikerros näytetään: oma sijainti meressä, muuten kartalta valittu piste, muuten alueen keskipiste. */
 function aikajanaKohta() {
@@ -1645,13 +1706,300 @@ $('jalkiPoista').addEventListener('click', () => {
 $('tallenna').addEventListener('click', () => { lueAsetukset(); piirraAsetukset(); piirra(); laskeMatalikot(); piirraMeriTila(); if (kartta) { kartta.askel = asetukset.lampoAskel; kartta.lohiVali = [asetukset.lohiMin, asetukset.lohiMax]; kartta.lohiReuna = asetukset.lohiReuna; kartta.jyrkka = jyrkkaRajat(); kartta.aaltoRajat = aaltoRajat(); piirraLohiRivi(); kartta.piirra(); } paivita(); });
 $('palauta').addEventListener('click', () => { asetukset = oletukset(); asetukset.asemat = [asetukset.asema1, asetukset.asema2]; tallennaLS('mlt_asetukset', asetukset); piirraAsetukset(); piirra(); });
 
+// ---------- Merisää (v30, Hannu 15.11.2026) ----------
+// Paluureitti: lähin paluukohde → väylää pitkin syvyyskäyrälle (asetus, oletus 10 m) → suoraan veneelle; paluu on käänteinen.
+// Aallokko (Copernicus) ja tuuli (IL) reitillä ajan mukaan. Luetaan ääneen uistelun alussa ja parillisina tasatunteina.
+let reittiVerkko = null, reittiVerkkoLahde = null, viimeisinMerisaa = null, viimeisinMeno = null, menoKohde = lue('mlt_kohde'), kohdeValinta = false;
+function vaylaVerkko() {
+  if (!vaylat) return null;
+  if (reittiVerkkoLahde !== vaylat) { reittiVerkko = Reitti.verkko(vaylat); reittiVerkkoLahde = vaylat; }
+  return reittiVerkko;
+}
+function laskeReitti(satama, kohde) {
+  return Reitti.reitti({ satama, kohde, vaylat, syvyys, rajaSyvyys: isFinite(asetukset.vaylaSyvyys) ? asetukset.vaylaSyvyys : 10, verkko: vaylaVerkko() });
+}
+/** Meritila pisteessä hetkellä ms päivätiedostoista (tänään–ylihuomenna): aalto, jaksot, suunta, pintavirta, syvyysarvio. */
+function meriPisteessa(lat, lon, ms) {
+  for (const d of aikajanaPaivat) {
+    if (!d || !d.wav) continue;
+    const wi = lahinIndeksiAjoista(d.wav.ajat, ms, 5400000);
+    if (wi < 0) continue;
+    const hs = KarttaMalli.lahinArvo(d.wav, 'hs', wi, lat, lon);
+    if (!isFinite(hs)) return null;   // maa tai alueen ulkopuolella (ruutu ~2 km)
+    const T = d.wav.jakso ? KarttaMalli.lahinArvo(d.wav, 'jakso', wi, lat, lon) : NaN;
+    const tp = aallonHuippujakso(d.wav, wi, lat, lon);
+    const suunta = d.wav.suunta ? KarttaMalli.lahinArvo(d.wav, 'suunta', wi, lat, lon) : NaN;
+    let u = NaN, v = NaN;
+    if (d.phy) { const pi = lahinIndeksiAjoista(d.phy.ajat, ms, 5400000);
+      if (pi >= 0) { u = KarttaMalli.lahinArvo(d.phy, 'u', pi, lat, lon); v = KarttaMalli.lahinArvo(d.phy, 'v', pi, lat, lon); } }
+    const k = syvyys ? KarttaMalli.lahinKayra(syvyys, lat, lon, undefined, 200) : null;   // syvyysarvio: lähin käyrä ≤ 200 m
+    return { hs, T, tp: tp.T, tpArvio: tp.arvio, suunta, u, v, pohja: k ? k.syvyys : NaN };
+  }
+  return null;
+}
+/** Pintavesi ja lohikerros kohdassa hetkellä ms. */
+function vesiPisteessa(lat, lon, ms) {
+  for (const d of aikajanaPaivat) {
+    if (!d || !d.phy) continue;
+    const i = lahinIndeksiAjoista(d.phy.ajat, ms, 5400000);
+    if (i < 0) continue;
+    const pr = KarttaMalli.profiiliPisteessa(d.phy, i, lat, lon);
+    if (!pr) return null;
+    return { pinta: pr.arvot[0], lohi: KarttaMalli.kerros(pr.arvot, pr.syvyydet, asetukset.lohiMin, asetukset.lohiMax) };
+  }
+  return null;
+}
+function lohiPuhe(k) {
+  if (!k) return null;
+  if (!k.loytyi) return `ei lohikerrosta ${luku(asetukset.lohiMin)}–${luku(asetukset.lohiMax)} astetta`;
+  return k.pohjaan ? `lohikerros ${luku(k.yla, 0)} metristä pohjaan` : `lohikerros ${luku(k.yla, 0)}–${luku(k.ala, 0)} metriä`;
+}
+/** IL:n ennuste hetkellä ms (sama kuin paluuikkunassa): { ws, wg, wd } tai null. */
+function tuuliHetkella(ms) {
+  const e = dataAlue === aktiivinenAlue().tunnus ? ennusteData : [];
+  if (!e.length || ms < e[0].t.getTime() - 3 * 3600000 || ms > e[e.length - 1].t.getTime() + 3600000) return null;
+  const t = new Date(ms);
+  let lahin = e[0]; for (const r of e) if (Math.abs(r.t - ms) < Math.abs(lahin.t - ms)) lahin = r;
+  return { ws: Malli.arvoHetkella(e, 'ws', t), wg: Malli.arvoHetkella(e, 'wg', t), wd: lahin.wd };
+}
+/** Tuorein tuulihavainto (≤ 60 min): { nimi, ws, wg } tai null. */
+function tuoreHavainto() {
+  if (dataAlue !== aktiivinenAlue().tunnus) return null;
+  let paras = null;
+  for (const h of havaintoData) if (h && h.aika && Date.now() - h.aika <= 3600000 && isFinite(h.ws) && (!paras || h.aika > paras.aika)) paras = h;
+  return paras ? { nimi: paras.nimi, ws: paras.ws, wg: paras.wg } : null;
+}
+/** Menomatkan lähtösatama: paluukohde, jonka lähellä (≤ 3 km) olet, muuten kohdetta lähin. */
+function lahtoSatama(kohde) {
+  const k = Malli.paluukohteet(Object.assign({}, Malli.OLETUKSET, asetukset));
+  if (sijainti) for (const x of k) if (Malli.etaisyysKm(sijainti.lat, sijainti.lon, x.lat, x.lon) <= 3) return x;
+  let paras = k[0];
+  for (const x of k) if (Malli.etaisyysKm(kohde.lat, kohde.lon, x.lat, x.lon) < Malli.etaisyysKm(kohde.lat, kohde.lon, paras.lat, paras.lon)) paras = x;
+  return paras;
+}
+function aaltoRajatReitille() {
+  return { hs: asetukset.jyrkkaHs, s: asetukset.jyrkkyysRaja / 100, vvKerroin: 1 + asetukset.vastavirtaRaja / 100, vvHs: Math.min(0.25, asetukset.jyrkkaHs) };
+}
+/** Merisään tiedot: tyyppi 'paluu' (oma sijainti → paluukohde) tai 'meno' (lähtösatama → kohde). */
+function merisaaTiedot(tyyppi, kohdePiste) {
+  const nyt = new Date(), ms = nyt.getTime(), al = aktiivinenAlue(), oma = dataAlue === al.tunnus;
+  const d = { klo: nyt, tyyppi, alue: al.nimi, merkit: KAIKKI_MERKIT, tuuliNyt: tuuliHetkella(ms), tuuli2h: tuuliHetkella(ms + 7200000),
+              havainto: tuoreHavainto() };
+  let arvio = null;
+  if (al.paluuikkuna) arvio = Malli.arvioi({ nyt, sijainti: tyyppi === 'meno' ? kohdePiste : sijainti, asetukset: paluuAsetukset(),
+                                             havainnot: oma ? havaintoData : [], ennuste: oma ? ennusteData : [] });
+  else { const h = Malli.tuulihalytys({ nyt, asetukset, havainnot: oma ? havaintoData : [], ennuste: oma ? ennusteData : [] }); arvio = { ylitys: h.ylitys, ylitysSyy: h.ylitysSyy }; }
+  if (arvio && arvio.ylitys) d.ylitys = { t: arvio.ylitys, syy: arvio.ylitysSyy };
+  let satama = null, kohde = null;
+  if (tyyppi === 'paluu') {
+    if (!al.paluuikkuna) d.eiReittia = `alueelle ${al.nimi} ei ole paluukohdetta`;
+    else if (!sijainti) d.eiReittia = 'sijaintia ei ole';
+    else if (arvio && arvio.kaukana) d.eiReittia = `olet yli ${luku(asetukset.alueSadeKm, 0)} kilometrin päässä paluukohteista`;
+    else {
+      const pk = paluuAsetukset();
+      satama = { lat: pk.kohdeLat, lon: pk.kohdeLon, nimi: pk.kohdeNimi }; kohde = sijainti;
+      d.kohdeNimiIllatiivi = Malli.illatiivi(pk.kohdeNimi); d.lahtoViimeistaan = arvio && arvio.lahtoViimeistaan;
+    }
+  } else if (kohdePiste) {
+    satama = lahtoSatama(kohdePiste); kohde = kohdePiste; d.lahtoSatama = satama.nimi;
+  }
+  if (satama && kohde) {
+    const r = laskeReitti(satama, kohde), pisteet = tyyppi === 'paluu' ? Reitti.kaanna(r.pisteet) : r.pisteet;
+    const nayt = Reitti.naytteet(pisteet, 500), nopeus = asetukset.nopeusNouseva, rajat = aaltoRajatReitille();
+    Object.assign(d, { reitti: r, pisteet, nopeus, minuutit: r.m / 1000 / nopeus * 60, minuutitKova: r.m / 1000 / asetukset.nopeusKova * 60,
+      aallot: Reitti.aallokkoReitilla(nayt, ms, nopeus, meriPisteessa, rajat),
+      aallot2h: Reitti.aallokkoReitilla(nayt, ms + 7200000, nopeus, meriPisteessa, rajat) });
+  }
+  const kohta = tyyppi === 'paluu' ? sijainti : kohde;
+  if (kohta) {
+    const loppuMs = tyyppi === 'meno' && isFinite(d.minuutit) ? ms + d.minuutit * 60000 : ms;   // menolla perillä
+    const w = vesiPisteessa(kohta.lat, kohta.lon, loppuMs);
+    if (w) d.oma = { pinta: w.pinta, lohi: lohiPuhe(w.lohi) };
+  }
+  return d;
+}
+function merisaaTekstiksi(d) {
+  let t = Reitti.merisaaTeksti(d);
+  if (d.havainto) t = t.replace(/(metriä sekunnissa\.)( |$)/, `$1 Havainto ${d.havainto.nimi} ${Math.round(d.havainto.ws)}${isFinite(d.havainto.wg) ? ', puuskissa ' + Math.round(d.havainto.wg) : ''}.$2`);
+  if (d.eiReittia) t = t.replace(/Paluureittiä ei voitu laskea: [^.]*\./, `Paluureittiä ei laskettu: ${d.eiReittia}.`);
+  if (d.tyyppi === 'meno' && d.lahtoSatama) t = t.replace('Menomatka kohteeseen', `Menomatka ${elatiivi(d.lahtoSatama)} kohteeseen`);
+  if (isFinite(d.minuutitKova) && d.minuutitKova > d.minuutit + 5) t = t.replace(/tuntinopeudella\./, `tuntinopeudella, kovassa kelissä ${puheMin(d.minuutitKova)}.`);
+  return t;
+}
+/** Paikannimi elatiivissa: "Köpmanholmen" → "Köpmanholmenista", "Ohtakari" → "Ohtakarista". */
+function elatiivi(nimi) {
+  const n = String(nimi || '').trim(); if (!n) return n;
+  const takavokaali = /[aou]/i.test(n) || !/[äöy]/i.test(n), paate = takavokaali ? 'sta' : 'stä';
+  return /[aeiouyäö]$/i.test(n) ? n + paate : n + 'i' + paate;
+}
+function puheMin(m) { if (m < 90) return `${Math.round(m)} minuuttia`; const h = Math.floor(m / 60), mm = Math.round(m - h * 60); return `${h} tunti${h > 1 ? 'a' : ''}${mm ? ' ' + mm + ' minuuttia' : ''}`; }
+/** Lisätiedot ruudulle (ei luettavaksi): mallin rajoitukset. */
+function merisaaHuomiot(d) {
+  const o = [];
+  if (d.reitti) o.push(d.reitti.tapa === 'vayla' ? `Reitti: väylä ${luku(d.reitti.vaylaM / 1000)} km ${luku(d.reitti.kayra, 0)} m:n käyrälle, suoraan ${luku(d.reitti.suoraM / 1000)} km.` : 'Reitti: suora viiva.');
+  o.push('Aaltomallin ruutu ~2 km: salmissa ja rannan lähellä paikallinen aallokko voi poiketa. Jyrkkyys Tm-1,0:sta kuten kartalla; vastavirta huippujaksosta' +
+    (d.aallot && d.aallot.maxHs && d.aallot.maxHs.tpArvio ? ' (arvio 1,107 × Tm-1,0)' : '') + '. Ei navigointikäyttöön.');
+  return o.join(' ');
+}
+function merisaaReitit(d) {
+  const reitit = [];
+  if (menoKohde && viimeisinMeno && viimeisinMeno.pisteet) reitit.push(reittiKartalle(viimeisinMeno, '#ffd54a'));
+  if (d && d.tyyppi === 'paluu' && d.pisteet) reitit.push(reittiKartalle(d, '#ffffff'));
+  return reitit;
+}
+function reittiKartalle(d, vari) {
+  const a = d.aallot, kohdat = [];
+  if (a && a.maxHs) kohdat.push({ lat: a.maxHs.lat, lon: a.maxHs.lon, vari: '#ff3c3c', nimi: 'max ' + luku(a.maxHs.hs, 2) + ' m' });
+  if (a && a.jyrkin && a.jyrkin.jyrkka && (a.jyrkin.lat !== a.maxHs.lat || a.jyrkin.lon !== a.maxHs.lon))
+    kohdat.push({ lat: a.jyrkin.lat, lon: a.jyrkin.lon, vari: '#b07cff', nimi: 'jyrkin ' + luku(a.jyrkin.s * 100) + ' %' });
+  return { pisteet: d.pisteet, vari, katko: d.tyyppi === 'paluu', kohdat };
+}
+function paivitaReititKartalle() {
+  if (!kartta) return;
+  // menokohde talteen: reitti ja ennuste uudelleen, jos vanha (> 10 min), väylät vaihtuivat tai sovellus avattiin uudelleen
+  if (menoKohde && (!viimeisinMeno || Date.now() - viimeisinMeno.klo > 600000 || viimeisinMeno.vaylat !== vaylat)) {
+    viimeisinMeno = merisaaTiedot('meno', menoKohde); viimeisinMeno.vaylat = vaylat;
+  }
+  kartta.kohde = menoKohde; kartta.reitit = merisaaReitit(viimeisinMerisaa); kartta.piirra();
+}
+/** Paluun merisää: teksti korttiin, reitti kartalle, ääneen jos pyydetty. */
+function merisaa(aaneen) {
+  const d = merisaaTiedot('paluu');
+  viimeisinMerisaa = d;
+  const teksti = merisaaTekstiksi(d);
+  $('merisaaTeksti').innerHTML = `<span class="aika">klo ${klo(d.klo)} · ${d.alue}</span>${teksti}<span class="aika" style="margin-top:4px">${merisaaHuomiot(d)}</span>`;
+  paivitaReititKartalle();
+  kirjaaKeli(d);
+  if (aaneen) lueAaneen(teksti);
+  return teksti;
+}
+function meno(kohde, aaneen) {
+  menoKohde = kohde; tallennaLS('mlt_kohde', kohde);
+  const d = merisaaTiedot('meno', kohde);
+  viimeisinMeno = d; d.vaylat = vaylat;
+  const teksti = merisaaTekstiksi(d);
+  paivitaReititKartalle();
+  if (aaneen) lueAaneen(teksti);
+  return { d, teksti };
+}
+
+// Puhe: suomenkielinen ääni, naisääni nimen perusteella (Web Speech API ei kerro sukupuolta).
+const PUHE_OK = typeof window !== 'undefined' && 'speechSynthesis' in window && typeof SpeechSynthesisUtterance === 'function';
+const NAISAANI = /satu|heidi|selma|noora|aino|female|nainen|woman|afi/i, MIESAANI = /onni|harri|\bmale\b|mies|tapio|mikko|petri/i;
+function suomiAanet() { try { return PUHE_OK ? speechSynthesis.getVoices().filter(v => /^fi([-_]|$)/i.test(v.lang)) : []; } catch (e) { return []; } }
+function valitseAani() {
+  const v = suomiAanet();
+  if (!v.length) return null;
+  if (asetukset.puheAani) { const x = v.find(a => a.name === asetukset.puheAani); if (x) return x; }
+  return v.find(a => NAISAANI.test(a.name) && !MIESAANI.test(a.name)) || v.find(a => !MIESAANI.test(a.name)) || v[0];
+}
+function piirraAaniValinta() {
+  const v = suomiAanet(), sel = $('puheAani');
+  sel.innerHTML = '<option value="">automaattinen</option>' + v.map(a => `<option value="${a.name.replace(/"/g, '&quot;')}">${a.name}</option>`).join('');
+  sel.value = v.some(a => a.name === asetukset.puheAani) ? asetukset.puheAani : '';
+  const k = valitseAani();
+  $('merisaaAani').textContent = !PUHE_OK ? 'Tämä selain ei osaa puhua: merisää näkyy vain tekstinä.'
+    : k ? `Ääni: ${k.name}${NAISAANI.test(k.name) ? '' : ' (sukupuolta ei voi päätellä nimestä)'}. Puhuu vain, kun sovellus on auki ja näyttö päällä.`
+    : 'Puhelimessa ei näy suomenkielistä ääntä: asenna puhelimen asetuksista suomen puhesynteesi (esim. Googlen tekstistä puheeksi -palvelu).';
+  $('merisaaPuhe').checked = asetukset.merisaaPuhe !== false;
+}
+function lueAaneen(teksti) {
+  if (!PUHE_OK) return false;
+  try {
+    speechSynthesis.cancel();
+    const aani = valitseAani();
+    // lauseittain: pitkä yksittäinen lausuma katkeaa joissain selaimissa
+    for (const lause of Reitti.puheeksi(teksti).match(/[^.!?]+[.!?]*/g) || []) {
+      if (!lause.trim()) continue;
+      const u = new SpeechSynthesisUtterance(lause.trim());
+      u.lang = aani ? aani.lang : 'fi-FI'; if (aani) u.voice = aani; u.rate = 1; u.pitch = 1;
+      // Chrome estää puheen, jos sivua ei ole napautettu sen latauksen jälkeen (esim. sovellus käynnistyi uudelleen kesken uistelun)
+      u.onerror = e => { if (e && e.error === 'not-allowed') $('merisaaAani').textContent = 'Selain esti äänen: napauta ruutua kerran, niin seuraava merisää kuuluu (tai paina Lue nyt).'; };
+      speechSynthesis.speak(u);
+    }
+    return true;
+  } catch (e) { return false; }
+}
+if (PUHE_OK) try { speechSynthesis.addEventListener('voiceschanged', piirraAaniValinta); } catch (e) {}
+
+// Ajastin: parilliset tasatunnit uistelun aikana (myöhästynyt raportti luetaan vielä 30 min sisällä).
+function merisaaAvain(d) { return pvmAvain(d) + 'T' + d.getHours(); }
+function merisaaAjastin() {
+  if (!uistelu) return;
+  const nyt = new Date();
+  if (Date.now() - (uistelu.keliT || 0) >= 600000) kirjaaKeli(null);   // keli talteen 10 min välein mukavuusarviota varten
+  if (nyt.getHours() % 2 !== 0 || nyt.getMinutes() >= 30) return;
+  const avain = merisaaAvain(nyt);
+  if (uistelu.merisaaViim === avain) return;
+  uistelu.merisaaViim = avain; tallennaLS('mlt_uistelu', uistelu);
+  merisaa(asetukset.merisaaPuhe !== false);
+}
+/** Uistelun keli: suurimmat arvot omalla kohdalla (aalto, jyrkkyys, tuuli). */
+function kirjaaKeli(d) {
+  if (!uistelu || !sijainti) return;
+  const ms = Date.now(), m = meriPisteessa(sijainti.lat, sijainti.lon, ms), tu = tuuliHetkella(ms), k = uistelu.keli || {};
+  const max = (a, b) => isFinite(b) ? (isFinite(a) ? Math.max(a, b) : b) : a;
+  if (m) { k.hs = max(k.hs, m.hs); const L = KarttaMalli.aallonPituus(m.T, m.pohja); if (L > 0) k.s = max(k.s, m.hs / L); }
+  if (tu) { k.ws = max(k.ws, tu.ws); k.wg = max(k.wg, tu.wg); }
+  if (d && d.aallot && d.aallot.maxHs) k.reittiHs = max(k.reittiHs, d.aallot.maxHs.hs);
+  uistelu.keli = k; uistelu.keliT = ms; tallennaLS('mlt_uistelu', uistelu);
+}
+function keliTeksti(k) {
+  if (!k) return '';
+  const o = [];
+  if (isFinite(k.hs)) o.push(`aalto ${luku(k.hs, 2)} m`);
+  if (isFinite(k.s)) o.push(`jyrkkyys ${luku(k.s * 100)} %`);
+  if (isFinite(k.ws)) o.push(`tuuli ${luku(k.ws, 0)}${isFinite(k.wg) ? '/' + luku(k.wg, 0) : ''} m/s`);
+  return o.join(', ');
+}
+let arvioitavaReissu = null;
+function kysyMukavuus(reissu) {
+  arvioitavaReissu = reissu.alku;
+  const k = keliTeksti(reissu.keli);
+  $('mukavuusKeli').textContent = k ? `Reissun suurimmat (malli omalla kohdalla): ${k}.` : 'Reissulta ei ole aalto- tai tuulitietoa.';
+  $('mukavuus').hidden = false;
+}
+document.querySelectorAll('#mukavuus [data-m]').forEach(b => b.addEventListener('click', () => {
+  const reissut = lue('mlt_reissut') || [], r = reissut.find(x => x.alku === arvioitavaReissu);
+  if (r) { r.mukavuus = +b.dataset.m; tallennaLS('mlt_reissut', reissut); }
+  $('mukavuus').hidden = true; arvioitavaReissu = null; piirraUistelu();
+}));
+$('mukavuusOhita').addEventListener('click', () => { $('mukavuus').hidden = true; arvioitavaReissu = null; });
+
+$('merisaaLue').addEventListener('click', () => merisaa(true));
+$('merisaaHiljaa').addEventListener('click', () => { try { speechSynthesis.cancel(); } catch (e) {} });
+$('merisaaKartta').addEventListener('click', () => { if (!viimeisinMerisaa) merisaa(false); avaa('v-kartta'); paivitaReititKartalle();
+  const d = viimeisinMerisaa; if (kartta && d && d.pisteet && sijainti) { kartta.keskita(sijainti.lat, sijainti.lon); kartta.piirra(); } });
+$('merisaaPuhe').addEventListener('change', e => { asetukset.merisaaPuhe = e.target.checked; tallennaLS('mlt_asetukset', asetukset); });
+$('puheAani').addEventListener('change', e => { asetukset.puheAani = e.target.value; tallennaLS('mlt_asetukset', asetukset); piirraAaniValinta(); lueAaneen('Merisää tällä äänellä.'); });
+$('kohdeNappi').addEventListener('click', () => {
+  const el = $('karttaTieto');
+  if (kohdeValinta && menoKohde) { kohdeValinta = false; menoKohde = null; viimeisinMeno = null; tallennaLS('mlt_kohde', null); paivitaReititKartalle();
+    $('kohdeNappi').classList.remove('paalla'); el.hidden = false; el.textContent = 'Kohde poistettu.  ✕'; mitoitaKartta(); return; }
+  kohdeValinta = !kohdeValinta;
+  $('kohdeNappi').classList.toggle('paalla', kohdeValinta);
+  if (kohdeValinta) { el.hidden = false; el.textContent = 'Napauta kohdepiste: menomatkan merisää lähtien nyt.' + (menoKohde ? ' 🎯 uudelleen = poista kohde.' : '') + '  ✕'; }
+  else { el.textContent = 'Kohteen valinta peruttu.  ✕'; }
+  mitoitaKartta();
+});
+/** Kartan napautus kohdevalinnassa: menomatkan merisää ruutuun ja ääneen. */
+function valitseKohde(lat, lon) {
+  kohdeValinta = false; $('kohdeNappi').classList.remove('paalla');
+  if (kartta) { kartta.valittu = null; }
+  const { d, teksti } = meno({ lat, lon }, asetukset.merisaaPuhe !== false);
+  const el = $('karttaTieto'); el.hidden = false;
+  el.innerHTML = `<b>Menomatka</b> klo ${klo(d.klo)}: ${teksti} <span class="pieni">${merisaaHuomiot(d)}</span>  ✕`;
+  mitoitaKartta();
+}
+setInterval(merisaaAjastin, 20000);
+
 piirraAsetukset();
 piirraSaaliit();
 piirraJalkiTila();
 palautaVanhaData();
 avaa(lue('mlt_valilehti') || 'v-vesilla');
 piirraMeriTila();
-piirra(); piirraUistelu(); piirraGps();
+piirra(); piirraUistelu(); piirraGps(); piirraAaniValinta();
 if (uistelu) pidaNaytto();
 kaynnistaGps();
 { const al = valittuAlue;
