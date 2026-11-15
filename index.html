@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b1726">
 <title>Merilohitutka</title>
+<!-- v34 (Hannu 15.11.2026 "syvän veden kautta väyliä suosien"): väylän jälkeen ja turvallisen veden pisteistä reitti kiertää matalikot syvän veden kautta (ruudukkohaku, matalan käyrän reunus vältetään), saaristoväyliä ei Luodon pisteistä; matalan veden huomautus vain käyrän kohdalla -->
 <!-- v33 (Hannu 15.11.2026 Vaasan kuva "Myös muihin väyläpainotteinen"): väyläverkko liittää risteykset ja linjan päät janan keskelle, satama väylän lähimpään kohtaan; jos mikään poistuminen ei kelpaa, valitaan vähiten matalia ylittävä -->
 <!-- v32 (Hannu 15.11.2026 "Tehdään sellainen. Parempi väyläpainotteinen."): reitti seuraa väylää pidemmälle (suora osuus × 1,5), ei oikaise 6 m:n tai matalampien käyrien yli, pienet suljetut syvänteet eivät kelpaa poistumiseen -->
 <!-- v31 (Hannu 15.11.2026 koordinaatit): lähtö- ja paluupisteet alueittain (oletus yli 50 km, muuten lähin tai annettu), paluu lähtöpisteeseen, Luodon turvallisen veden pisteet, Köpmanholmen Luoto-pisteen kautta (kova keli 15 m/s: lähin piste), Reposaari aallonmurtajan kautta, Norrskär Vaasan pisteistä -->
@@ -386,7 +387,7 @@
 <script src="fmi.js?v=13"></script>
 <script src="nopeus.js?v=20"></script>
 <script src="kartta.js?v=27"></script>
-<script src="reitti.js?v=4"></script>
+<script src="reitti.js?v=5"></script>
 <script src="ais.js?v=23"></script>
 <script>
 'use strict';
@@ -1739,7 +1740,9 @@ function vaylaVerkko() {
 /** Reitti lähtöpisteestä kohteeseen (v31): turvallisen veden piste → suoraan; luiska → väylää syvyyskäyrälle, sitten suoraan;
  *  pakollinen välipiste (Reposaari: aallonmurtaja) ensin. */
 function laskeReitti(piste, kohde) {
-  if (piste.tyyppi === 'turva') return Reitti.suora(piste, kohde, syvyys);
+  if (piste.tyyppi === 'turva')   // v34: turvallisen veden pisteestä suoraan tai syvän veden kautta, ei saaristoväyliä
+    return Reitti.reitti({ satama: piste, kohde, syvyys, turva: true, rajaSyvyys: isFinite(asetukset.vaylaSyvyys) ? asetukset.vaylaSyvyys : 10,
+                           matalaRaja: asetukset.suoraMatala, suoraPaino: asetukset.suoraPaino });
   const alku = piste.kautta || piste;
   const r = Reitti.reitti({ satama: alku, kohde, vaylat, syvyys, rajaSyvyys: isFinite(asetukset.vaylaSyvyys) ? asetukset.vaylaSyvyys : 10, verkko: vaylaVerkko(),
                             matalaRaja: asetukset.suoraMatala, suoraPaino: asetukset.suoraPaino });   // v32: väyläpainotteinen
@@ -1763,7 +1766,7 @@ function meriPisteessa(lat, lon, ms) {
     let u = NaN, v = NaN;
     if (d.phy) { const pi = lahinIndeksiAjoista(d.phy.ajat, ms, 5400000);
       if (pi >= 0) { u = KarttaMalli.lahinArvo(d.phy, 'u', pi, lat, lon); v = KarttaMalli.lahinArvo(d.phy, 'v', pi, lat, lon); } }
-    const k = syvyys ? KarttaMalli.lahinKayra(syvyys, lat, lon, undefined, 200) : null;   // syvyysarvio: lähin käyrä ≤ 200 m
+    const k = syvyys ? KarttaMalli.lahinKayra(syvyys, lat, lon, undefined, 50) : null;   // v34: syvyysarvio vain käyrän päällä (≤ 50 m; ennen 200 m liioitteli)
     return { hs, T, tp: tp.T, tpArvio: tp.arvio, suunta, u, v, pohja: k ? k.syvyys : NaN };
   }
   return null;
@@ -1915,8 +1918,9 @@ function merisaaHuomiot(d) {
   const o = [];
   if (d.piste) o.push(`${d.tyyppi === 'meno' ? 'Lähtöpiste' : 'Paluupiste'}: ${d.piste.piste.nimi} (${d.piste.syy}).`);
   if (d.reitti) o.push(d.reitti.tapa === 'vayla' ? `Reitti: ${d.reitti.kautta ? d.reitti.kautta + ', ' : ''}väylä ${luku(d.reitti.vaylaM / 1000)} km` +
-      (d.reitti.syvaan ? ` (${luku(d.reitti.kayra, 0)} m:n käyrä ylitetty)` : '') + `, suoraan ${luku(d.reitti.suoraM / 1000)} km.`
-    : d.reitti.tapa === 'turva' ? 'Reitti: suoraan turvallisen veden pisteestä.' : 'Reitti: suora viiva.');
+      (d.reitti.syvaan ? ` (${luku(d.reitti.kayra, 0)} m:n käyrä ylitetty)` : '') + `, ${d.reitti.kierto ? 'syvän veden kautta' : 'suoraan'} ${luku(d.reitti.suoraM / 1000)} km.`
+    : d.reitti.tapa === 'turva' ? (d.reitti.kierto ? `Reitti: turvallisen veden pisteestä syvän veden kautta (${d.reitti.kierto} käännöstä), matalikot kiertäen.` : 'Reitti: suoraan turvallisen veden pisteestä.')
+    : 'Reitti: suora viiva.');
   o.push('Aaltomallin ruutu ~2 km: salmissa ja rannan lähellä paikallinen aallokko voi poiketa. Jyrkkyys Tm-1,0:sta kuten kartalla; vastavirta huippujaksosta' +
     (d.aallot && d.aallot.maxHs && d.aallot.maxHs.tpArvio ? ' (arvio 1,107 × Tm-1,0)' : '') + '. Ei navigointikäyttöön.');
   return o.join(' ');
