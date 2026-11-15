@@ -399,7 +399,7 @@
       polku.reverse();
       const vaylaM = am + d[ks];
       return { pisteet: [[S.lat, S.lon]].concat(polku.map(n => [V.solmut[n][2], V.solmut[n][3]]), [[Q.lat, Q.lon]]), m: vaylaM + lq.m, vaylaM, suoraM: lq.m,
-               tapa: 'vayla', vaylalla: true, poistuminen: { lat: P.lat(lq.y), lon: P.lon(lq.x) }, kayra, syvaan: false, kierto: 0, varoitus: null };
+               tapa: 'vayla', vaylalla: true, liitosM: am, poistuminen: { lat: P.lat(lq.y), lon: P.lon(lq.x) }, kayra, syvaan: false, kierto: 0, varoitus: null };
     }
     // väyläpuu etäisyysjärjestyksessä: syva = polku satamasta on ylittänyt poistumiskäyrän
     const jarj = []; for (let i = 0; i < V.solmut.length; i++) if (isFinite(d[i])) jarj.push(i);

@@ -396,7 +396,7 @@
 <script src="nopeus.js?v=20"></script>
 <script src="kartta.js?v=28"></script>
 <script src="sillat.js?v=2"></script>
-<script src="reitti.js?v=8"></script>
+<script src="reitti.js?v=9"></script>
 <script src="ais.js?v=23"></script>
 <script>
 'use strict';
@@ -1891,7 +1891,7 @@ function vaylaVerkko() {
   return reittiVerkko;
 }
 /** Reitti lähtöpisteestä kohteeseen (v31): turvallisen veden piste → suoraan; luiska → väylää syvyyskäyrälle, sitten suoraan;
- *  pakollinen välipiste (Reposaari: aallonmurtaja) ensin. */
+ *  pakollinen välipiste (Reposaari: aallonmurtaja) ensin – v40: luiskalta välipisteeseen väylää pitkin, jos mahdollista. */
 /** v39: pisteen alue (lähtöpisteet ja turvasatamat); alueen suoraMatala on alaraja (Norrskär 10 m). */
 function matalaRajaPisteelle(piste) {
   const al = ALUELISTA.find(a => (a.lahtopisteet || []).includes(piste) || (a.turvasatamat || []).includes(piste));
@@ -1907,7 +1907,14 @@ function laskeReitti(piste, kohde) {
                             matalaRaja, suoraPaino: asetukset.suoraPaino, vaylallaM: asetukset.vaylallaM });   // v32: väyläpainotteinen; v36: kohde väylällä
   if (piste.kautta) {
     const lisa = Reitti.etaisyysM(piste.lat, piste.lon, alku.lat, alku.lon);
-    r.pisteet = [[piste.lat, piste.lon]].concat(r.pisteet); r.m += lisa; r.vaylaM += lisa; r.kautta = piste.kautta.teksti || (piste.kautta.nimi + ' kautta');
+    // v40 (Hannun kuva 20.44 Reposaari: "Pelaa mutta luiskalta ei mene väylälle"): luiskalta välipisteeseen väylää pitkin, jos
+    // luiska ja välipiste ovat kumpikin enintään 500 m väylästä ja väylät yhtyvät; muuten suoraan kuten ennen
+    const r1 = Reitti.reitti({ satama: piste, kohde: alku, vaylat, syvyys, rajaSyvyys: isFinite(asetukset.vaylaSyvyys) ? asetukset.vaylaSyvyys : 10,
+                               verkko: vaylaVerkko(), matalaRaja, suoraPaino: asetukset.suoraPaino, vaylallaM: Math.max(asetukset.vaylallaM || 0, 500) });
+    if (r1 && r1.vaylalla && r1.liitosM <= 500 && r1.m <= 5 * lisa) {
+      r.pisteet = r1.pisteet.concat(r.pisteet.slice(1)); r.m += r1.m; r.vaylaM += r1.m; r.kauttaVayla = true;
+    } else { r.pisteet = [[piste.lat, piste.lon]].concat(r.pisteet); r.m += lisa; r.vaylaM += lisa; }
+    r.kautta = piste.kautta.teksti || (piste.kautta.nimi + ' kautta');
   }
   return r;
 }
