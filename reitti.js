@@ -71,43 +71,116 @@
     return false;
   }
 
+  /** Ruudukkoindeksi janoille [ax, ay, bx, by, …] (v33): haku janan varrelta tai pisteen ympäriltä. */
+  function ruudukko(janat, solu) {
+    const solut = new Map();
+    janat.forEach((j, n) => {
+      const L = Math.hypot(j[2] - j[0], j[3] - j[1]), k = Math.max(1, Math.ceil(L / (solu / 2)));
+      const nahty = new Set();
+      for (let i = 0; i <= k; i++) {
+        const avain = Math.floor((j[0] + (j[2] - j[0]) * i / k) / solu) + ',' + Math.floor((j[1] + (j[3] - j[1]) * i / k) / solu);
+        if (nahty.has(avain)) continue; nahty.add(avain);
+        if (!solut.has(avain)) solut.set(avain, []); solut.get(avain).push(n);
+      }
+    });
+    return {
+      lahella(x, y, sade) {   // janat, joiden jokin solu on ≤ sade + solu pisteestä
+        const out = new Set(), r = Math.ceil(sade / solu) + 1, gx = Math.floor(x / solu), gy = Math.floor(y / solu);
+        for (let i = -r; i <= r; i++) for (let j = -r; j <= r; j++) for (const n of solut.get((gx + i) + ',' + (gy + j)) || []) out.add(n);
+        return out;
+      },
+      varrella(ax, ay, bx, by) {
+        const out = new Set(), L = Math.hypot(bx - ax, by - ay), k = Math.max(1, Math.ceil(L / (solu / 2)));
+        for (let i = 0; i <= k; i++) {
+          const gx = Math.floor((ax + (bx - ax) * i / k) / solu), gy = Math.floor((ay + (by - ay) * i / k) / solu);
+          for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const n of solut.get((gx + a) + ',' + (gy + b)) || []) out.add(n);
+        }
+        return out;
+      }
+    };
+  }
+  /** Pisteen lähin kohta janalla: { f, x, y, m }. */
+  function projisoi(j, x, y) {
+    const dx = j[2] - j[0], dy = j[3] - j[1], L2 = dx * dx + dy * dy;
+    const f = L2 > 0 ? Math.max(0, Math.min(1, ((x - j[0]) * dx + (y - j[1]) * dy) / L2)) : 0;
+    const px = j[0] + f * dx, py = j[1] + f * dy;
+    return { f, x: px, y: py, m: Math.hypot(px - x, py - y) };
+  }
+
   /**
-   * Väyläverkko navigointilinjoista: solmut (yhdistetty, jos ≤ sideM), kaaret peräkkäisten pisteiden välillä,
-   * linjan päät liitetään lähimpään toisen linjan solmuun (≤ liitosM). Palauttaa { P, solmut: [[x,y,lat,lon]], naapurit }.
+   * Väyläverkko navigointilinjoista (v33, Hannu 15.11.: Vaasassa reitti meni suoraan, koska satama liitettiin vain linjojen
+   * taitepisteisiin): pisteet ≤ sideM yhdistetään; risteävät janat liitetään risteyskohdasta; linjan pää liitetään toisen linjan
+   * lähimpään kohtaan (≤ liitosM, myös keskelle janaa). Palauttaa { P, solmut: [[x,y,lat,lon]], naapurit, kaaret, kaariInd }.
    */
   function verkko(vaylat, sideM, liitosM) {
     sideM = sideM || 25; liitosM = liitosM || 120;
-    const linjat = (vaylat && vaylat.linjat) || [];
+    const linjat = ((vaylat && vaylat.linjat) || []).filter(v => v.ll && v.ll.length >= 4);
     if (!linjat.length) return null;
     const P = projektio(linjat[0].ll[0], linjat[0].ll[1]);
-    const solmut = [], naapurit = [], ruutu = new Map(), linja = [];
-    const avain = (x, y) => Math.floor(x / sideM) + ',' + Math.floor(y / sideM);
-    const solmu = (lat, lon, li) => {
-      const x = P.x(lon), y = P.y(lat), gx = Math.floor(x / sideM), gy = Math.floor(y / sideM);
+    // 1) janat ja niiden jakokohdat
+    const janat = [], li = [], jako = [];
+    linjat.forEach((v, k) => { const p = v.ll;
+      for (let i = 0; i + 3 < p.length; i += 2) { janat.push([P.x(p[i + 1]), P.y(p[i]), P.x(p[i + 3]), P.y(p[i + 2])]); li.push(k); jako.push([]); } });
+    const ind = ruudukko(janat, 500);
+    // 2) risteykset (ilman yhteistä taitepistettä)
+    janat.forEach((a, n) => {
+      for (const m of ind.varrella(a[0], a[1], a[2], a[3])) {
+        if (m <= n) continue;
+        const b = janat[m], f = leikkaus(a[0], a[1], a[2], a[3], b[0], b[1], b[2], b[3]);
+        if (f === null) continue;
+        const g = leikkaus(b[0], b[1], b[2], b[3], a[0], a[1], a[2], a[3]);
+        if (g === null) continue;
+        if (f > 1e-6 && f < 1 - 1e-6) jako[n].push(f);
+        if (g > 1e-6 && g < 1 - 1e-6) jako[m].push(g);
+      }
+    });
+    // 3) linjan päät toisen linjan lähimpään kohtaan
+    const lisaKaaret = [];
+    linjat.forEach((v, k) => { const p = v.ll, n = p.length;
+      for (const [la, lo] of [[p[0], p[1]], [p[n - 2], p[n - 1]]]) {
+        const x = P.x(lo), y = P.y(la); let paras = null;
+        for (const m of ind.lahella(x, y, liitosM)) {
+          if (li[m] === k) continue;
+          const q = projisoi(janat[m], x, y);
+          if (q.m <= liitosM && (!paras || q.m < paras.q.m)) paras = { m, q };
+        }
+        if (!paras || paras.q.m < 1e-6) continue;
+        if (paras.q.f > 1e-6 && paras.q.f < 1 - 1e-6) jako[paras.m].push(paras.q.f);
+        lisaKaaret.push([x, y, paras.q.x, paras.q.y]);
+      }
+    });
+    // 4) solmut ja kaaret
+    const solmut = [], naapurit = [], ruutu = new Map(), kaaret = [];
+    const solmu = (x, y) => {
+      const gx = Math.floor(x / sideM), gy = Math.floor(y / sideM);
       for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++)
         for (const n of ruutu.get((gx + i) + ',' + (gy + j)) || []) if (Math.hypot(solmut[n][0] - x, solmut[n][1] - y) <= sideM) return n;
-      const n = solmut.push([x, y, lat, lon]) - 1; naapurit.push([]); linja.push(li);
-      const k = avain(x, y); if (!ruutu.has(k)) ruutu.set(k, []); ruutu.get(k).push(n);
+      const n = solmut.push([x, y, P.lat(y), P.lon(x)]) - 1; naapurit.push([]);
+      const k = gx + ',' + gy; if (!ruutu.has(k)) ruutu.set(k, []); ruutu.get(k).push(n);
       return n;
     };
     const kaari = (a, b) => {
       if (a === b || naapurit[a].some(e => e.j === b)) return;
       const m = Math.hypot(solmut[a][0] - solmut[b][0], solmut[a][1] - solmut[b][1]);
-      naapurit[a].push({ j: b, m }); naapurit[b].push({ j: a, m });
+      naapurit[a].push({ j: b, m }); naapurit[b].push({ j: a, m }); kaaret.push([a, b]);
     };
-    const paat = [];
-    linjat.forEach((v, li) => {
-      const p = v.ll; let ed = null;
-      for (let i = 0; i + 1 < p.length; i += 2) { const n = solmu(p[i], p[i + 1], li); if (ed !== null) kaari(ed, n); ed = n; if (i === 0) paat.push(n); }
-      if (ed !== null) paat.push(ed);
+    janat.forEach((j, n) => {
+      const fs = [0].concat(jako[n].sort((a, b) => a - b), [1]);
+      let ed = null;
+      for (const f of fs) { const s = solmu(j[0] + f * (j[2] - j[0]), j[1] + f * (j[3] - j[1])); if (ed !== null) kaari(ed, s); ed = s; }
     });
-    for (const n of paat) {   // T-liitokset: linjan pää toisen linjan solmuun
-      if (naapurit[n].length > 1) continue;
-      const [x, y] = solmut[n]; let paras = -1, pm = liitosM;
-      solmut.forEach((s, j) => { if (j === n || linja[j] === linja[n]) return; const d = Math.hypot(s[0] - x, s[1] - y); if (d < pm) { pm = d; paras = j; } });
-      if (paras >= 0) kaari(n, paras);
+    for (const [x1, y1, x2, y2] of lisaKaaret) kaari(solmu(x1, y1), solmu(x2, y2));
+    const kaariInd = ruudukko(kaaret.map(([a, b]) => [solmut[a][0], solmut[a][1], solmut[b][0], solmut[b][1]]), 500);
+    return { P, solmut, naapurit, kaaret, kaariInd };
+  }
+  /** Lähin kohta väyläverkossa (myös kaaren keskellä): { a, b, f, x, y, m } tai null (> maxM). */
+  function lahinVayla(V, x, y, maxM) {
+    let paras = null;
+    for (const n of V.kaariInd.lahella(x, y, maxM)) {
+      const [a, b] = V.kaaret[n], q = projisoi([V.solmut[a][0], V.solmut[a][1], V.solmut[b][0], V.solmut[b][1]], x, y);
+      if (q.m <= maxM && (!paras || q.m < paras.m)) paras = { a, b, f: q.f, x: q.x, y: q.y, m: q.m };
     }
-    return { P, solmut, naapurit };
+    return paras;
   }
 
   /** Dijkstra solmusta s: { d, ed } (etäisyys metreinä, edeltäjä). */
@@ -135,6 +208,18 @@
     if (auki > 50) return false;
     return Math.hypot(P.x(v.lo1) - P.x(v.lo0), P.y(v.la1) - P.y(v.la0)) < maxM;
   }
+  /** Montako matalan käyrän janaa suora (x,y)→(qx,qy) leikkaa (viimeiset varaM metriä pois). */
+  function matalaLaskuri(ind, x, y, qx, qy, varaM) {
+    const L = Math.hypot(qx - x, qy - y);
+    if (L <= varaM) return 0;
+    const f = (L - varaM) / L, bx = x + f * (qx - x), by = y + f * (qy - y);
+    let n = 0;
+    for (const k of ind.ehdokkaat(x, y, bx, by)) {
+      const [cx, cy, dx, dy] = ind.janat[k], t = leikkaus(x, y, bx, by, cx, cy, dx, dy);
+      if (t !== null && t > 1e-6) n++;
+    }
+    return n;
+  }
   /** Leikkaako jana (x,y)→(qx,qy) matalia käyriä, kun viimeiset varaM metriä (kohteen ympäristö) jätetään pois. */
   function matalaSuoralla(ind, x, y, qx, qy, varaM) {
     const L = Math.hypot(qx - x, qy - y);
@@ -157,15 +242,21 @@
     const S = o.satama, Q = o.kohde, raja = isFinite(o.rajaSyvyys) ? o.rajaSyvyys : 10, matala = isFinite(o.matalaRaja) ? o.matalaRaja : 6;
     const paino = isFinite(o.suoraPaino) && o.suoraPaino >= 1 ? o.suoraPaino : 1.5, pieniM = isFinite(o.pieniSyvanneM) ? o.pieniSyvanneM : 1000, varaM = 300;
     const tasot = o.syvyys && o.syvyys.tasot ? o.syvyys.tasot : [];
-    const suoraan = (varoitus) => ({ pisteet: [[S.lat, S.lon], [Q.lat, Q.lon]], m: etaisyysM(S.lat, S.lon, Q.lat, Q.lon), vaylaM: 0,
-      suoraM: etaisyysM(S.lat, S.lon, Q.lat, Q.lon), tapa: 'suora', poistuminen: null, kayra: null, syvaan: false, varoitus });
+    const suoraan = (varoitus) => {   // v33: varareitti kertoo myös, jos suora viiva ylittää saaren, karin tai maan (≤ 3 m käyrä)
+      const r = suora(S, Q, o.syvyys, 3);
+      return Object.assign(r, { tapa: 'suora', syvaan: false, varoitus: r.varoitus ? varoitus + '; ' + r.varoitus.replace('suora reitti ylittää', 'se ylittää') : varoitus });
+    };
     const V = o.verkko || verkko(o.vaylat);
     if (!V || !V.solmut.length) return suoraan('väyläaineistoa ei ole: reitti suoraan satamasta');
     const P = V.P, sx = P.x(S.lon), sy = P.y(S.lat), qx = P.x(Q.lon), qy = P.y(Q.lat);
-    // satama lähimpään väyläsolmuun
-    let alku = -1, am = isFinite(o.liityntaM) ? o.liityntaM : 3000;
-    V.solmut.forEach((s, i) => { const d = Math.hypot(s[0] - sx, s[1] - sy); if (d < am) { am = d; alku = i; } });
-    if (alku < 0) return suoraan('satama yli 3 km väylästä: reitti suoraan');
+    // v33: satama väylän lähimpään kohtaan (myös pitkän janan keskelle); väliaikainen solmu poistetaan lopuksi
+    const lk = (V.kaariInd ? lahinVayla(V, sx, sy, isFinite(o.liityntaM) ? o.liityntaM : 3000) : null);
+    if (!lk) return suoraan('satama yli 3 km väylästä: reitti suoraan');
+    const alku = V.solmut.length, am = lk.m, L = Math.hypot(V.solmut[lk.b][0] - V.solmut[lk.a][0], V.solmut[lk.b][1] - V.solmut[lk.a][1]);
+    V.solmut.push([lk.x, lk.y, P.lat(lk.y), P.lon(lk.x)]); V.naapurit.push([{ j: lk.a, m: lk.f * L }, { j: lk.b, m: (1 - lk.f) * L }]);
+    V.naapurit[lk.a].push({ j: alku, m: lk.f * L }); V.naapurit[lk.b].push({ j: alku, m: (1 - lk.f) * L });
+    try { return reittiVerkossa(); } finally { V.naapurit[lk.a].pop(); V.naapurit[lk.b].pop(); V.naapurit.pop(); V.solmut.pop(); }
+    function reittiVerkossa() {
     // poistumiskäyrä: pienin syvyystaso ≥ raja, pienet suljetut syvänteet pois
     const tasoLista = tasot.map(t => t.syvyys).filter(x => x >= raja - 1e-9).sort((a, b) => a - b);
     const kayra = tasoLista.length ? tasoLista[0] : null;
@@ -197,8 +288,11 @@
       varoitus = kayra === null ? `${luku0(raja)} m:n syvyyskäyrää ei ole` : `väylältä ei löydy ${luku0(kayra)} m:n käyrän ylitystä`;
     }
     let valittu = lista.find(ok);
-    if (!valittu) {
-      valittu = lista[0];
+    if (!valittu) {   // v33: mikään ei kelpaa → 300 halvimmasta se, jonka suora ylittää vähiten matalia käyriä (ei suoraan saaren yli)
+      let paras = null;
+      for (const e of lista.slice(0, 300)) { e.matalia = matalaLaskuri(matalaInd, e.x, e.y, qx, qy, varaM);
+        if (!paras || e.matalia < paras.matalia || (e.matalia === paras.matalia && e.hinta < paras.hinta)) paras = e; }
+      valittu = paras || lista[0];
       const v2 = `suora osuus ylittää ${luku0(matala)} m:n tai matalamman käyrän`;
       varoitus = varoitus ? varoitus + ', ' + v2 : v2;
     }
@@ -210,6 +304,7 @@
     const vaylaM = am + valittu.pitkin;
     return { pisteet, m: vaylaM + valittu.suora, vaylaM, suoraM: valittu.suora, tapa: 'vayla',
              poistuminen: { lat: P.lat(valittu.y), lon: P.lon(valittu.x) }, kayra, syvaan, varoitus };
+    }
   }
   /** v31: suora reitti turvallisen veden pisteestä (Luoto): ei väylää; varoitus, jos ylittää matalan käyrän (≤ matalaRaja). */
   function suora(piste, kohde, syvyys, matalaRaja) {
@@ -374,7 +469,7 @@
     return teksti.replace(/kello (\d{1,2})\.(\d\d)/g, 'kello $1 $2').replace(/(\d)\s*–\s*(\d)/g, '$1 – $2');
   }
 
-  const Reitti = { etaisyysM, projektio, leikkaus, verkko, dijkstra, reitti, suora, naytteet, kaanna, vastavirtaKerroin, vastaKomponentti,
+  const Reitti = { etaisyysM, projektio, leikkaus, verkko, lahinVayla, dijkstra, reitti, suora, naytteet, kaanna, vastavirtaKerroin, vastaKomponentti,
                    aallokkoReitilla, trendi, merisaaTeksti, puheeksi };
   if (typeof module !== 'undefined' && module.exports) module.exports = Reitti;
   else root.Reitti = Reitti;
