@@ -389,14 +389,14 @@
   <button data-v="v-raportit">⋯<br>RAPORTIT</button>
 </nav>
 
-<script src="alueet.js?v=25"></script>
+<script src="alueet.js?v=26"></script>
 <script src="havainnot.js?v=15"></script>
 <script src="malli.js?v=25"></script>
 <script src="fmi.js?v=14"></script>
 <script src="nopeus.js?v=20"></script>
 <script src="kartta.js?v=28"></script>
 <script src="sillat.js?v=2"></script>
-<script src="reitti.js?v=7"></script>
+<script src="reitti.js?v=8"></script>
 <script src="ais.js?v=23"></script>
 <script>
 'use strict';
@@ -1892,13 +1892,19 @@ function vaylaVerkko() {
 }
 /** Reitti lähtöpisteestä kohteeseen (v31): turvallisen veden piste → suoraan; luiska → väylää syvyyskäyrälle, sitten suoraan;
  *  pakollinen välipiste (Reposaari: aallonmurtaja) ensin. */
+/** v39: pisteen alue (lähtöpisteet ja turvasatamat); alueen suoraMatala on alaraja (Norrskär 10 m). */
+function matalaRajaPisteelle(piste) {
+  const al = ALUELISTA.find(a => (a.lahtopisteet || []).includes(piste) || (a.turvasatamat || []).includes(piste));
+  return Math.max(asetukset.suoraMatala, al && isFinite(al.suoraMatala) ? al.suoraMatala : -Infinity);
+}
 function laskeReitti(piste, kohde) {
+  const matalaRaja = matalaRajaPisteelle(piste);
   if (piste.tyyppi === 'turva')   // v34: turvallisen veden pisteestä suoraan tai syvän veden kautta, ei saaristoväyliä
     return Reitti.reitti({ satama: piste, kohde, syvyys, turva: true, rajaSyvyys: isFinite(asetukset.vaylaSyvyys) ? asetukset.vaylaSyvyys : 10,
-                           matalaRaja: asetukset.suoraMatala, suoraPaino: asetukset.suoraPaino });
+                           matalaRaja, suoraPaino: asetukset.suoraPaino });
   const alku = piste.kautta || piste;
   const r = Reitti.reitti({ satama: alku, kohde, vaylat, syvyys, rajaSyvyys: isFinite(asetukset.vaylaSyvyys) ? asetukset.vaylaSyvyys : 10, verkko: vaylaVerkko(),
-                            matalaRaja: asetukset.suoraMatala, suoraPaino: asetukset.suoraPaino, vaylallaM: asetukset.vaylallaM });   // v32: väyläpainotteinen; v36: kohde väylällä
+                            matalaRaja, suoraPaino: asetukset.suoraPaino, vaylallaM: asetukset.vaylallaM });   // v32: väyläpainotteinen; v36: kohde väylällä
   if (piste.kautta) {
     const lisa = Reitti.etaisyysM(piste.lat, piste.lon, alku.lat, alku.lon);
     r.pisteet = [[piste.lat, piste.lon]].concat(r.pisteet); r.m += lisa; r.vaylaM += lisa; r.kautta = piste.kautta.teksti || (piste.kautta.nimi + ' kautta');

@@ -431,9 +431,13 @@
     }
     // v34: syvän veden haku kaikista poistumiskohdista; kohteeseen suoraan tai välipisteiden kautta
     // halvin poistuminen, jonka suora osuus kelpaa; jos se on kaikista halvin, kiertoa ei tarvitse etsiä (suora = alaraja)
+    // v39: kun matala raja ≥ poistumiskäyrä (Norrskär: väylän ulkopuolella vain yli 10 m:n vesi), poistumiskohta on itse
+    // esteviivalla → sen ympäriltä 150 m sallitaan (lähtö väylältä), muuten suora ja haku estyisivät heti alussa
+    const alkuVara = kayra !== null && matala >= kayra - 1e-9 ? 150 : 0;
+    const suoraEstyy = e => alkuVara ? !osuusKelpaa(matalaInd, e.x, e.y, qx, qy, alkuVara, varaM) : matalaSuoralla(matalaInd, e.x, e.y, qx, qy, varaM);
     let suoraParas = null;
-    for (const e of lista.slice(0, 300)) if (!matalaSuoralla(matalaInd, e.x, e.y, qx, qy, varaM)) { suoraParas = e; break; }
-    const hk = suoraParas === lista[0] ? null : syvaHaku(lista.map(e => ({ x: e.x, y: e.y, g: e.pitkin })), qx, qy, matalaInd, paino, varaM);
+    for (const e of lista.slice(0, 300)) if (!suoraEstyy(e)) { suoraParas = e; break; }
+    const hk = suoraParas === lista[0] ? null : syvaHaku(lista.map(e => ({ x: e.x, y: e.y, g: e.pitkin, vara: alkuVara || undefined })), qx, qy, matalaInd, paino, varaM);
     const kiertoHinta = hk ? lista[hk.alku].pitkin + paino * pituus([[lista[hk.alku].x, lista[hk.alku].y]].concat(hk.ketju, [[qx, qy]])) : Infinity;
     let valittu, ketju = [];
     if (suoraParas && suoraParas.hinta <= kiertoHinta) valittu = suoraParas;
@@ -577,7 +581,11 @@
     const tn = tuuliLause(d.tuuliNyt), t2 = tuuliLause(d.tuuli2h);
     if (tn) L.push(`Tuuli ${tn}.` + (t2 ? ` Kahden tunnin päästä ${t2}.` : ''));
     else L.push('Tuuliennustetta ei ole.');
-    if (d.ylitys && d.ylitys.t) L.push(`Tuuliraja ylittyy ${d.ylitys.t <= d.klo ? 'nyt' : kello(d.ylitys.t)}${d.ylitys.syy ? ', ' + d.ylitys.syy : ''}.`);
+    if (d.ylitys && d.ylitys.t) {   // v39 (Hannun video 15.11.): "keskituuli 10 m/s" kuulosti nykyiseltä tuulelta → raja sanotaan rajaksi
+      const aika = d.ylitys.t <= d.klo ? 'nyt' : kello(d.ylitys.t), m = /^(keskituuli|puuska) ([\d.,]+)(\s*m\/s)?$/.exec(d.ylitys.syy || '');
+      L.push(m ? `Tuuliraja ylittyy ${aika}: ${m[1] === 'puuska' ? 'puuskan' : 'keskituulen'} raja on ${m[2].replace('.', ',')} metriä sekunnissa.`
+               : `Tuuliraja ylittyy ${aika}${d.ylitys.syy ? ', ' + d.ylitys.syy : ''}.`);
+    }
     if (!meno && d.lahtoViimeistaan) L.push(`Lähde paluulle viimeistään ${kello(d.lahtoViimeistaan)}.`);
     if (!meno && d.kova) L.push(d.kova === 'suoja' ? 'Kova tuuli: paluu lähimpään suojaan.' : 'Kova tuuli: paluu lähimmän turvallisen veden pisteen kautta.');
     const r = d.reitti;

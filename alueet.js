@@ -29,6 +29,9 @@
  *   lahtopisteetAlueelta: alue käyttää toisen alueen pisteitä (v24: Norrskär → Vaasa; v25 alkaen ei käytössä).
  *   turvasatamat (v25, Hannu 15.11.: Norrskär "turvasatama/yöpymispaikka"): ei lähtöpiste; kovalla kelillä paluu lähimpään suojaan
  *   (alueen lähtöpisteet ja turvasatamat). tyyppi "turva" → reitti suoraan tai syvän veden kautta, satamaa ympäröivät 300 m sallitaan.
+ *   suoraMatala (v26, Hannu 15.11.: Norrskärin alueella voi olla karttaan merkitsemätöntä matalaa pintaan asti, pysytään väylällä
+ *   tai yli 10 m:n vedessä; "Vain Norrskär"): väylän ulkopuolinen reittiosuus kiertää tämän syvyiset ja matalammat käyrät
+ *   (asetusta ei käytetä pienempänä kuin tämä).
  *   Koordinaatit Hannun antamat (asteet, minuutit, sekunnit).
  * v23: Ohtakari toiseksi paluukohteeksi (Hannu 14.11.); merkki satamaan 64,08944 23,40594 (predictwind.com), paluukohteen tyyli.
  */
@@ -71,7 +74,7 @@
   {
     "tunnus": "norrskar", "nimi": "Norrskär", "lyhyt": "Norrskär", "polku": "norrskar/",
     "rajat": { "lat_min": 63.05, "lat_max": 63.45, "lon_min": 20.30, "lon_max": 21.20 },
-    "keski": [63.24, 20.80], "zoom": 10.4, "paluuikkuna": false,
+    "keski": [63.24, 20.80], "zoom": 10.4, "paluuikkuna": false, "suoraMatala": 10,
     "lahtopisteet": [
       {"nimi": "Klubbskat", "minne": "Klubbskatiin", "mista": "Klubbskatista", "tyyppi": "luiska", "lat": 63.305153, "lon": 21.093697}
     ],
