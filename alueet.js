@@ -26,7 +26,10 @@
  *   tyyppi "turva": piste on jo turvallisessa vedessä (Luoto: "nämä vie turvalliseen veteen asti ei luiskalle") → reitti suoraan;
  *   "luiska": väylää pitkin asetuksen syvyyskäyrälle, sitten suoraan. kautta = pakollinen välipiste (Reposaari: "aina aallonmurtajan
  *   kautta"). jatko = sisäosuus satamaan (Luoto → Köpmanholmen). minne/mista = nimen taivutus puheeseen.
- *   lahtopisteetAlueelta: Norrskär käyttää Vaasan pisteitä (Hannu). Koordinaatit Hannun antamat (asteet, minuutit, sekunnit).
+ *   lahtopisteetAlueelta: alue käyttää toisen alueen pisteitä (v24: Norrskär → Vaasa; v25 alkaen ei käytössä).
+ *   turvasatamat (v25, Hannu 15.11.: Norrskär "turvasatama/yöpymispaikka"): ei lähtöpiste; kovalla kelillä paluu lähimpään suojaan
+ *   (alueen lähtöpisteet ja turvasatamat). tyyppi "turva" → reitti suoraan tai syvän veden kautta, satamaa ympäröivät 300 m sallitaan.
+ *   Koordinaatit Hannun antamat (asteet, minuutit, sekunnit).
  * v23: Ohtakari toiseksi paluukohteeksi (Hannu 14.11.); merkki satamaan 64,08944 23,40594 (predictwind.com), paluukohteen tyyli.
  */
 (typeof window !== 'undefined' ? window : globalThis).ALUEET = [
@@ -69,7 +72,12 @@
     "tunnus": "norrskar", "nimi": "Norrskär", "lyhyt": "Norrskär", "polku": "norrskar/",
     "rajat": { "lat_min": 63.05, "lat_max": 63.45, "lon_min": 20.30, "lon_max": 21.20 },
     "keski": [63.24, 20.80], "zoom": 10.4, "paluuikkuna": false,
-    "lahtopisteetAlueelta": "vaasa",
+    "lahtopisteet": [
+      {"nimi": "Klubbskat", "minne": "Klubbskatiin", "mista": "Klubbskatista", "tyyppi": "luiska", "lat": 63.305153, "lon": 21.093697}
+    ],
+    "turvasatamat": [
+      {"nimi": "Norrskärin satama", "minne": "Norrskärin satamaan", "mista": "Norrskärin satamasta", "tyyppi": "turva", "lat": 63.235661, "lon": 20.614439, "yopyminen": true}
+    ],
     "asemat": ["Mustasaari Valassaaret@63.430,21.070", "Maalahti Strömmingsbådan@62.979,20.741"],
     "merkit": [
       { "nimi": "Norrskär", "lat": 63.2367, "lon": 20.6108, "muoto": "kolmio", "vari": "#ff9d3a" },

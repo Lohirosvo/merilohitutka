@@ -579,7 +579,7 @@
     else L.push('Tuuliennustetta ei ole.');
     if (d.ylitys && d.ylitys.t) L.push(`Tuuliraja ylittyy ${d.ylitys.t <= d.klo ? 'nyt' : kello(d.ylitys.t)}${d.ylitys.syy ? ', ' + d.ylitys.syy : ''}.`);
     if (!meno && d.lahtoViimeistaan) L.push(`Lähde paluulle viimeistään ${kello(d.lahtoViimeistaan)}.`);
-    if (!meno && d.kova) L.push('Kova tuuli: paluu lähimmän turvallisen veden pisteen kautta.');
+    if (!meno && d.kova) L.push(d.kova === 'suoja' ? 'Kova tuuli: paluu lähimpään suojaan.' : 'Kova tuuli: paluu lähimmän turvallisen veden pisteen kautta.');
     const r = d.reitti;
     if (!r) L.push(meno ? 'Menoreittiä ei voitu laskea.' : 'Paluureittiä ei voitu laskea: sijaintia tai paluukohdetta ei ole.');
     else {

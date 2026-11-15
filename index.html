@@ -8,7 +8,7 @@
 <!-- v34 (Hannu 15.11.2026 "syvän veden kautta väyliä suosien"): väylän jälkeen ja turvallisen veden pisteistä reitti kiertää matalikot syvän veden kautta (ruudukkohaku, matalan käyrän reunus vältetään), saaristoväyliä ei Luodon pisteistä; matalan veden huomautus vain käyrän kohdalla -->
 <!-- v33 (Hannu 15.11.2026 Vaasan kuva "Myös muihin väyläpainotteinen"): väyläverkko liittää risteykset ja linjan päät janan keskelle, satama väylän lähimpään kohtaan; jos mikään poistuminen ei kelpaa, valitaan vähiten matalia ylittävä -->
 <!-- v32 (Hannu 15.11.2026 "Tehdään sellainen. Parempi väyläpainotteinen."): reitti seuraa väylää pidemmälle (suora osuus × 1,5), ei oikaise 6 m:n tai matalampien käyrien yli, pienet suljetut syvänteet eivät kelpaa poistumiseen -->
-<!-- v31 (Hannu 15.11.2026 koordinaatit): lähtö- ja paluupisteet alueittain (oletus yli 50 km, muuten lähin tai annettu), paluu lähtöpisteeseen, Luodon turvallisen veden pisteet, Köpmanholmen Luoto-pisteen kautta (kova keli 15 m/s: lähin piste), Reposaari aallonmurtajan kautta, Norrskär Vaasan pisteistä -->
+<!-- v31 (Hannu 15.11.2026 koordinaatit): lähtö- ja paluupisteet alueittain (oletus yli 50 km, muuten lähin tai annettu), paluu lähtöpisteeseen, Luodon turvallisen veden pisteet, Köpmanholmen Luoto-pisteen kautta (kova keli 15 m/s: lähin piste), Reposaari aallonmurtajan kautta, Norrskär Vaasan pisteistä (v38: Klubbskat ja Norrskärin turvasatama) -->
 <!-- v30 (Hannu 15.11.2026 "Tehdään kaikki mutta merisään muodossa"): merisää paluureitille (väylä 10 m:iin, sitten suoraan), ääneen uistelun aikana 2 h välein, menomatkan kohde kartalta, vastavirta aaltoja vastaan, huippujakso VTPK, mukavuusarvio 1–5 -->
 <!-- v29 (Hannu 14.11.2026 "0.3 m mukavuus kärsii tehdään"): jyrkkä aallokko aallonjaksosta (VTM10): kartta, napautus, 48 h; tuuli virtaa vastaan -huomautus -->
 <!-- v28 (Hannu 14.11.2026 "1 2 3 kerralla"): nousun lämpöraja (48 h -välilehti, ⓘ), 48 h aikajana aallolla ja lohikerroksella, nopeushälytys 3 m:n virrasta (valinta) -->
@@ -389,14 +389,14 @@
   <button data-v="v-raportit">⋯<br>RAPORTIT</button>
 </nav>
 
-<script src="alueet.js?v=24"></script>
+<script src="alueet.js?v=25"></script>
 <script src="havainnot.js?v=15"></script>
 <script src="malli.js?v=25"></script>
 <script src="fmi.js?v=14"></script>
 <script src="nopeus.js?v=20"></script>
 <script src="kartta.js?v=28"></script>
 <script src="sillat.js?v=2"></script>
-<script src="reitti.js?v=6"></script>
+<script src="reitti.js?v=7"></script>
 <script src="ais.js?v=23"></script>
 <script>
 'use strict';
@@ -1976,11 +1976,14 @@ function menoPiste(al) {
   if (sijainti) { const l = lahinPiste(lista, sijainti.lat, sijainti.lon); if (l.km <= asetukset.alueSadeKm) return { piste: l.p, syy: 'lähin' }; }
   return { piste: lista[0], syy: 'oletus' };
 }
-/** Paluupiste: kova keli → lähin turvallisen veden piste; annettu; uistelun lähtöpiste; lähin. Yli 50 km: null. */
+/** Paluupiste: kova keli → lähin turvallisen veden piste (alueella turvasatamia: lähin suoja = lähtöpisteet ja turvasatamat);
+ *  annettu; uistelun lähtöpiste; lähin. Yli 50 km: null. */
 function paluuPiste(al, kova) {
   const lista = lahtopisteet(al); if (!lista.length || !sijainti) return null;
   const l = lahinPiste(lista, sijainti.lat, sijainti.lon);
   if (l.km > asetukset.alueSadeKm) return null;
+  if (kova && (al.turvasatamat || []).length)   // v38: Norrskär (Hannu 15.11. "Lähin suoja"): Norrskärin satama tai Klubbskat
+    return { piste: lahinPiste(lista.concat(al.turvasatamat), sijainti.lat, sijainti.lon).p, syy: 'kova keli', suoja: true };
   const turva = lista.filter(p => p.tyyppi === 'turva');
   if (kova && turva.length) return { piste: lahinPiste(turva, sijainti.lat, sijainti.lon).p, syy: 'kova keli' };
   const k = kasinValittu(al); if (k) return { piste: k, syy: 'valittu' };
@@ -2033,7 +2036,7 @@ function merisaaTiedot(tyyppi, kohdePiste) {
     else if (!pp) d.eiReittia = `olet yli ${luku(asetukset.alueSadeKm, 0)} kilometrin päässä lähtöpisteistä`;
     else {
       satama = pp.piste; kohde = sijainti; d.piste = pp;
-      d.kohdeNimiIllatiivi = satama.minne; d.kova = pp.syy === 'kova keli';
+      d.kohdeNimiIllatiivi = satama.minne; d.kova = pp.syy === 'kova keli' ? (pp.suoja ? 'suoja' : true) : false;
       if (satama.jatko) d.jatko = { minne: satama.jatko.minne, m: Reitti.etaisyysM(satama.lat, satama.lon, satama.jatko.lat, satama.jatko.lon) };
       if (al.paluuikkuna && arvio && !arvio.kaukana) d.lahtoViimeistaan = arvio.lahtoViimeistaan;
     }
