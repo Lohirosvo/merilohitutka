@@ -395,7 +395,7 @@
 <script src="fmi.js?v=14"></script>
 <script src="nopeus.js?v=20"></script>
 <script src="kartta.js?v=28"></script>
-<script src="sillat.js?v=1"></script>
+<script src="sillat.js?v=2"></script>
 <script src="reitti.js?v=6"></script>
 <script src="ais.js?v=23"></script>
 <script>
@@ -1649,7 +1649,12 @@ function siltaTeksti(lat, lon) {
   if (!v.haettuH && !v.kesken) haeVesiAsema(v.asema, false).then(() => {   // aseman ensimmäinen haku: teksti päivittyy haun jälkeen
     if (!$('karttaTieto').hidden && $('karttaTieto').textContent.startsWith(s.nimi + ' (')) naytaPiste(lat, lon); });
   const a = Sillat.arvio(s, v, vene, vara, new Date()), tarve = `vene ${luku(vene, 2)} m` + (vara ? ` + vara ${luku(vara, 2)} m` : '');
-  let t = `${s.nimi} (${s.tunnus}): alikulku ${luku(s.korkeus)} m (${s.vertaus})` + (isFinite(s.taulukko) ? `, taulukossa ${luku(s.taulukko)} m` : '');
+  let t = `${s.nimi}${s.tunnus ? ' (' + s.tunnus + ')' : ''}: alikulku ${luku(s.korkeus)} m (${s.vertaus}${s.oletettu ? ', oletettu' : ''})`;
+  if (s.taulukko) {   // v37: taulukon luku N2000:ssa vertailuksi; pienempi alapinta käytössä
+    const tN = s.taulukko.korkeus + Sillat.vertausN2000(s.taulukko), kN = s.korkeus + Sillat.vertausN2000(s);
+    t += `, 2005-taulukossa ${luku(s.taulukko.korkeus)} m (${s.taulukko.vertaus}) = ${luku(tN, 2)} m N2000` + (Math.abs(tN - kN) > 0.15 ? ' – ristiriita' : '')
+      + (tN < kN - 1e-9 ? ', taulukon pienempi käytössä' : '');
+  }
   if (isFinite(a.alikulku)) {
     t += ` · meri nyt ${cm(a.vesi)} N2000 (${v.asema.nimi} klo ${klo(v.havainto.t)}) → todellinen ${luku(a.alikulku, 2)} m · ${tarve}: `
       + (a.tila === 'mahtuu' ? `MAHTUU, väliä ${luku(a.ero, 2)} m` : `EI MAHDU, puuttuu ${luku(-a.ero, 2)} m`);
@@ -1660,7 +1665,8 @@ function siltaTeksti(lat, lon) {
     if (v.ennuste.arvattu) t += ' (ennusteen yksikkö oletettu mm)';
     if (v.ennuste.muunnettu) t += ' (ennuste keskivedestä N2000:een havainnon erolla)';
   }
-  return t + ` · vertaustaso ${Sillat.VERTAUS[s.vertaus].selite}${s.huom ? '; ' + s.huom : ''} · lähde: ${s.lahde} · ei navigointiin, katso sillan korkeusmerkki`;
+  return t + ` · vertaustaso ${Sillat.VERTAUS[s.vertaus].selite}` + (s.oletettu ? ' (kartan reunatekstiä ei nähty; N2000 on varovaisin oletus)' : '')
+    + `${s.huom ? '; ' + s.huom : ''} · lähde: ${s.lahde} · ei navigointiin, katso sillan korkeusmerkki`;
 }
 function vesiTilaTeksti() {
   const osat = Object.values(vesi).map(v => `${v.asema.nimi} (${v.asema.fmisid}): `

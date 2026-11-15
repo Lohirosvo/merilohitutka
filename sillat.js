@@ -1,4 +1,4 @@
-/* Merilohitutka – sillat.js (v35, 15.11.2026)
+/* Merilohitutka – sillat.js (v35, 15.11.2026; v37 merikartan luvut)
  * Siltojen alikulkukorkeudet ja meriveden korkeus (Hannu 15.11.: "Lisätään tiedot koordinaatteihin
  * alikulkukorkeuksien kanssa. Vedenkorkeus huomioiden ja kartta tieto korkeus").
  *
@@ -6,7 +6,12 @@
  *   Merkitty alikulku on vertaustasosta (MW2005 tai N60+0,1), eikä siihen sisälly vedenkorkeuden vaihtelu.
  *
  * LÄHTEET JA VARMUUS
- *   - Korkeudet: 2005-taulukko (Liikennevirasto 42/2017, liite 9). Sundom: Hannun oma tieto 2,5 m (taulukossa 2,4 m).
+ *   - Korkeudet: 2005-taulukko (Liikennevirasto 42/2017, liite 9) tai merikartta (Hannun kuvat 15.11.). Merikartan luku on
+ *     ensisijainen. Jos kartan vertaustasoa ei tiedetä, oletetaan N2000 (= 0): varovaisin, koska keskivesi on ollut N2000:n
+ *     yläpuolella (MW2005 +13,7 cm, 2026 noin +5 cm) – oletus antaa pienimmän alikulun.
+ *   - v37: Sundom kartassa 2,5 m (taulukossa 2,4 m MW2005 = 2,54 m N2000 → kartta luultavasti N2000; v35 laski 2,5 m
+ *     MW2005:stä = 10–14 cm liikaa). Skalöfjärden kartassa 2,3 m (taulukossa 2,8 m MW2005 – ristiriita, kartta käytössä).
+ *     Jos taulukko antaa pienemmän alapinnan kuin kartta, käytetään pienempää.
  *   - Sijainnit: Hannun antamat koordinaatit (asteet-minuutit-sekunnit → desimaalit).
  *   - MW2005 = N2000 + 13,7 cm: Ilmatieteen laitos, muunnosluvut (esimerkki Pietarsaaresta). Vaasan alueen silloille
  *     sama luku on ARVIO (Pietarsaaren ja Vaasan teoreettinen keskivesi N2000:ssa vuonna 2026 sama 5 cm IL:n
@@ -30,19 +35,25 @@
   /** Vertaustasot N2000:ssa (m). */
   const VERTAUS = {
     'MW2005': { n2000: 0.137, selite: 'MW2005 = N2000 + 13,7 cm (IL, Pietarsaari)' },
-    'N60+0,1': { n2000: 0.540, selite: 'N60 + 0,1 m = N2000 + 54 cm (laskettu IL:n luvuista, Pietarsaari)' }
+    'N60+0,1': { n2000: 0.540, selite: 'N60 + 0,1 m = N2000 + 54 cm (laskettu IL:n luvuista, Pietarsaari)' },
+    'N2000': { n2000: 0, selite: 'N2000' }
   };
 
-  const LAHDE = '2005-taulukko (Liikennevirasto 42/2017, liite 9)';
+  const LAHDE = '2005-taulukko (Liikennevirasto 42/2017, liite 9)', KARTTA = 'merikartta (Hannun kuva 15.11.)';
   const SILLAT = [
     { tunnus: 'V-608', nimi: 'Fårholmsbro', lat: 63.697592, lon: 22.758483, korkeus: 3.3, vertaus: 'N60+0,1', lahde: LAHDE },
     { tunnus: 'V-600', nimi: 'Gertrudsbro', lat: 63.798017, lon: 22.763206, korkeus: 3.2, vertaus: 'N60+0,1', lahde: LAHDE },
     { tunnus: 'V-1777', nimi: 'Öskatan silta', lat: 63.259800, lon: 22.079183, korkeus: 3.8, vertaus: 'MW2005', lahde: LAHDE },
     { tunnus: 'V-1234', nimi: 'Hällnäsbro', lat: 63.270883, lon: 22.237114, korkeus: 3.1, vertaus: 'MW2005', lahde: LAHDE },
-    { tunnus: 'V-1359', nimi: 'Sundomin silta', lat: 63.079789, lon: 21.576594, korkeus: 2.5, vertaus: 'MW2005', taulukko: 2.4,
-      lahde: 'Hannun tieto 2,5 m; ' + LAHDE + ' 2,4 m', huom: 'vertaustaso oletettu samaksi kuin taulukossa (MW2005)' },
+    { tunnus: 'V-1359', nimi: 'Sundomin silta', lat: 63.079789, lon: 21.576594, korkeus: 2.5, vertaus: 'N2000', oletettu: true,
+      taulukko: { korkeus: 2.4, vertaus: 'MW2005' }, lahde: KARTTA + '; ' + LAHDE + ' 2,4 m' },
     { tunnus: 'V-679', nimi: 'Molpeströmsbro', lat: 62.865925, lon: 21.240422, korkeus: 2.5, vertaus: 'MW2005', lahde: LAHDE },
-    { tunnus: 'V-675', nimi: 'Skalöfjärdenin silta', lat: 63.274119, lon: 21.343789, korkeus: 2.8, vertaus: 'MW2005', lahde: LAHDE }
+    { tunnus: 'V-675', nimi: 'Skalöfjärdenin silta', lat: 63.274097, lon: 21.343825, korkeus: 2.3, vertaus: 'N2000', oletettu: true,
+      taulukko: { korkeus: 2.8, vertaus: 'MW2005' }, lahde: KARTTA + ' (Hannu: "korjataan 2.3 m"); ' + LAHDE + ' 2,8 m' },
+    // v37: Hannun merikarttakuvat 15.11. (nimi kartan paikannimestä; varsinaista sillan nimeä ei tiedetä)
+    { tunnus: null, nimi: 'Silta Störgrund', lat: 62.992711, lon: 21.472828, korkeus: 2.5, vertaus: 'N2000', oletettu: true, lahde: KARTTA,
+      huom: 'noin 2 km Åminnen lähtöpisteestä pohjoiseen' },
+    { tunnus: null, nimi: 'Silta Bässörsbottnen', lat: 63.020686, lon: 21.443467, korkeus: 2.5, vertaus: 'N2000', oletettu: true, lahde: KARTTA }
   ];
 
   function etaisyysKm(a, b, c, d) {
@@ -59,8 +70,14 @@
 
   function vertausN2000(s) { const v = VERTAUS[s.vertaus]; return v ? v.n2000 : NaN; }
 
+  /** Sillan alapinta N2000:ssa (m): merkitty + vertaustaso; jos taulukon luku antaa pienemmän, se (varovaisempi). */
+  function alapinta(s) {
+    const k = s.korkeus + vertausN2000(s);
+    return s.taulukko ? Math.min(k, s.taulukko.korkeus + vertausN2000(s.taulukko)) : k;
+  }
+
   /** Todellinen alikulku (m), kun meriveden korkeus on vesiN2000 (m). */
-  function alikulku(s, vesiN2000) { return isFinite(vesiN2000) ? s.korkeus + vertausN2000(s) - vesiN2000 : NaN; }
+  function alikulku(s, vesiN2000) { return isFinite(vesiN2000) ? alapinta(s) - vesiN2000 : NaN; }
 
   /** 'mahtuu' | 'ei' | 'tuntematon' (ei vedenkorkeutta). */
   function tila(ak, vene, vara) {
@@ -172,7 +189,7 @@
     return paras;
   }
 
-  const Sillat = { SILLAT, MAREOGRAFIT, VERTAUS, etaisyysKm, lahinMareografi, vertausN2000, alikulku, tila, parametrit, sarjaksi,
+  const Sillat = { SILLAT, MAREOGRAFIT, VERTAUS, etaisyysKm, lahinMareografi, vertausN2000, alapinta, alikulku, tila, parametrit, sarjaksi,
                    havainto, ennuste, arvoHetkella, jakso, arvio, lahinSilta };
   if (typeof module !== 'undefined' && module.exports) module.exports = Sillat;
   else root.Sillat = Sillat;
