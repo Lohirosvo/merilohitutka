@@ -27,6 +27,10 @@
     nakyvyysRaja: 1000,    // m: Tankarin näkyvyys alle tämän -> keltainen
     havaintoVanhaMin: 60,  // havaintoa vanhempi kuin tämä ei ratkaise tilaa
     alueSadeKm: 50,        // kauempana kohteesta (esim. kotona) paluuikkunaa ei lasketa
+    // v25 (Hannu 15.11.2026): paluu Köpmanholmeniin turvallisen veden pisteen kautta ("Ennallaan köpmanholmen mutta pisteen
+    // kautta"; "Jos kova keli 15 m/s turvallisempi. Muuten 1."): normaalisti ensimmäinen piste (Luoto), kovalla kelillä
+    // (keskituuli ≥ kovaKeli havainnossa tai ennusteessa 2 h sisällä) lähin piste. kohdeKautta asetetaan sovelluksessa.
+    kovaKeli: 15,          // m/s keskituuli
     // Asema: FMI:n asemanumero (101661 = Kokkola Tankar, varmistettu sijainnista) tai "Nimi@lat,lon" = lähin asema pisteestä.
     // Kallanin piste = majakan sijainti (Hannu 9.11.2026: 63°45'05.29" N, 22°31'21.95" E). Asemanumeroa ei löytynyt.
     asemat: ['Pietarsaari Kallan@63.7515,22.5228', '101661']
@@ -131,6 +135,15 @@
     if (syote.sijainti && isFinite(syote.sijainti.lat)) {
       tulos.matkaSuoraKm = etaisyysKm(syote.sijainti.lat, syote.sijainti.lon, a.kohdeLat, a.kohdeLon);
       tulos.matkaKm = tulos.matkaSuoraKm * a.reittikerroin;
+      const kautta = (Array.isArray(a.kohdeKautta) ? a.kohdeKautta : []).filter(p => p && isFinite(p.lat) && isFinite(p.lon));
+      if (kautta.length) {   // v25: avomeriosuus suoraan pisteeseen, sisäosuus pisteestä kohteeseen × reittikerroin
+        const kova = kovaKeli(syote, a, nyt);
+        let p = kautta[0];
+        if (kova) for (const x of kautta) if (etaisyysKm(syote.sijainti.lat, syote.sijainti.lon, x.lat, x.lon) < etaisyysKm(syote.sijainti.lat, syote.sijainti.lon, p.lat, p.lon)) p = x;
+        const avoKm = etaisyysKm(syote.sijainti.lat, syote.sijainti.lon, p.lat, p.lon), sisaKm = etaisyysKm(p.lat, p.lon, a.kohdeLat, a.kohdeLon);
+        tulos.matkaKm = avoKm + sisaKm * a.reittikerroin;
+        tulos.kautta = { nimi: p.nimi, lat: p.lat, lon: p.lon, avoKm, sisaKm, kova };
+      }
       tulos.paluu.nouseva = aikaMin(tulos.matkaKm, a.nopeusNouseva);
       tulos.paluu.kova = aikaMin(tulos.matkaKm, a.nopeusKova);
       tulos.paluu.tyyni = aikaMin(tulos.matkaKm, a.nopeusTyyni);
@@ -194,6 +207,17 @@
     tulos.tila = !tiedossa ? 'tuntematon' : ['vihrea', 'keltainen', 'punainen'][taso];
     if (tulos.kaukana) tulos.tila = 'kaukana'; // yli alueen säteen: ei hälytyksiä, syyt näytetään tietona
     return tulos;
+  }
+
+  /** v25: kova keli = tuore havainto tai ennuste (nyt … +2 h) keskituuli ≥ a.kovaKeli. */
+  function kovaKeli(syote, a, nyt) {
+    const raja = a.kovaKeli;
+    if (!isFinite(raja)) return false;
+    for (const h of syote.havainnot || [])
+      if (h && h.aika && (nyt - h.aika) / 60000 <= a.havaintoVanhaMin && h.ws >= raja) return true;
+    const alku = nyt.getTime() - 3600000, loppu = nyt.getTime() + 2 * 3600000;
+    for (const r of syote.ennuste || []) if (r.t.getTime() >= alku && r.t.getTime() <= loppu && r.ws >= raja) return true;
+    return false;
   }
 
   /**
@@ -309,7 +333,7 @@
   }
 
   const Malli = { OLETUKSET, etaisyysKm, aikaMin, ylitysHetki, arvoHetkella, yhdistaEnnusteet, arvioi, tuulihalytys, alueSijainnille,
-                  paluukohteet, lahinKohde, illatiivi, lampoYlitys };
+                  paluukohteet, lahinKohde, illatiivi, lampoYlitys, kovaKeli };
   if (typeof module !== 'undefined' && module.exports) module.exports = Malli;
   else root.Malli = Malli;
 })(typeof window !== 'undefined' ? window : this);

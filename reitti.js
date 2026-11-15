@@ -174,6 +174,17 @@
     return { pisteet, m: vaylaM + valittu.suora, vaylaM, suoraM: valittu.suora, tapa: 'vayla',
              poistuminen: { lat: P.lat(valittu.y), lon: P.lon(valittu.x) }, kayra, varoitus };
   }
+  /** v31: suora reitti turvallisen veden pisteestä (Luoto): ei väylää; varoitus, jos ylittää matalan käyrän (≤ matalaRaja). */
+  function suora(piste, kohde, syvyys, matalaRaja) {
+    const matala = isFinite(matalaRaja) ? matalaRaja : 3, m = etaisyysM(piste.lat, piste.lon, kohde.lat, kohde.lon);
+    const out = { pisteet: [[piste.lat, piste.lon], [kohde.lat, kohde.lon]], m, vaylaM: 0, suoraM: m, tapa: 'turva', poistuminen: null, kayra: null, varoitus: null };
+    const tasot = syvyys && syvyys.tasot ? syvyys.tasot.filter(t => t.syvyys <= matala + 1e-9) : [];
+    if (tasot.length) {
+      const P = projektio(piste.lat, piste.lon), ind = janaIndeksi([].concat(...tasot.map(t => t.viivat)), P);
+      if (leikkaakoJono(ind, 0, 0, P.x(kohde.lon), P.y(kohde.lat))) out.varoitus = `suora reitti ylittää ${luku0(matala)} m:n tai matalamman käyrän (saari tai kari)`;
+    }
+    return out;
+  }
   function luku0(x) { return String(Math.round(x * 10) / 10).replace('.', ','); }
 
   /** Näytteet murtoviivalta enintään valiM välein: [{ lat, lon, m }] (m = matka alusta). */
@@ -266,7 +277,7 @@
   /** Kohdan kuvaus: paluulla matka ennen satamaa, menolla matka satamasta; lähin nimetty merkki ≤ 1,5 km (nimeä ei taivuteta). */
   function paikka(p, d) {
     const loppuun = Math.max(0, (d.reitti ? d.reitti.m : 0) - p.m);
-    const osa = d.tyyppi === 'meno' ? (loppuun < 300 ? 'kohteessa' : `${km(p.m)} satamasta`) : (p.m < 300 ? 'lähtöpaikalla' : `${km(loppuun)} ennen satamaa`);
+    const osa = d.tyyppi === 'meno' ? (loppuun < 300 ? 'kohteessa' : `${km(p.m)} lähtöpisteestä`) : (p.m < 300 ? 'lähtöpaikalla' : `${km(loppuun)} ennen paluupistettä`);
     let lahin = null, ld = 1500;
     for (const m of d.merkit || []) { const e = etaisyysM(p.lat, p.lon, m.lat, m.lon); if (e < ld) { ld = e; lahin = m; } }
     return lahin ? `${osa}, kohdassa ${lahin.nimi}` : osa;
@@ -285,12 +296,14 @@
     else L.push('Tuuliennustetta ei ole.');
     if (d.ylitys && d.ylitys.t) L.push(`Tuuliraja ylittyy ${d.ylitys.t <= d.klo ? 'nyt' : kello(d.ylitys.t)}${d.ylitys.syy ? ', ' + d.ylitys.syy : ''}.`);
     if (!meno && d.lahtoViimeistaan) L.push(`Lähde paluulle viimeistään ${kello(d.lahtoViimeistaan)}.`);
+    if (!meno && d.kova) L.push('Kova tuuli: paluu lähimmän turvallisen veden pisteen kautta.');
     const r = d.reitti;
     if (!r) L.push(meno ? 'Menoreittiä ei voitu laskea.' : 'Paluureittiä ei voitu laskea: sijaintia tai paluukohdetta ei ole.');
     else {
-      const minne = meno ? 'Menomatka kohteeseen' : `Paluu ${d.kohdeNimiIllatiivi || 'satamaan'}`;
-      L.push(`${minne} ${km(r.m)}` + (r.tapa === 'vayla' ? `, josta väylää ${km(r.vaylaM)} ${luku0(r.kayra)} metrin käyrälle` : '') +
+      const minne = meno ? `Menomatka ${d.lahtoMista ? d.lahtoMista + ' ' : ''}kohteeseen` : `Paluu ${d.kohdeNimiIllatiivi || 'satamaan'}`;
+      L.push(`${minne} ${km(r.m)}` + (r.kautta ? `, ${r.kautta}` : '') + (r.tapa === 'vayla' ? `, josta väylää ${km(r.vaylaM)} ${luku0(r.kayra)} metrin käyrälle` : '') +
         (isFinite(d.minuutit) ? `, noin ${Math.round(d.minuutit)} minuuttia ${Math.round(d.nopeus)} kilometrin tuntinopeudella.` : '.'));
+      if (!meno && d.jatko) L.push(`Sieltä ${d.jatko.minne} ${km(d.jatko.m)}.`);
       if (r.varoitus) L.push(`Huomio: ${r.varoitus}.`);
     }
     const a = d.aallot;
@@ -324,7 +337,7 @@
     return teksti.replace(/kello (\d{1,2})\.(\d\d)/g, 'kello $1 $2').replace(/(\d)\s*–\s*(\d)/g, '$1 – $2');
   }
 
-  const Reitti = { etaisyysM, projektio, leikkaus, verkko, dijkstra, reitti, naytteet, kaanna, vastavirtaKerroin, vastaKomponentti,
+  const Reitti = { etaisyysM, projektio, leikkaus, verkko, dijkstra, reitti, suora, naytteet, kaanna, vastavirtaKerroin, vastaKomponentti,
                    aallokkoReitilla, trendi, merisaaTeksti, puheeksi };
   if (typeof module !== 'undefined' && module.exports) module.exports = Reitti;
   else root.Reitti = Reitti;

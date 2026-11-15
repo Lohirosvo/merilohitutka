@@ -1,4 +1,4 @@
-/* Merilohitutka – alueet.js (v23)
+/* Merilohitutka – alueet.js (v24)
  * Kalastusalueet. Yksi lähde: sovellus lataa tämän skriptinä ja hae_copernicus.py lukee saman tiedoston.
  * Hakasulkeiden [ ] välissä on oltava puhdasta JSONia (ei kommentteja, ei pilkkua viimeisen alkion jälkeen).
  *
@@ -22,6 +22,11 @@
  * luontoon.fi; saariryhmän laajuus arvioitu) ja Luoto itään Lohtajalle (Lohtaja 64,0236 23,5056 ja Ohtakari 64,0905 23,4053,
  * Wikipedia). tuulipisteetLisaa: kiinteiden pisteiden lisäksi haku lisää mallin meriruuduista pisteet alueen osiin,
  * jotka ovat yli 10 km:n päässä kiinteistä (Lohtajan suunta).
+ * v24 (Hannu 15.11.2026): lahtopisteet = merisään lähtö- ja paluupisteet, ensimmäinen = oletus (kun yli 50 km).
+ *   tyyppi "turva": piste on jo turvallisessa vedessä (Luoto: "nämä vie turvalliseen veteen asti ei luiskalle") → reitti suoraan;
+ *   "luiska": väylää pitkin asetuksen syvyyskäyrälle, sitten suoraan. kautta = pakollinen välipiste (Reposaari: "aina aallonmurtajan
+ *   kautta"). jatko = sisäosuus satamaan (Luoto → Köpmanholmen). minne/mista = nimen taivutus puheeseen.
+ *   lahtopisteetAlueelta: Norrskär käyttää Vaasan pisteitä (Hannu). Koordinaatit Hannun antamat (asteet, minuutit, sekunnit).
  * v23: Ohtakari toiseksi paluukohteeksi (Hannu 14.11.); merkki satamaan 64,08944 23,40594 (predictwind.com), paluukohteen tyyli.
  */
 (typeof window !== 'undefined' ? window : globalThis).ALUEET = [
@@ -29,6 +34,11 @@
     "tunnus": "luoto", "nimi": "Luoto–Tankar", "lyhyt": "Luoto", "polku": "",
     "rajat": { "lat_min": 63.45, "lat_max": 64.13, "lon_min": 22.05, "lon_max": 23.65 },
     "keski": [63.83, 22.62], "zoom": 10.6, "paluuikkuna": true, "tuulipisteetLisaa": true,
+    "lahtopisteet": [
+      {"nimi": "Luoto", "minne": "Luodon pisteeseen", "mista": "Luodon pisteestä", "tyyppi": "turva", "lat": 63.8352, "lon": 22.646742, "jatko": {"nimi": "Köpmanholmen", "minne": "Köpmanholmeniin", "lat": 63.806844, "lon": 22.671069}},
+      {"nimi": "Etelä", "minne": "eteläiseen pisteeseen", "mista": "eteläisestä pisteestä", "tyyppi": "turva", "lat": 63.613219, "lon": 22.480039},
+      {"nimi": "Pietarsaari", "minne": "Pietarsaaren pisteeseen", "mista": "Pietarsaaren pisteestä", "tyyppi": "turva", "lat": 63.738158, "lon": 22.561789}
+    ],
     "asemat": ["Pietarsaari Kallan@63.7515,22.5228", "101661"],
     "tuulipisteet": [[63.55, 22.15], [63.55, 22.32], [63.55, 22.47], [63.70, 22.15], [63.70, 22.32], [63.70, 22.48],
                      [63.85, 22.15], [63.85, 22.35], [63.85, 22.55], [64.00, 22.20], [64.00, 22.45], [64.00, 22.70], [64.00, 22.95]],
@@ -44,6 +54,10 @@
     "tunnus": "vaasa", "nimi": "Vaasa", "lyhyt": "Vaasa", "polku": "vaasa/",
     "rajat": { "lat_min": 62.95, "lat_max": 63.56, "lon_min": 21.15, "lon_max": 22.00 },
     "keski": [63.12, 21.50], "zoom": 10.9, "paluuikkuna": false,
+    "lahtopisteet": [
+      {"nimi": "Raippaluodon silta", "minne": "Raippaluodon sillalle", "mista": "Raippaluodon sillalta", "tyyppi": "luiska", "lat": 63.206742, "lon": 21.48695},
+      {"nimi": "Åminne", "minne": "Åminneen", "mista": "Åminnestä", "tyyppi": "luiska", "lat": 62.974208, "lon": 21.480453}
+    ],
     "asemat": ["Mustasaari Valassaaret@63.430,21.070", "Maalahti Strömmingsbådan@62.979,20.741"],
     "merkit": [
       { "nimi": "Valassaaret", "lat": 63.430, "lon": 21.070, "vari": "#ffffff" },
@@ -55,6 +69,7 @@
     "tunnus": "norrskar", "nimi": "Norrskär", "lyhyt": "Norrskär", "polku": "norrskar/",
     "rajat": { "lat_min": 63.05, "lat_max": 63.45, "lon_min": 20.30, "lon_max": 21.20 },
     "keski": [63.24, 20.80], "zoom": 10.4, "paluuikkuna": false,
+    "lahtopisteetAlueelta": "vaasa",
     "asemat": ["Mustasaari Valassaaret@63.430,21.070", "Maalahti Strömmingsbådan@62.979,20.741"],
     "merkit": [
       { "nimi": "Norrskär", "lat": 63.2367, "lon": 20.6108, "muoto": "kolmio", "vari": "#ff9d3a" },
@@ -66,6 +81,9 @@
     "tunnus": "kaskinen", "nimi": "Kaskinen–Kristiinankaupunki", "lyhyt": "Kaskinen–Kristiinank.", "polku": "kaskinen/",
     "rajat": { "lat_min": 62.12, "lat_max": 62.65, "lon_min": 20.85, "lon_max": 21.65 },
     "keski": [62.36, 21.25], "zoom": 10.3, "paluuikkuna": false,
+    "lahtopisteet": [
+      {"nimi": "Kaskinen", "minne": "Kaskisten luiskalle", "mista": "Kaskisten luiskalta", "tyyppi": "luiska", "lat": 62.382847, "lon": 21.218158}
+    ],
     "asemat": ["Kristiinankaupunki Majakka@62.203,21.173"],
     "merkit": [
       { "nimi": "Sälgrund", "lat": 62.335, "lon": 21.193, "vari": "#ffffff" },
@@ -76,6 +94,10 @@
     "tunnus": "pori", "nimi": "Pori", "lyhyt": "Pori", "polku": "pori/",
     "rajat": { "lat_min": 61.40, "lat_max": 61.90, "lon_min": 20.85, "lon_max": 21.60 },
     "keski": [61.65, 21.28], "zoom": 10.3, "paluuikkuna": false,
+    "lahtopisteet": [
+      {"nimi": "Reposaaren luiska", "minne": "Reposaaren luiskalle", "mista": "Reposaaren luiskalta", "tyyppi": "luiska", "lat": 61.615497, "lon": 21.44245, "kautta": {"nimi": "Reposaaren aallonmurtaja", "teksti": "aallonmurtajan kautta", "lat": 61.599539, "lon": 21.458564}},
+      {"nimi": "Reposaaren aallonmurtaja", "minne": "Reposaaren aallonmurtajalle", "mista": "Reposaaren aallonmurtajalta", "tyyppi": "luiska", "lat": 61.599539, "lon": 21.458564}
+    ],
     "asemat": ["Pori Tahkoluoto satama@61.644,21.337", "Rauma Kylmäpihlaja@61.145,21.303"],
     "merkit": [
       { "nimi": "Tahkoluoto", "lat": 61.644, "lon": 21.337, "vari": "#ffffff" }
@@ -85,6 +107,10 @@
     "tunnus": "eckero", "nimi": "Ahvenanmaa–Eckerö", "lyhyt": "Eckerö", "polku": "eckero/",
     "rajat": { "lat_min": 60.00, "lat_max": 60.42, "lon_min": 19.10, "lon_max": 20.00 },
     "keski": [60.20, 19.55], "zoom": 10.5, "paluuikkuna": false,
+    "lahtopisteet": [
+      {"nimi": "Torp", "minne": "Torpin luiskalle", "mista": "Torpin luiskalta", "tyyppi": "luiska", "lat": 60.180297, "lon": 19.598986},
+      {"nimi": "Eckerö meripelastus", "minne": "Eckerön meripelastuskeskukselle", "mista": "Eckerön meripelastuskeskukselta", "tyyppi": "luiska", "lat": 60.219206, "lon": 19.538847}
+    ],
     "asemat": ["Hammarland Märket@60.301,19.131", "Jomala Jomalaby@60.122,19.898"],
     "merkit": [
       { "nimi": "Eckerö Berghamn", "lat": 60.225, "lon": 19.537, "muoto": "nelio", "vari": "#ffd54a" },
