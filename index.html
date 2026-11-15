@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b1726">
 <title>Merilohitutka</title>
+<!-- v32 (Hannu 15.11.2026 "Tehdään sellainen. Parempi väyläpainotteinen."): reitti seuraa väylää pidemmälle (suora osuus × 1,5), ei oikaise 6 m:n tai matalampien käyrien yli, pienet suljetut syvänteet eivät kelpaa poistumiseen -->
 <!-- v31 (Hannu 15.11.2026 koordinaatit): lähtö- ja paluupisteet alueittain (oletus yli 50 km, muuten lähin tai annettu), paluu lähtöpisteeseen, Luodon turvallisen veden pisteet, Köpmanholmen Luoto-pisteen kautta (kova keli 15 m/s: lähin piste), Reposaari aallonmurtajan kautta, Norrskär Vaasan pisteistä -->
 <!-- v30 (Hannu 15.11.2026 "Tehdään kaikki mutta merisään muodossa"): merisää paluureitille (väylä 10 m:iin, sitten suoraan), ääneen uistelun aikana 2 h välein, menomatkan kohde kartalta, vastavirta aaltoja vastaan, huippujakso VTPK, mukavuusarvio 1–5 -->
 <!-- v29 (Hannu 14.11.2026 "0.3 m mukavuus kärsii tehdään"): jyrkkä aallokko aallonjaksosta (VTM10): kartta, napautus, 48 h; tuuli virtaa vastaan -huomautus -->
@@ -384,7 +385,7 @@
 <script src="fmi.js?v=13"></script>
 <script src="nopeus.js?v=20"></script>
 <script src="kartta.js?v=27"></script>
-<script src="reitti.js?v=2"></script>
+<script src="reitti.js?v=3"></script>
 <script src="ais.js?v=23"></script>
 <script>
 'use strict';
@@ -420,6 +421,8 @@ const KENTAT = [
   ['vaylaSyvyys', 'Merisää: väylää pitkin syvyyskäyrälle, sitten suoraan (m, 10–20)'],
   ['vastavirtaRaja', 'Merisää: vastavirran jyrkennys mainitaan vähintään (%)'],
   ['kovaKeli', 'Kova keli: paluu lähimmän turvallisen veden pisteen kautta, keskituuli vähintään (m/s)'],
+  ['suoraMatala', 'Merisää: väylältä suoraan vain, jos suora osuus ei ylitä tämän syvyisiä tai matalampia käyriä (m)'],
+  ['suoraPaino', 'Merisää: väyläpainotteisuus, suora osuus painaa × (1 = lyhin reitti)'],
   ['aaltoRaja1', 'Aaltoraja 1, merkitsevä aallonkorkeus (m)'], ['aaltoRaja2', 'Aaltoraja 2, merkitsevä aallonkorkeus (m)'],
   ['matalikkoMin', 'Matalikko: huippukäyrä vähintään (m)'], ['matalikkoMax', 'Matalikko: huippukäyrä enintään (m)'],
   ['nousuM', 'Matalikko muuten: nousu ympäristöstä vähintään (m)']
@@ -430,6 +433,7 @@ function oletukset() {
       jyrkkaHs: 0.3, jyrkkyysRaja: 5,   // v29: Hannu 14.11. "0.3 m mukavuus kärsii"; 5 % = arvio, säädettävä
       vaylaSyvyys: 10,                  // v30: Hannu 15.11. "väyliä käytetään 10–20 m vedelle asti", oletus 10 m
       vastavirtaRaja: 15,               // v30: arvio (≈ Tp 2 s ja 0,1 m/s), säädettävä
+      suoraMatala: 6, suoraPaino: 1.5,  // v32: Hannu 15.11. "Parempi väyläpainotteinen"; arvoja ei kalibroitu
       merisaaPuhe: true, puheAani: '',
       aaltoRaja1: 0.35, aaltoRaja2: 0.5,   // Hannu 13.11.: merkitsevä aallonkorkeus
       matalikkoMin: 10, matalikkoMax: 20, nousuM: 5 });   // Hannu 13.11.: "10 m matalikko–20 m tai poikkeaa ympäristöstä merkittävästi" (5 m = oletus)
@@ -1736,7 +1740,8 @@ function vaylaVerkko() {
 function laskeReitti(piste, kohde) {
   if (piste.tyyppi === 'turva') return Reitti.suora(piste, kohde, syvyys);
   const alku = piste.kautta || piste;
-  const r = Reitti.reitti({ satama: alku, kohde, vaylat, syvyys, rajaSyvyys: isFinite(asetukset.vaylaSyvyys) ? asetukset.vaylaSyvyys : 10, verkko: vaylaVerkko() });
+  const r = Reitti.reitti({ satama: alku, kohde, vaylat, syvyys, rajaSyvyys: isFinite(asetukset.vaylaSyvyys) ? asetukset.vaylaSyvyys : 10, verkko: vaylaVerkko(),
+                            matalaRaja: asetukset.suoraMatala, suoraPaino: asetukset.suoraPaino });   // v32: väyläpainotteinen
   if (piste.kautta) {
     const lisa = Reitti.etaisyysM(piste.lat, piste.lon, alku.lat, alku.lon);
     r.pisteet = [[piste.lat, piste.lon]].concat(r.pisteet); r.m += lisa; r.vaylaM += lisa; r.kautta = piste.kautta.teksti || (piste.kautta.nimi + ' kautta');
@@ -1908,7 +1913,8 @@ function puheMin(m) { if (m < 90) return `${Math.round(m)} minuuttia`; const h =
 function merisaaHuomiot(d) {
   const o = [];
   if (d.piste) o.push(`${d.tyyppi === 'meno' ? 'Lähtöpiste' : 'Paluupiste'}: ${d.piste.piste.nimi} (${d.piste.syy}).`);
-  if (d.reitti) o.push(d.reitti.tapa === 'vayla' ? `Reitti: ${d.reitti.kautta ? d.reitti.kautta + ', ' : ''}väylä ${luku(d.reitti.vaylaM / 1000)} km ${luku(d.reitti.kayra, 0)} m:n käyrälle, suoraan ${luku(d.reitti.suoraM / 1000)} km.`
+  if (d.reitti) o.push(d.reitti.tapa === 'vayla' ? `Reitti: ${d.reitti.kautta ? d.reitti.kautta + ', ' : ''}väylä ${luku(d.reitti.vaylaM / 1000)} km` +
+      (d.reitti.syvaan ? ` (${luku(d.reitti.kayra, 0)} m:n käyrä ylitetty)` : '') + `, suoraan ${luku(d.reitti.suoraM / 1000)} km.`
     : d.reitti.tapa === 'turva' ? 'Reitti: suoraan turvallisen veden pisteestä.' : 'Reitti: suora viiva.');
   o.push('Aaltomallin ruutu ~2 km: salmissa ja rannan lähellä paikallinen aallokko voi poiketa. Jyrkkyys Tm-1,0:sta kuten kartalla; vastavirta huippujaksosta' +
     (d.aallot && d.aallot.maxHs && d.aallot.maxHs.tpArvio ? ' (arvio 1,107 × Tm-1,0)' : '') + '. Ei navigointikäyttöön.');
