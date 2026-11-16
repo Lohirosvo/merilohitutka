@@ -395,7 +395,7 @@
 <script src="malli.js?v=25"></script>
 <script src="fmi.js?v=14"></script>
 <script src="nopeus.js?v=20"></script>
-<script src="kartta.js?v=32"></script>
+<script src="kartta.js?v=33"></script>
 <script src="sillat.js?v=2"></script>
 <script src="silakka.js?v=3"></script>
 <script src="reitti.js?v=9"></script>
@@ -1051,7 +1051,7 @@ function piirraMeriTila() {
   if (nousuTeksti) osat.push(nousuTeksti);       // v28
   if (offlineTeksti) osat.push(offlineTeksti);   // v26
   const silT = !!valittuAlue.silakka;   // v45: silakan valomallin lähteet todisteen tasoon
-  osat.push('Todisteen taso: malli (lämpö, lohikerros, virta, aalto' + (silT ? ', valon vaimennus, mallin pohja' : '') + ')' + (silT ? ', merikartta (pohjan syvyysväli käyristä)' : '') + ', satelliitti (SST), sääennuste (tuuli'
+  osat.push('Todisteen taso: malli (lämpö, lohikerros, virta, aalto' + (silT ? ', valon vaimennus, mallin pohja' : '') + ')' + (silT ? ', merikartta (pohjan arvio syvyyskäyristä)' : '') + ', satelliitti (SST), sääennuste (tuuli'
     + (silT ? ', pilvisyys' : '') + ')' + (silT ? ', laskettu (silakan valokerros: valosta laskettu työoletus, ei havaintoa eikä kaikuluotainvertailua)' : '')
     + '. Ennusteen tarkkuus heikkenee loppua kohti. E.U. Copernicus Marine Service Information.');
   el.textContent = osat.join(' · ');
@@ -1709,25 +1709,24 @@ function silakkaArvio(lat, lon, t) {
   const b = nakyma && nakyma.bgc, pl = pohjaLahde();
   const kd490 = b && b.kd ? KarttaMalli.lahinArvo(b, 'kd', 0, lat, lon) : NaN, zsd = b && b.zsd ? KarttaMalli.lahinArvo(b, 'zsd', 0, lat, lon) : NaN;
   const malli = pl ? KarttaMalli.lahinArvo(pl, 'syv', 0, lat, lon) : NaN;
-  // v46: merikartan käyristä syvyysväli (sisin suljettu käyrä); mallin pohja rajataan väliin, koska mallin ruutu
-  // (noin 1 mpk) ei näe matalikkoja. Ilman varmaa väliä käytetään mallin pohjaa kuten ennen.
-  const kv = matalikkoTulos && KarttaMalli.pohjaKayrista ? KarttaMalli.pohjaKayrista(matalikkoTulos, lat, lon) : null;
-  const vali = kv && isFinite(kv.min) ? kv : null;
-  let pohja = malli;
-  if (vali) pohja = isFinite(malli) ? Math.min(Math.max(malli, vali.min), vali.max) : vali.max;
-  const a = Silakka.arvio({ lat, lon, t, kd490, zsd, oletusKd: al.silakka.kdOletus, pohja, pilvi: pilviPisteessa(lat, lon, t) });
-  if (a) { a.pohjaMalli = malli; a.pohjaKartta = kv; }
+  // v46–v47: pohja merikartan käyristä (kartta.js pohjaArvio), koska mallin ruutu (noin 1 mpk) ei näe matalikkoja eikä
+  // jyrkkiä rinteitä. Ilman käyriä mallin pohja kuten ennen.
+  const pa = syvyys && KarttaMalli.pohjaArvio ? KarttaMalli.pohjaArvio(syvyys, matalikkoTulos, lat, lon, malli) : { arvio: malli, tapa: 'malli', malli };
+  const a = Silakka.arvio({ lat, lon, t, kd490, zsd, oletusKd: al.silakka.kdOletus, pohja: pa.arvio, pilvi: pilviPisteessa(lat, lon, t) });
+  if (a) { a.pohjaMalli = malli; a.pohjaArvio = pa; }
   return a;
 }
-/** v46: pohjan lähde napautustekstiin. */
+/** v46–v47: pohjan lähde napautustekstiin. */
 function pohjaOsa(a, m) {
-  const kv = a.pohjaKartta, mp = a.pohjaMalli, mal = isFinite(mp) ? `malli ${m(mp)} m` : 'mallin pohja puuttuu';
-  if (kv && isFinite(kv.min)) {
-    const vali = isFinite(kv.max) ? `${luku(kv.min, 0)}–${luku(kv.max, 0)} m` : `yli ${luku(kv.min, 0)} m`;
-    return ` · pohja ${m(a.pohja)} m (merikartta ${vali}, ${mal})`;
-  }
+  const pa = a.pohjaArvio || { tapa: 'malli' }, mp = a.pohjaMalli, mal = isFinite(mp) ? `malli ${m(mp)} m` : 'mallin pohja puuttuu';
+  const kayra = (d, r) => `${luku(d, 0)} m käyrä ${etaisyys(r)}`;
+  if (pa.tapa === 'malli') return isFinite(a.pohja) ? ` · mallin pohja ${m(a.pohja)} m (merikartasta ei käyriä 3 km:n sisällä)` : '';
   if (!isFinite(a.pohja)) return '';
-  return ` · mallin pohja ${m(a.pohja)} m (merikartasta ${kv ? 'ei varmaa väliä' : 'ei suljettua käyrää ympärillä'})`;
+  const alku = ` · pohja ~${m(a.pohja)} m (merikartta: `;
+  if (pa.tapa === 'rengas' || pa.tapa === 'kayrat') return alku + `${kayra(pa.A, pa.rA)}, ${kayra(pa.B, pa.rB)}; ${mal})`;
+  if (pa.tapa === 'rengasRaja') return alku + `${isFinite(pa.B) ? luku(pa.A, 0) + '–' + luku(pa.B, 0) + ' m' : 'yli ' + luku(pa.A, 0) + ' m'} suljetun käyrän sisällä; ${mal})`;
+  if (pa.tapa === 'kayraRaja') return alku + `${kayra(pa.A, pa.rA)}, ${luku(pa.B, 0)} m käyrää ei 3 km:n sisällä; ${mal})`;
+  return alku + `${pa.syva ? 'syvempi' : 'matalampi'} kuin ${kayra(pa.A, pa.rA)}; ${mal})`;   // yksiKayra
 }
 function silakkaTeksti(lat, lon) {
   if (!kartta || !kartta.tasot.silakka || !window.Silakka) return '';
@@ -1741,7 +1740,8 @@ function silakkaTeksti(lat, lon) {
   const kd = a.kd, lahde = kd.lahde === 'kd' ? `Copernicus kd ${luku(kd.raaka, 2)} klo 12 UTC → PAR`
     : kd.lahde === 'zsd' ? `Copernicus Secchi ${luku(kd.raaka, 1)} m` : 'oletus, Copernicus-arvoa ei ole';
   const lyhyt = v => !v ? '–' : v.tila === 'hajallaan' ? 'hajallaan' : `${m(v.yla)}–${m(v.ala)} m`;
-  const paa = a.ennuste ? `${kerros(a.ennuste, `pilvisyys ${luku(a.pilvi, 0)} % (IL)`)} (kirkas ${lyhyt(a.kirkas)}, täysin pilvinen ${lyhyt(a.pilvinen)})`
+  const paa = a.kirkas && a.kirkas.tila === 'hajallaan' ? 'hajallaan pintakerroksessa (pinnan valo alle 0,1 lx kirkkaallakin säällä)'   // v47: kerran
+    : a.ennuste ? `${kerros(a.ennuste, `pilvisyys ${luku(a.pilvi, 0)} % (IL)`)} (kirkas ${lyhyt(a.kirkas)}, täysin pilvinen ${lyhyt(a.pilvinen)})`
     : `${kerros(a.kirkas, 'kirkas')}; ${kerros(a.pilvinen, 'täysin pilvinen')} (pilvisyysennustetta ei ole)`;
   return `Silakka, valomalli ${klo(t)} (${a.vaihe}, aurinko ${luku(a.h, 1)}°): ${paa}`
     + ` · Kd(PAR) ${luku(kd.kd, 2)} m⁻¹ (${lahde})` + pohjaOsa(a, m)

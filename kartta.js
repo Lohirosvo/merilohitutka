@@ -514,6 +514,58 @@
     const yla = tasot.find(d => d > r.d);
     return { min: r.d, max: yla === undefined ? Infinity : yla, rengas: r.d, tyyppi: 'kuoppa' };
   }
+  /** Lähimmän käyrän etäisyys (m) jokaiselle käyrätasolle, enintään rajaM: { syvyys: m }. */
+  function kayratTasoittain(S, lat, lon, rajaM) {
+    const tulos = {};
+    if (!S || !S.tasot) return tulos;
+    rajaM = rajaM || 3000;
+    const kx = 111320 * Math.cos(lat * Math.PI / 180), ky = 110574, dLa = rajaM / ky, dLo = rajaM / kx;
+    for (const taso of S.tasot) {
+      let paras = Infinity;
+      for (const v of taso.viivat) {
+        if (v.la1 < lat - dLa || v.la0 > lat + dLa || v.lo1 < lon - dLo || v.lo0 > lon + dLo) continue;
+        const p = v.ll;
+        for (let i = 0; i + 3 < p.length; i += 2) {
+          const ax = (p[i + 1] - lon) * kx, ay = (p[i] - lat) * ky, bx = (p[i + 3] - lon) * kx, by = (p[i + 2] - lat) * ky;
+          const dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy;
+          const t = L2 > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / L2)) : 0;
+          const d = Math.hypot(ax + t * dx, ay + t * dy);
+          if (d < paras) paras = d;
+        }
+      }
+      if (paras <= rajaM) tulos[taso.syvyys] = paras;
+    }
+    return tulos;
+  }
+  /** Pohjan arvio merikartan käyristä (v47). M = matalikot()-tulos, malli = mallin pohja (m) tai NaN.
+   *  1) Piste suljetun käyrän sisällä (pohjaKayrista): väli tiedetään → arvio väliltä etäisyyksillä painottaen:
+   *     A + (B − A) · rA / (rA + rB), A ja B välin käyrätasot, rA ja rB lähimmän käyrän etäisyys kummallakin tasolla.
+   *  2) Muuten lähin käyrä (taso L0): puoli (syvä vai matala) päätellään mallin pohjasta [A], toinen taso = viereinen
+   *     käyrätaso sillä puolella ja sama painotus. Oletus [A]: pohja viettää käyrien välillä tasaisesti.
+   *  Toisen tason käyrää ei rajaM:n sisällä → mallin pohja rajattuna tasojen väliin. Ei käyriä tai ei mallia → malli.
+   *  Palauttaa { arvio, tapa, A, B, rA, rB, malli, kv }. tapa: 'rengas' | 'rengasRaja' | 'kayrat' | 'kayraRaja' |
+   *  'yksiKayra' | 'malli'. */
+  function pohjaArvio(S, M, lat, lon, malli, rajaM) {
+    rajaM = rajaM || 3000;
+    const et = kayratTasoittain(S, lat, lon, rajaM), kv = pohjaKayrista(M, lat, lon);
+    const tasot = (M && M.tasot) || [];
+    const t = { malli, kv };
+    const valiin = (A, B) => et[A] >= 0 && et[B] >= 0 ? { arvio: A + (B - A) * et[A] / (et[A] + et[B]), A, B, rA: et[A], rB: et[B] } : null;
+    const rajaa = (x, a, b) => Math.min(Math.max(x, Math.min(a, b)), Math.max(a, b));
+    if (kv && isFinite(kv.min)) {
+      const v = isFinite(kv.max) && kv.min > 0 ? valiin(kv.min, kv.max) : null;
+      if (v) return Object.assign(t, v, { tapa: 'rengas' });
+      return Object.assign(t, { arvio: isFinite(malli) ? rajaa(malli, kv.min, kv.max) : (isFinite(kv.max) ? kv.max : NaN), tapa: 'rengasRaja', A: kv.min, B: kv.max });
+    }
+    let L0, r0 = Infinity;
+    for (const k of Object.keys(et)) if (et[k] < r0) { r0 = et[k]; L0 = +k; }
+    if (L0 === undefined || !isFinite(malli)) return Object.assign(t, { arvio: malli, tapa: 'malli' });
+    const syva = malli >= L0, L1 = syva ? tasot.find(d => d > L0) : tasot.filter(d => d < L0).pop();
+    if (L1 === undefined) return Object.assign(t, { arvio: syva ? Math.max(malli, L0) : Math.min(malli, L0), tapa: 'yksiKayra', A: L0, rA: r0, syva });
+    const v = valiin(L0, L1);
+    if (v) return Object.assign(t, v, { tapa: 'kayrat' });
+    return Object.assign(t, { arvio: rajaa(malli, L0, L1), tapa: 'kayraRaja', A: L0, B: L1, rA: r0 });
+  }
   /** Matalikko pisteessä: pienin, jonka huippurenkaan sisällä piste on (tai null). */
   function matalikkoPisteessa(lista, lat, lon) {
     let paras = null;
@@ -1473,7 +1525,7 @@
   const KarttaMalli = { lonX, latY, xLon, yLat, kayra, tasot, arvovali, lahinIndeksi, lahinArvo, lahinAika, virta, akseliArvo,
                         kerros, lohiLuokka, lohiMarginaali, lohiPehmeys, profiiliPisteessa, puraSyvyys, lahinKayra, puraVaylat, lahinVayla, tuuliVari,
                         havainnotPisteessa, havaintoTiedot, havaintoVari, etaisyysViivaan, jasennaSaaliit, aaltoLuokka, aallonPituus, aaltoJyrkkyys, onJyrkka,
-                        jalkiOsat, jalkiAlfa, lahinJalki, ketjuta, matalikot, matalikkoPisteessa, renkaanSisalla, pohjaKayrista };
+                        jalkiOsat, jalkiAlfa, lahinJalki, ketjuta, matalikot, matalikkoPisteessa, renkaanSisalla, pohjaKayrista, kayratTasoittain, pohjaArvio };
   if (typeof module !== 'undefined' && module.exports) module.exports = KarttaMalli;
   else { root.KarttaMalli = KarttaMalli; root.Kartta = Kartta; }
 })(typeof window !== 'undefined' ? window : this);
