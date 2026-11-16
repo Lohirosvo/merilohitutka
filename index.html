@@ -1050,7 +1050,10 @@ function piirraMeriTila() {
   if (meri.virheet && meri.virheet.length) osat.push('virheet: ' + meri.virheet.join(' | '));
   if (nousuTeksti) osat.push(nousuTeksti);       // v28
   if (offlineTeksti) osat.push(offlineTeksti);   // v26
-  osat.push('Todisteen taso: malli (lämpö, lohikerros, virta, aalto), satelliitti (SST), sääennuste (tuuli). Ennusteen tarkkuus heikkenee loppua kohti. E.U. Copernicus Marine Service Information.');
+  const silT = !!valittuAlue.silakka;   // v45: silakan valomallin lähteet todisteen tasoon
+  osat.push('Todisteen taso: malli (lämpö, lohikerros, virta, aalto' + (silT ? ', valon vaimennus, mallin pohja' : '') + '), satelliitti (SST), sääennuste (tuuli'
+    + (silT ? ', pilvisyys' : '') + ')' + (silT ? ', laskettu (silakan valokerros: valosta laskettu työoletus, ei havaintoa eikä kaikuluotainvertailua)' : '')
+    + '. Ennusteen tarkkuus heikkenee loppua kohti. E.U. Copernicus Marine Service Information.');
   el.textContent = osat.join(' · ');
 }
 function piirraPaivat() {
