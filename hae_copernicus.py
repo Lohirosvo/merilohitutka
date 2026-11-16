@@ -18,6 +18,9 @@ v8: ajaa ensin myös Traficomin syvyyskäyrien päivityksen (hae_syvyys.py, data
 v9: lisäksi Väyläviraston väylät (hae_vaylat.py, data/vaylat.json) ja IL:n tuuliennuste kartan
 pisteisiin (hae_tuuli.py, päivätiedostoihin). Näiden epäonnistuminen ei vaikuta Copernicus-hakuun.
 
+v44 (16.11.2026): silakka-alueille myös IL:n kokonaispilvisyys tuulipisteisiin (hae_tuuli.hae_pilvi, päivätiedoston
+tuuli.pc, %). Virhe ei vaikuta tuuleen.
+
 v43 (Hannu 16.11.2026, silakkatietopohja v006 kohta 1.1): alueille, joilla alueet.js:ssä on "silakka"-kohta (nyt vain Luoto),
 lisäksi valon vaimennus BGC-mallista (kd ja Secchi zsd, hetkiarvo klo 12 UTC päiväaineistossa) päivätiedostoihin ja
 mallin pohjan syvyys (deptho, staattinen) hakemistoon. Virhe ei vaikuta muihin hakuihin.
@@ -245,7 +248,7 @@ def rakenna(phy, wav, sst, luotu, virheet, syvyys=None, tuuli=None, vaylat=None,
         it = t_paivat.get(pvm, [])
         if it:
             sis["tuuli"] = {"ajat": [tuuli["ajat"][i] for i in it],
-                            **{k: [tuuli[k][i] for i in it] for k in ("ws", "wd", "wg")}}
+                            **{k: [tuuli[k][i] for i in it] for k in ("ws", "wd", "wg", "pc") if k in tuuli}}
         nimi = tiedostonimi(pvm)
         tiedostot[nimi] = sis
         hakemisto["paivat"].append({"pvm": pvm, "tiedosto": nimi, "ajat": sis["ajat"]})
@@ -541,6 +544,16 @@ def hae_alue(alue, perus, nyt, luotu):
         if tvirhe:
             virheet.append(f"tuuli: {tvirhe}")
         print(f"tuuli: {'OK' if tuuli else 'VIRHE'}, {time.monotonic() - alku:.0f} s")
+        if tuuli and alue.get("silakka"):   # v44: pilvisyys silakan valomalliin, vain silakka-alueille
+            try:
+                pc, pvirhe = hae_tuuli.hae_pilvi(tuuli["ajat"], tuuli["pisteet"])
+                if pc:
+                    tuuli["pc"] = pc
+                else:
+                    virheet.append(f"pilvi: {pvirhe}")
+            except Exception as e:  # noqa: BLE001
+                traceback.print_exc()
+                virheet.append(f"pilvi: {str(e)[:200]}")
     except Exception as e:  # noqa: BLE001
         traceback.print_exc()
         virheet.append(f"tuuli: {str(e)[:200]}")

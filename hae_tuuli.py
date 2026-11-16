@@ -6,6 +6,10 @@ tuulen kiinteisiin pisteisiin merellä, 3 h välein koko Copernicus-jakson ajall
 Lähde: Ilmatieteen laitos, avoin data (CC BY 4.0). Sama kysely kuin sovelluksen paluuikkunassa (fmi.js),
 joten puuskaparametri HourlyMaximumGust on todettu toimivaksi 9.11.2026.
 Ennusteen todellinen pituus tulostuu lokiin (ei tarkistettu ennen ensimmäistä ajoa).
+
+v44 (16.11.2026): hae_pilvi = kokonaispilvisyys (TotalCloudCover, %) samoihin pisteisiin ja aikoihin silakan valomallia
+varten. Oma kysely: jos parametrin nimi ei kelpaa toimitetulle ennusteelle, tuulihaku ei kärsi. Nimi on FMI:n
+avoimen datan ohjeissa ennusteparametrina (tarkistettu 16.11.2026), toimitetun ennusteen osalta ensimmäinen ajo kertoo.
 """
 import math
 import re
@@ -68,6 +72,49 @@ def rakenna(rivit, pisteet):
             continue
         taulu[nimi[param]][ia[aika]][_lahin(pisteet, lat, lon)] = round(v, 1) if param != "WindDirection" else round(v)
     return {"ajat": ajat, **taulu}
+
+
+PILVIPARAMETRI = "TotalCloudCover"
+
+
+def hae_pilvi(ajat, pisteet, loki=print, pyynto=None):
+    """Kokonaispilvisyys (%) tuulen aikoihin ja pisteisiin. Palauttaa (pc[aika][piste], None) tai (None, virhe)."""
+    pyynto = pyynto or _pyynto
+    pisteet = [tuple(p) for p in pisteet]
+    perus = {"service": "WFS", "version": "2.0.0", "request": "getFeature", "storedquery_id": KYSELY,
+             "parameters": PILVIPARAMETRI, "starttime": ajat[0], "endtime": ajat[-1], "timestep": "180"}
+    rivit, virhe = [], None
+    try:
+        rivit = jasenna(pyynto(dict(perus, latlons=",".join(f"{la},{lo}" for la, lo in pisteet))))
+        if len({(round(r[0], 2), round(r[1], 2)) for r in rivit}) < len(pisteet) // 2:
+            loki(f"pilvi: latlons palautti liian vähän pisteitä – haetaan piste kerrallaan")
+            rivit = []
+    except Exception as e:  # noqa: BLE001
+        virhe = str(e)[:200]
+        loki(f"pilvi: latlons-kysely ei onnistunut ({virhe})")
+        if "FMI:" in virhe:   # palvelin hylkäsi kyselyn (esim. parametrin nimi): piste kerrallaan ei auta
+            return None, virhe
+    if not rivit:
+        for la, lo in pisteet:
+            try:
+                rivit += jasenna(pyynto(dict(perus, latlon=f"{la},{lo}")))
+            except Exception as e:  # noqa: BLE001
+                virhe = str(e)[:200]
+                loki(f"pilvi: piste {la},{lo} epäonnistui: {virhe}")
+                if "FMI:" in virhe:
+                    break
+    ia = {a: i for i, a in enumerate(ajat)}
+    pc = [[None] * len(pisteet) for _ in ajat]
+    n = 0
+    for lat, lon, aika, param, v in rivit:
+        if param != PILVIPARAMETRI or v != v or aika not in ia:
+            continue
+        pc[ia[aika]][_lahin(pisteet, lat, lon)] = int(round(min(100.0, max(0.0, v))))
+        n += 1
+    if not n:
+        return None, virhe or "ei pilvisyysarvoja"
+    loki(f"pilvi: {n} arvoa ({sum(1 for r in pc if any(v is not None for v in r))}/{len(ajat)} aikaa)")
+    return pc, None
 
 
 def meripisteet(lat, lon, meri, tavoite=12):

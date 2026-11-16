@@ -397,7 +397,7 @@
 <script src="nopeus.js?v=20"></script>
 <script src="kartta.js?v=31"></script>
 <script src="sillat.js?v=2"></script>
-<script src="silakka.js?v=1"></script>
+<script src="silakka.js?v=2"></script>
 <script src="reitti.js?v=9"></script>
 <script src="ais.js?v=23"></script>
 <script>
@@ -1043,9 +1043,10 @@ function piirraMeriTila() {
   if (vaylat) osat.push(`Väylät: Väylävirasto, vesiväyläaineisto (CC BY 4.0). Ei navigointikäyttöön`);
   if (typeof aisTila === 'function' && aisTila()) osat.push(aisTila());
   if (typeof vesiTilaTeksti === 'function' && vesiTilaTeksti()) osat.push(vesiTilaTeksti());   // v35
-  if (meri.bgc || valittuAlue.silakka) osat.push(`Silakan valomalli (v43, vain ${valittuAlue.silakka ? valittuAlue.nimi : '–'}): valon vaimennus `
+  if (meri.bgc || valittuAlue.silakka) osat.push(`Silakan valomalli (v44, vain ${valittuAlue.silakka ? valittuAlue.nimi : '–'}): valon vaimennus `
     + (meri.bgc ? `Copernicus BGC ${meri.bgc.dataset} (${(meri.bgc.muuttujat || []).join(', ')}, ${meri.bgc.aika || 'klo 12 UTC'})` : 'ei vielä haettu (oletus Kd ' + luku(valittuAlue.silakka ? valittuAlue.silakka.kdOletus : NaN, 2) + ')')
-    + `, mallin pohja ${meri.pohja ? meri.pohja.dataset : 'puuttuu'}. Työoletuksia, ei kalibroitu`);
+    + `, mallin pohja ${meri.pohja ? meri.pohja.dataset : 'puuttuu'}`
+    + `, pilvisyys ${nakyma && nakyma.tuuli && nakyma.tuuli.pc ? 'IL:n toimitetusta ennusteesta' : 'ei tälle päivälle'} (valo × 1 − 0,75·n^3,4, Kasten–Czeplak). Työoletuksia, ei kalibroitu`);
   if (meri.virheet && meri.virheet.length) osat.push('virheet: ' + meri.virheet.join(' | '));
   if (nousuTeksti) osat.push(nousuTeksti);       // v28
   if (offlineTeksti) osat.push(offlineTeksti);   // v26
@@ -1688,12 +1689,23 @@ function pohjaLahde() {   // mallin pohja (m) lahinArvo-muotoon, puretaan kerran
     pohjaVarasto = { meri, lahde: { lat: meri.pohja.lat, lon: meri.pohja.lon, syv: [meri.pohja.syv.map(r => r.map(v => v === null ? null : v / k))] } }; }
   return pohjaVarasto.lahde;
 }
+/** v44: IL:n kokonaispilvisyys (%) lähimmästä tuulipisteestä lähimpään aikaan (enintään 3 h), muuten NaN. */
+function pilviPisteessa(lat, lon, t) {
+  const tu = nakyma && nakyma.tuuli;
+  if (!tu || !tu.pc || !tu.ajat || !tu.ajat.length) return NaN;
+  const ti = KarttaMalli.lahinAika(tu.ajat, t.getTime());
+  if (!(ti >= 0) || Math.abs(Date.parse(tu.ajat[ti]) - t.getTime()) > 3 * 3600000) return NaN;
+  let paras = -1, pd = Infinity;
+  tu.pisteet.forEach(([la, lo], i) => { const d = Malli.etaisyysKm(lat, lon, la, lo); if (d < pd) { pd = d; paras = i; } });
+  const v = tu.pc[ti] ? tu.pc[ti][paras] : null;
+  return v === null || v === undefined ? NaN : v;
+}
 function silakkaArvio(lat, lon, t) {
   const al = valittuAlue; if (!al.silakka || !window.Silakka) return null;
   const b = nakyma && nakyma.bgc, pl = pohjaLahde();
   const kd490 = b && b.kd ? KarttaMalli.lahinArvo(b, 'kd', 0, lat, lon) : NaN, zsd = b && b.zsd ? KarttaMalli.lahinArvo(b, 'zsd', 0, lat, lon) : NaN;
   const pohja = pl ? KarttaMalli.lahinArvo(pl, 'syv', 0, lat, lon) : NaN;
-  return Silakka.arvio({ lat, lon, t, kd490, zsd, oletusKd: al.silakka.kdOletus, pohja });
+  return Silakka.arvio({ lat, lon, t, kd490, zsd, oletusKd: al.silakka.kdOletus, pohja, pilvi: pilviPisteessa(lat, lon, t) });
 }
 function silakkaTeksti(lat, lon) {
   if (!kartta || !kartta.tasot.silakka || !window.Silakka) return '';
@@ -1706,7 +1718,10 @@ function silakkaTeksti(lat, lon) {
     : v.tila === 'pohja' ? `${nimi}: pohjan tuntumassa ${m(v.yla)}–${m(v.ala)} m` : `${nimi}: ${m(v.yla)}–${m(v.ala)} m, opt. ${m(v.opt)} m`;
   const kd = a.kd, lahde = kd.lahde === 'kd' ? `Copernicus kd ${luku(kd.raaka, 2)} klo 12 UTC → PAR`
     : kd.lahde === 'zsd' ? `Copernicus Secchi ${luku(kd.raaka, 1)} m` : 'oletus, Copernicus-arvoa ei ole';
-  return `Silakka, valomalli ${klo(t)} (${a.vaihe}, aurinko ${luku(a.h, 1)}°): ${kerros(a.kirkas, 'kirkas')}; ${kerros(a.pilvinen, 'pilvinen')}`
+  const lyhyt = v => !v ? '–' : v.tila === 'hajallaan' ? 'hajallaan' : `${m(v.yla)}–${m(v.ala)} m`;
+  const paa = a.ennuste ? `${kerros(a.ennuste, `pilvisyys ${luku(a.pilvi, 0)} % (IL)`)} (kirkas ${lyhyt(a.kirkas)}, täysin pilvinen ${lyhyt(a.pilvinen)})`
+    : `${kerros(a.kirkas, 'kirkas')}; ${kerros(a.pilvinen, 'täysin pilvinen')} (pilvisyysennustetta ei ole)`;
+  return `Silakka, valomalli ${klo(t)} (${a.vaihe}, aurinko ${luku(a.h, 1)}°): ${paa}`
     + ` · Kd(PAR) ${luku(kd.kd, 2)} m⁻¹ (${lahde})` + (isFinite(a.pohja) ? ` · mallin pohja ${m(a.pohja)} m` : '')
     + ' · työoletus 10–1–0,1 lx, ei lämpö-, happi- eikä vaihemallia';
 }
