@@ -684,6 +684,7 @@
       if (d) {
         if (this.tasot.lampo && d.phy) this._kayrat(d.phy, 'lampo', this.aika, false);
         if (this.tasot.sst && d.sst) this._kayrat(d.sst, 'lampo', 0, true);
+        if (this.tasot.lohi && d.phy && d.phy.profiili) this._lohiRaja();   // v42: lämpökäyrien päälle, syvyyskäyrien alle
       }
       if (this.tasot.syvyys && this.syvyys) this._syvyys();   // lämpökäyrien päälle: 20 m ja 6 m erottuvat
       if (this.tasot.matalikot && this.matalikot.length) this._matalikot();
@@ -903,11 +904,19 @@
         const c = VARI[r.l];
         if (c && r.s > 0) { g.fillStyle = `rgba(${c[0]},${c[1]},${c[2]},${(c[3] * r.s).toFixed(3)})`; g.fillRect(x1, y1, x2 - x1 + 0.6, y2 - y1 + 0.6); }
       }
-      // v25: rajaviiva (lämpöväli loppuu koko vesipatsaasta): sininen = liian kylmä puoli, punainen = liian lämmin puoli
-      g.save(); g.lineCap = 'round'; g.lineJoin = 'round';
+    }
+
+    /** v25: rajaviiva (lämpöväli loppuu koko vesipatsaasta): sininen = liian kylmä puoli, punainen = liian lämmin puoli.
+     *  v42 (Hannu 16.11.: "Nyt ne menee lämpökäyrien alla … Yhtäaikaa pitäisi kuitenkin näkyä"): piirretään lämpökäyrien päälle;
+     *  kun lämpökäyrät ovat näkyvissä, katkoviivana, jolloin samalla kohdalla oleva lämpökäyrä näkyy katkojen välistä. */
+    _lohiRaja() {
+      const v = this._lohiRuudut(); if (!v) return;
+      const g = this.ctx, katko = !!(this.tasot.lampo && this.data && this.data.phy);
+      g.save(); g.lineCap = katko ? 'butt' : 'round'; g.lineJoin = 'round';
+      g.setLineDash(katko ? [12, 7] : []);
       for (const [avain, vari] of [['kylma', LOHI_RAJA.kylma], ['lammin', LOHI_RAJA.lammin]]) {
         const janat = v.rajat[avain]; if (!janat.length) continue;
-        for (const [lev, c] of [[4.2, 'rgba(0,0,0,0.55)'], [2, vari]]) {
+        for (const [lev, c] of [[5, 'rgba(0,0,0,0.6)'], [2.8, vari]]) {
           g.strokeStyle = c; g.lineWidth = lev; g.beginPath();
           for (const [la1, lo1, la2, lo2] of janat) { const [xa, ya] = this.ruutu(la1, lo1), [xb, yb] = this.ruutu(la2, lo2); g.moveTo(xa, ya); g.lineTo(xb, yb); }
           g.stroke();
