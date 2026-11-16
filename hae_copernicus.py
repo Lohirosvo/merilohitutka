@@ -18,6 +18,9 @@ v8: ajaa ensin myös Traficomin syvyyskäyrien päivityksen (hae_syvyys.py, data
 v9: lisäksi Väyläviraston väylät (hae_vaylat.py, data/vaylat.json) ja IL:n tuuliennuste kartan
 pisteisiin (hae_tuuli.py, päivätiedostoihin). Näiden epäonnistuminen ei vaikuta Copernicus-hakuun.
 
+v48 (16.11.2026): silakka-alueille myös pohjan lämpö (bottomT) ja sekoittumiskerroksen paksuus (mlotst) PHY-mallista
+(tuntiaineisto 3 h välein, varalla päiväaineisto) päivätiedostoihin (kerros.pt °C × 100, kerros.mld m × 10). Oma haku.
+
 v44 (16.11.2026): silakka-alueille myös IL:n kokonaispilvisyys tuulipisteisiin (hae_tuuli.hae_pilvi, päivätiedoston
 tuuli.pc, %). Virhe ei vaikuta tuuleen.
 
@@ -68,11 +71,17 @@ LAHTEET = {
     "bgc": dict(tuote="BALTICSEA_ANALYSISFORECAST_BGC_003_007",
                 ehdokkaat=["cmems_mod_bal_bgc_anfc_P1D-m"],
                 muuttujat=["kd", "zsd"]),
+    # v48: pohjan lämpö ja sekoittumiskerros (2D). Tuotesivun mukaan tunti-, päivä- ja kuukausiaineistoissa; tuntiaineisto
+    # ensin (3 h välein kuten lämpö), varalla päiväaineisto. mlotst = "Ocean mixed layer thickness defined by density".
+    "kerros": dict(tuote="BALTICSEA_ANALYSISFORECAST_PHY_003_006",
+                   ehdokkaat=["cmems_mod_bal_phy_anfc_PT1H-i", "cmems_mod_bal_phy_anfc_P1D-m"],
+                   muuttujat=["bottomT", "mlotst"]),
     "pohja": dict(tuote="BALTICSEA_ANALYSISFORECAST_PHY_003_006",
                   ehdokkaat=["cmems_mod_bal_phy_anfc_static", "cmems_mod_bal_bgc_anfc_static"],
                   muuttujat=["deptho"]),
 }
 KD_KERROIN, ZSD_KERROIN, POHJA_KERROIN = 1000, 100, 10   # v43: kd 0,001 m-1, zsd cm, pohja dm
+PT_KERROIN, MLD_KERROIN = 100, 10                         # v48: pohjan lämpö 0,01 °C, sekoittumiskerros dm
 
 
 # ---------------------------------------------------------------- muunnos (testattava ilman verkkoa)
@@ -166,7 +175,7 @@ def tiedostonimi(pvm):
     return "p_" + pvm.replace("-", "") + ".json"
 
 
-def rakenna(phy, wav, sst, luotu, virheet, syvyys=None, tuuli=None, vaylat=None, alue=None, bgc=None, pohja=None):
+def rakenna(phy, wav, sst, luotu, virheet, syvyys=None, tuuli=None, vaylat=None, alue=None, bgc=None, pohja=None, kerros=None):
     """Kokoaa hakemiston ja päivätiedostot.
     phy = dict(ajat, lat, lon, syvyydet, thetao[aika, syvyys, lat, lon], u[aika, lat, lon], v, dataset,
                u3/v3[aika, lat, lon] = virta VIRTA_SYV m:ssä tai None)
@@ -207,6 +216,12 @@ def rakenna(phy, wav, sst, luotu, virheet, syvyys=None, tuuli=None, vaylat=None,
                             "kerroin": {"kd": KD_KERROIN, "zsd": ZSD_KERROIN}, "aika": "hetkiarvo klo 12 UTC",
                             "muuttujat": [k for k in ("kd", "zsd") if bgc.get(k) is not None]}
         b_paivat = paivittain(bgc["ajat"])
+    k_paivat = {}
+    if kerros:   # v48: pohjan lämpö ja sekoittumiskerros; ruudukko hakemistoon, arvot päivätiedostoihin
+        hakemisto["kerros"] = {"dataset": kerros["dataset"], "lat": pyorista(kerros["lat"], 4), "lon": pyorista(kerros["lon"], 4),
+                               "kerroin": {"pt": PT_KERROIN, "mld": MLD_KERROIN},
+                               "muuttujat": [k for k in ("pt", "mld") if kerros.get(k) is not None]}
+        k_paivat = paivittain(kerros["ajat"])
     if pohja:   # v43: mallin pohjan syvyys (m × 10)
         hakemisto["pohja"] = {"dataset": pohja["dataset"], "lat": pyorista(pohja["lat"], 4), "lon": pyorista(pohja["lon"], 4),
                               "kerroin": POHJA_KERROIN, "syv": kokonaisluvut(pohja["deptho"], POHJA_KERROIN)}
@@ -245,6 +260,13 @@ def rakenna(phy, wav, sst, luotu, virheet, syvyys=None, tuuli=None, vaylat=None,
                 if bgc.get(k) is not None:
                     b[k] = kokonaisluvut(np.asarray(bgc[k])[ib[0]], kerroin)
             sis["bgc"] = b
+        ik = k_paivat.get(pvm, [])
+        if ik:
+            k = {"ajat": [iso(np.datetime64(kerros["ajat"][i])) for i in ik]}
+            for nimi, kerroin in (("pt", PT_KERROIN), ("mld", MLD_KERROIN)):
+                if kerros.get(nimi) is not None:
+                    k[nimi] = kokonaisluvut(np.asarray(kerros[nimi])[ik], kerroin)
+            sis["kerros"] = k
         it = t_paivat.get(pvm, [])
         if it:
             sis["tuuli"] = {"ajat": [tuuli["ajat"][i] for i in it],
@@ -377,6 +399,28 @@ def hae_bgc(nyt, alue=None):
             tulos[k] = pinta2d(ds[k])
     print("bgc:", ", ".join(f"{k} {np.nanmin(tulos[k]):.3f}–{np.nanmax(tulos[k]):.3f}" for k in ("kd", "zsd")
                              if tulos[k] is not None and np.isfinite(tulos[k]).any()))
+    return tulos
+
+
+def hae_kerros(nyt, alue=None):
+    """v48: pohjan lämpö (bottomT) ja sekoittumiskerros (mlotst), sama aikajakso kuin lämmöllä; 3 h välein.
+    Jos molemmat yhdessä eivät onnistu, haetaan kumpikin erikseen. Palauttaa dict(dataset, ajat, lat, lon, pt, mld)."""
+    lahde, alku, loppu = LAHTEET["kerros"], nyt - timedelta(hours=TUNNIT_TAAKSE), nyt + timedelta(hours=TUNNIT_ETEEN)
+    virhe = None
+    for muuttujat in (["bottomT", "mlotst"], ["bottomT"], ["mlotst"]):
+        try:
+            ds, ds_id = avaa(dict(lahde, muuttujat=muuttujat), alku, loppu, alue=alue)
+            break
+        except Exception as e:  # noqa: BLE001
+            virhe = e
+            print("kerros: muuttujat", muuttujat, "eivät onnistuneet:", str(e)[:300], file=sys.stderr)
+    else:
+        raise RuntimeError(f"kerros: {virhe}")
+    ds = ds.isel(time=tasatunnit(ds["time"].values))
+    tulos = dict(dataset=ds_id, ajat=ds["time"].values, lat=ds["latitude"].values, lon=ds["longitude"].values,
+                 pt=pinta2d(ds["bottomT"]) if "bottomT" in ds else None, mld=pinta2d(ds["mlotst"]) if "mlotst" in ds else None)
+    print("kerros:", ds_id, len(tulos["ajat"]), "aikaa;", ", ".join(f"{k} {np.nanmin(tulos[k]):.1f}–{np.nanmax(tulos[k]):.1f}"
+                                                                    for k in ("pt", "mld") if tulos[k] is not None and np.isfinite(tulos[k]).any()))
     return tulos
 
 
@@ -557,10 +601,11 @@ def hae_alue(alue, perus, nyt, luotu):
     except Exception as e:  # noqa: BLE001
         traceback.print_exc()
         virheet.append(f"tuuli: {str(e)[:200]}")
-    bgc = pohja = None
+    bgc = pohja = kerros = None
     vanha_pohja = vanha.get("pohja") if vanha else None
     if alue.get("silakka"):   # v43: silakan valokerros (kohta 1.1): valon vaimennus; mallin pohja kerran (ei muutu)
-        hakijat = [("bgc", lambda: hae_bgc(nyt, rajat))] + ([] if vanha_pohja else [("pohja", lambda: hae_pohja(rajat))])
+        hakijat = [("bgc", lambda: hae_bgc(nyt, rajat)), ("kerros", lambda: hae_kerros(nyt, rajat))] \
+            + ([] if vanha_pohja else [("pohja", lambda: hae_pohja(rajat))])
         for nimi, hakija in hakijat:
             alku = time.monotonic()
             try:
@@ -569,6 +614,9 @@ def hae_alue(alue, perus, nyt, luotu):
                     bgc = t
                     print(f"bgc: OK {t['dataset']}, {len(t['ajat'])} päivää, {len(t['lat'])}x{len(t['lon'])} ruutua, "
                           f"{time.monotonic() - alku:.0f} s")
+                elif nimi == "kerros":
+                    kerros = t
+                    print(f"kerros: OK, {time.monotonic() - alku:.0f} s")
                 else:
                     pohja = t
             except Exception as e:  # noqa: BLE001
@@ -578,7 +626,7 @@ def hae_alue(alue, perus, nyt, luotu):
         if vanha_pohja:
             print("pohja: edellisestä ajosta (staattinen)")
     hakemisto, tiedostot = rakenna(tulokset["phy"], tulokset.get("wav"), sst, luotu, virheet, syvyys, tuuli, vaylat, rajat,
-                                   bgc=bgc, pohja=pohja)
+                                   bgc=bgc, pohja=pohja, kerros=kerros)
     if alue.get("silakka") and vanha_pohja and "pohja" not in hakemisto:
         hakemisto["pohja"] = vanha_pohja
     hakemisto["tunnus"], hakemisto["nimi"] = tunnus, alue.get("nimi", tunnus)
