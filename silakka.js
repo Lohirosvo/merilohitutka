@@ -1,4 +1,4 @@
-/* Merilohitutka – silakka.js (v44, 16.11.2026; v43 ensimmäinen)
+/* Merilohitutka – silakka.js (v49, 16.11.2026; v43 ensimmäinen)
  * Silakan valokerros (tietopohja merilohitutka_silakkakerros_tiedot_v006.md, kohta 1.1), ensin Luoto–Tankar.
  * Hannu 16.11.: "Nyt tehdään ja en heitä noppaa. Luotan claudeen" → valinnat alla, perustelut tilannekuvassa v066.
  *
@@ -18,6 +18,11 @@
  *   Remote Sensing of Environment 112: 668–680, Itämeri; ei tietopohjassa, joka käyttää /1,48 (L18)]. Että mallin kd ≈ Kd(490) = A.
  *   2) Copernicus zsd: Kd(PAR) = 1,7 / Secchi (Poole–Atkins) [tietopohja L17]. 3) alueen oletus (Luoto 0,36) [tietopohja K].
  *   QUID: malli olettaa havaintoja pienemmän sameuden → Kd todennäköisesti liian pieni → kerros liian syvällä (rannikolla) [L+A].
+ * VAIHE (v49, tietopohja kohta 3.1 Luoto–Tankar, työoletuksia): pohjan lämmöstä (Copernicus bottomT)
+ *   alle 8 °C ja pinta yli 3 °C = kutua odottava; 8–14 °C = kutu; yli 14 °C = syönnös; pinta enintään 3 °C = talvehtiminen.
+ *   "Kutu ohi" -ehtoa ei ole (vaatisi lämpöhistorian) [A]. Päivällä: odottava pohjan tuntumassa; kutu viereisissä 10–20 m:n
+ *   syvänteissä; syönnös harppauskerroksen (mlotst) alla tai pohjassa [tietopohja A]. Yöllä valon mukaan, kudulla kutumatalikolla.
+ *   Pohjan syvyyden sopivuus vaiheelle (min / opt / max): odottava 5 / 10–20 / 30, kutu 0,5 / 3–10 / 15, syönnös 10 / 15–30 / 40+.
  * AURINGON KORKEUS: tähtitieteellisen almanakan likiarvo (tarkkuus noin 0,01°), ei taittumista (kuten tietopohjan taulukko).
  */
 (function (root) {
@@ -96,7 +101,67 @@
     return tulos;
   }
 
-  const Silakka = { RAJAT, aurinko, haurwitz, pintavalo, pilviKerroin, kdPar, valokerros, vaihe, arvio };
+  // ---------- v49: vaihemalli (tietopohja v006 kohta 3.1, Luoto–Tankar) ----------
+  const VAIHEET = {
+    odottava: { nimi: 'kutua odottava', pohja: [5, 10, 20, 30] },        // [A]
+    kutu: { nimi: 'kutu', pohja: [0.5, 3, 10, 15] },                     // [L2; opt L1]
+    syonnos: { nimi: 'syönnös', pohja: [10, 15, 30, Infinity] },         // [A]
+    talvi: { nimi: 'talvehtiminen', pohja: null },
+  };
+  const KUTU_ALA = 8, KUTU_YLA = 14, NOUSU_PINTA = 3;   // °C [L1, L2, L4; nousu K]
+  /** Vaiheen tunnus pohjan lämmöstä pt ja pinnan lämmöstä (°C): 'odottava' | 'kutu' | 'syonnos' | 'talvi' | null. */
+  function vaiheLampo(pt, pinta) {
+    if (!isFinite(pt) || pt === null) return null;
+    if (pt > KUTU_YLA) return 'syonnos';
+    if (pt >= KUTU_ALA) return 'kutu';
+    if (isFinite(pinta) && pinta !== null && pinta <= NOUSU_PINTA) return 'talvi';
+    return 'odottava';
+  }
+  /** Pohjan syvyys z vaiheen välille r = [min, optMin, optMax, max]: 'optimi' | 'sopiva' | 'ei' | null. */
+  function sopivuus(z, r) {
+    if (!r || !isFinite(z) || z === null) return null;
+    return z >= r[1] && z <= r[2] ? 'optimi' : z >= r[0] && z <= r[3] ? 'sopiva' : 'ei';
+  }
+  /** Vaiheen kerros (v49). o = { pt, pinta, mld, pohja, vrk (vaihe()), valo (valokerros) }.
+   *  Palauttaa { tunnus, nimi, ohje, kerros (tila/yla/opt/ala tai null = ei tässä), paikka, raja } tai null. */
+  function vaiheMalli(o) {
+    const tunnus = vaiheLampo(o.pt, o.pinta);
+    if (!tunnus) return null;
+    const V = VAIHEET[tunnus], P = isFinite(o.pohja) && o.pohja > 0, valo = o.valo || null, vrk = o.vrk;
+    const tuntuma = () => P ? { tila: 'pohja', yla: Math.max(0, o.pohja - POHJAN_TUNTUMA), opt: Math.max(0, o.pohja - POHJAN_TUNTUMA / 2), ala: o.pohja } : null;
+    const t = { tunnus, nimi: V.nimi, paikka: P ? sopivuus(o.pohja, V.pohja) : null, raja: V.pohja };
+    if (tunnus === 'talvi') return Object.assign(t, { ohje: 'avomeren syvänteissä, ei rannikon mallia', kerros: null });
+    if (vrk === 'päivä') {
+      if (tunnus === 'odottava') return Object.assign(t, { ohje: 'pohjan tuntumassa', kerros: tuntuma() || valo });
+      if (tunnus === 'kutu') {
+        if (P && o.pohja >= 10 && o.pohja <= 20) return Object.assign(t, { ohje: 'viereisissä 10–20 m:n syvänteissä: tässä pohjan tuntumassa', kerros: tuntuma() });
+        return Object.assign(t, { ohje: 'viereisissä 10–20 m:n syvänteissä' + (P ? `, ei tässä (pohja ${o.pohja < 10 ? 'alle 10' : 'yli 20'} m)` : ''), kerros: null });
+      }
+      // syönnös: harppauskerroksen alla tai pohjassa
+      const M = isFinite(o.mld) && o.mld !== null;
+      if (!M || (P && o.mld >= o.pohja - 0.5)) return Object.assign(t, { ohje: 'harppauskerrosta ei ole (sekoittunut pohjaan asti): valon mukaan', kerros: valo });
+      if (!valo || valo.tila === 'hajallaan') return Object.assign(t, { ohje: 'valon mukaan', kerros: valo });
+      const yla = Math.max(valo.yla, o.mld);
+      if (P && yla >= o.pohja - POHJAN_TUNTUMA) return Object.assign(t, { ohje: 'harppauskerroksen alla = pohjan tuntumassa', kerros: tuntuma() });
+      // valokerros ulottuu harppauskerroksen alle → sen alaraja; muuten (valo loppuu ennen) harppauskerroksesta pohjaan [A]
+      const ala = valo.ala > yla ? valo.ala : (P ? o.pohja : yla + POHJAN_TUNTUMA), alaP = P ? Math.min(ala, o.pohja) : ala;
+      return Object.assign(t, { ohje: 'harppauskerroksen alla', kerros: { tila: 'valo', yla, opt: Math.min(Math.max(valo.opt, yla), alaP), ala: alaP } });
+    }
+    if (vrk === 'yö' && tunnus === 'kutu') {
+      if (P && o.pohja <= V.pohja[3]) return Object.assign(t, { ohje: 'kutumatalikolla', kerros: valo });
+      return Object.assign(t, { ohje: 'kutumatalikoilla (pohja 0,5–15 m)' + (P ? ', ei tässä' : ''), kerros: null });
+    }
+    return Object.assign(t, { ohje: 'valon mukaan', kerros: valo });
+  }
+  /** Onko päivä t (Date) kaudella k = ['KK-PP', 'KK-PP'] (Suomen aikaa likimain: UTC + 2 h). */
+  function kaudella(t, k) {
+    if (!k || k.length !== 2) return true;
+    const d = new Date(t.getTime() + 2 * 3600000), x = String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0');
+    return x >= k[0] && x <= k[1];
+  }
+
+  const Silakka = { RAJAT, VAIHEET, aurinko, haurwitz, pintavalo, pilviKerroin, kdPar, valokerros, vaihe, arvio,
+                    vaiheLampo, sopivuus, vaiheMalli, kaudella };
   if (typeof module !== 'undefined' && module.exports) module.exports = Silakka;
   else root.Silakka = Silakka;
 })(typeof window !== 'undefined' ? window : this);

@@ -1,4 +1,4 @@
-/* Merilohitutka – alueet.js (v27)
+/* Merilohitutka – alueet.js (v28)
  * Kalastusalueet. Yksi lähde: sovellus lataa tämän skriptinä ja hae_copernicus.py lukee saman tiedoston.
  * Hakasulkeiden [ ] välissä on oltava puhdasta JSONia (ei kommentteja, ei pilkkua viimeisen alkion jälkeen).
  *
@@ -35,6 +35,7 @@
  *   silakka (v27, silakkatietopohja v006 kohta 1.1): silakan valokerros tälle alueelle (ensin Luoto–Tankar). hae_copernicus.py
  *   hakee valon vaimennuksen (BGC kd, zsd) ja mallin pohjan. kdOletus = Kd(PAR), jos mallin arvoa ei ole (Perämeren avomeren
  *   kesän Secchi 4,73 m → 1,7/4,73 = 0,36, tietopohja [K]).
+ *   kausi (v28): lohikausi ['KK-PP', 'KK-PP'] (tietopohja 0.1: 1.5.–31.8.); sen ulkopuolella vaihemalli näytetään vain laskentana.
  *   Koordinaatit Hannun antamat (asteet, minuutit, sekunnit).
  * v23: Ohtakari toiseksi paluukohteeksi (Hannu 14.11.); merkki satamaan 64,08944 23,40594 (predictwind.com), paluukohteen tyyli.
  */
@@ -43,7 +44,7 @@
     "tunnus": "luoto", "nimi": "Luoto–Tankar", "lyhyt": "Luoto", "polku": "",
     "rajat": { "lat_min": 63.45, "lat_max": 64.13, "lon_min": 22.05, "lon_max": 23.65 },
     "keski": [63.83, 22.62], "zoom": 10.6, "paluuikkuna": true, "tuulipisteetLisaa": true,
-    "silakka": { "kdOletus": 0.36 },
+    "silakka": { "kdOletus": 0.36, "kausi": ["05-01", "08-31"] },
     "lahtopisteet": [
       {"nimi": "Luoto", "minne": "Luodon pisteeseen", "mista": "Luodon pisteestä", "tyyppi": "turva", "lat": 63.8352, "lon": 22.646742, "jatko": {"nimi": "Köpmanholmen", "minne": "Köpmanholmeniin", "lat": 63.806844, "lon": 22.671069}},
       {"nimi": "Etelä", "minne": "eteläiseen pisteeseen", "mista": "eteläisestä pisteestä", "tyyppi": "turva", "lat": 63.613219, "lon": 22.480039},
