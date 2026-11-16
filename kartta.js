@@ -437,6 +437,7 @@
     const tulos = { matalikot: [], renkaita: 0, maki: 0, kuoppa: 0, epaselva: 0 };
     if (!S || !S.tasot) return tulos;
     const tasot = S.tasot.map(t => t.syvyys).filter(isFinite).sort((a, b) => a - b);
+    tulos.tasot = tasot;   // v46: pohjaKayrista käyttää renkaita, avoimia käyriä ja tasoja
     const R = [], A = [];
     for (const t of S.tasot) for (const k of ketjuta(t.viivat.map(v => v.ll))) {
       const x = Object.assign({ d: t.syvyys, ll: k.ll }, rajaus(k.ll));
@@ -444,6 +445,7 @@
     }
     tulos.renkaita = R.length;
     R.sort((a, b) => a.ala - b.ala);
+    tulos.renkaat = R; tulos.avoimet = A;
     for (let i = 0; i < R.length; i++) {   // ylempi = pienin rengas, jonka sisällä tämä on (käyrät eivät leikkaa)
       const a = R[i];
       for (let j = i + 1; j < R.length; j++) {
@@ -490,6 +492,27 @@
       tulos.matalikot.push({ d: p.d, ala, ymparisto: F.d, nousu, luokka, ll: p.ll, la0: p.la0, la1: p.la1, lo0: p.lo0, lo1: p.lo1, keski: [sa / n, so / n] });
     }
     return tulos;
+  }
+  /** Pohjan syvyysväli merikartan käyristä (v46) matalikot()-tuloksesta: sisin suljettu käyrä, jonka sisällä piste on.
+   *  Mäki (sisällä matalampaa): seuraava matalampi käyrätaso … renkaan syvyys. Kuoppa: renkaan syvyys … seuraava syvempi
+   *  taso (puuttuu → Infinity). Oletus: käyrät ovat kaikilla tasoilla eivätkä leikkaa toisiaan (pätee pisteelle, jonka
+   *  ympärillä ei ole avoimia käyriä). Palauttaa { min, max, rengas, tyyppi } tai { epavarma: 'tyyppi'|'avoin', rengas }
+   *  tai null (ei minkään renkaan sisällä). 'avoin' = renkaan sisällä on avoin käyrä (ranta, aineiston reuna tai
+   *  katkennut käyrä), jolloin väli ei ole varma. */
+  function pohjaKayrista(M, lat, lon) {
+    if (!M || !M.renkaat) return null;
+    const r = M.renkaat.find(x => lat >= x.la0 && lat <= x.la1 && lon >= x.lo0 && lon <= x.lo1 && renkaanSisalla(x.ll, lat, lon));
+    if (!r) return null;
+    if (!r.tyyppi) return { epavarma: 'tyyppi', rengas: r.d };
+    for (const a of M.avoimet || []) {
+      if (a.la1 < r.la0 || a.la0 > r.la1 || a.lo1 < r.lo0 || a.lo0 > r.lo1) continue;
+      for (let i = 0; i < a.ll.length; i += Math.max(2, Math.floor(a.ll.length / 2 / 8) * 2))   // muutama piste riittää: käyrät eivät leikkaa
+        if (renkaanSisalla(r.ll, a.ll[i], a.ll[i + 1])) return { epavarma: 'avoin', rengas: r.d };
+    }
+    const tasot = M.tasot || [];
+    if (r.tyyppi === 'maki') { const ala = tasot.filter(d => d < r.d).pop(); return { min: ala === undefined ? 0 : ala, max: r.d, rengas: r.d, tyyppi: 'maki' }; }
+    const yla = tasot.find(d => d > r.d);
+    return { min: r.d, max: yla === undefined ? Infinity : yla, rengas: r.d, tyyppi: 'kuoppa' };
   }
   /** Matalikko pisteessä: pienin, jonka huippurenkaan sisällä piste on (tai null). */
   function matalikkoPisteessa(lista, lat, lon) {
@@ -1450,7 +1473,7 @@
   const KarttaMalli = { lonX, latY, xLon, yLat, kayra, tasot, arvovali, lahinIndeksi, lahinArvo, lahinAika, virta, akseliArvo,
                         kerros, lohiLuokka, lohiMarginaali, lohiPehmeys, profiiliPisteessa, puraSyvyys, lahinKayra, puraVaylat, lahinVayla, tuuliVari,
                         havainnotPisteessa, havaintoTiedot, havaintoVari, etaisyysViivaan, jasennaSaaliit, aaltoLuokka, aallonPituus, aaltoJyrkkyys, onJyrkka,
-                        jalkiOsat, jalkiAlfa, lahinJalki, ketjuta, matalikot, matalikkoPisteessa, renkaanSisalla };
+                        jalkiOsat, jalkiAlfa, lahinJalki, ketjuta, matalikot, matalikkoPisteessa, renkaanSisalla, pohjaKayrista };
   if (typeof module !== 'undefined' && module.exports) module.exports = KarttaMalli;
   else { root.KarttaMalli = KarttaMalli; root.Kartta = Kartta; }
 })(typeof window !== 'undefined' ? window : this);

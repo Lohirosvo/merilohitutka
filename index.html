@@ -395,7 +395,7 @@
 <script src="malli.js?v=25"></script>
 <script src="fmi.js?v=14"></script>
 <script src="nopeus.js?v=20"></script>
-<script src="kartta.js?v=31"></script>
+<script src="kartta.js?v=32"></script>
 <script src="sillat.js?v=2"></script>
 <script src="silakka.js?v=3"></script>
 <script src="reitti.js?v=9"></script>
@@ -1051,7 +1051,7 @@ function piirraMeriTila() {
   if (nousuTeksti) osat.push(nousuTeksti);       // v28
   if (offlineTeksti) osat.push(offlineTeksti);   // v26
   const silT = !!valittuAlue.silakka;   // v45: silakan valomallin lähteet todisteen tasoon
-  osat.push('Todisteen taso: malli (lämpö, lohikerros, virta, aalto' + (silT ? ', valon vaimennus, mallin pohja' : '') + '), satelliitti (SST), sääennuste (tuuli'
+  osat.push('Todisteen taso: malli (lämpö, lohikerros, virta, aalto' + (silT ? ', valon vaimennus, mallin pohja' : '') + ')' + (silT ? ', merikartta (pohjan syvyysväli käyristä)' : '') + ', satelliitti (SST), sääennuste (tuuli'
     + (silT ? ', pilvisyys' : '') + ')' + (silT ? ', laskettu (silakan valokerros: valosta laskettu työoletus, ei havaintoa eikä kaikuluotainvertailua)' : '')
     + '. Ennusteen tarkkuus heikkenee loppua kohti. E.U. Copernicus Marine Service Information.');
   el.textContent = osat.join(' · ');
@@ -1451,7 +1451,8 @@ $('karttaTakaisin').addEventListener('click', () => {
 });
 $('kokoNaytto').addEventListener('click', () => { if (kokoNaytossa()) poistuKokoNaytosta(); else kokoNayttoon(); });
 $('karttaInfo').addEventListener('click', () => {
-  const el = $('dataTila'); el.hidden = !el.hidden;
+  const el = $('dataTila'); if (el.hidden) piirraMeriTila();   // v46: tiedot ajan tasalle avattaessa (päiväkohtainen pilvisyys)
+  el.hidden = !el.hidden;
   if (kartta) kartta.naytaSelite(el.hidden ? 3000 : 600000);
   mitoitaKartta();
 });
@@ -1707,8 +1708,26 @@ function silakkaArvio(lat, lon, t) {
   const al = valittuAlue; if (!al.silakka || !window.Silakka) return null;
   const b = nakyma && nakyma.bgc, pl = pohjaLahde();
   const kd490 = b && b.kd ? KarttaMalli.lahinArvo(b, 'kd', 0, lat, lon) : NaN, zsd = b && b.zsd ? KarttaMalli.lahinArvo(b, 'zsd', 0, lat, lon) : NaN;
-  const pohja = pl ? KarttaMalli.lahinArvo(pl, 'syv', 0, lat, lon) : NaN;
-  return Silakka.arvio({ lat, lon, t, kd490, zsd, oletusKd: al.silakka.kdOletus, pohja, pilvi: pilviPisteessa(lat, lon, t) });
+  const malli = pl ? KarttaMalli.lahinArvo(pl, 'syv', 0, lat, lon) : NaN;
+  // v46: merikartan käyristä syvyysväli (sisin suljettu käyrä); mallin pohja rajataan väliin, koska mallin ruutu
+  // (noin 1 mpk) ei näe matalikkoja. Ilman varmaa väliä käytetään mallin pohjaa kuten ennen.
+  const kv = matalikkoTulos && KarttaMalli.pohjaKayrista ? KarttaMalli.pohjaKayrista(matalikkoTulos, lat, lon) : null;
+  const vali = kv && isFinite(kv.min) ? kv : null;
+  let pohja = malli;
+  if (vali) pohja = isFinite(malli) ? Math.min(Math.max(malli, vali.min), vali.max) : vali.max;
+  const a = Silakka.arvio({ lat, lon, t, kd490, zsd, oletusKd: al.silakka.kdOletus, pohja, pilvi: pilviPisteessa(lat, lon, t) });
+  if (a) { a.pohjaMalli = malli; a.pohjaKartta = kv; }
+  return a;
+}
+/** v46: pohjan lähde napautustekstiin. */
+function pohjaOsa(a, m) {
+  const kv = a.pohjaKartta, mp = a.pohjaMalli, mal = isFinite(mp) ? `malli ${m(mp)} m` : 'mallin pohja puuttuu';
+  if (kv && isFinite(kv.min)) {
+    const vali = isFinite(kv.max) ? `${luku(kv.min, 0)}–${luku(kv.max, 0)} m` : `yli ${luku(kv.min, 0)} m`;
+    return ` · pohja ${m(a.pohja)} m (merikartta ${vali}, ${mal})`;
+  }
+  if (!isFinite(a.pohja)) return '';
+  return ` · mallin pohja ${m(a.pohja)} m (merikartasta ${kv ? 'ei varmaa väliä' : 'ei suljettua käyrää ympärillä'})`;
 }
 function silakkaTeksti(lat, lon) {
   if (!kartta || !kartta.tasot.silakka || !window.Silakka) return '';
@@ -1725,7 +1744,7 @@ function silakkaTeksti(lat, lon) {
   const paa = a.ennuste ? `${kerros(a.ennuste, `pilvisyys ${luku(a.pilvi, 0)} % (IL)`)} (kirkas ${lyhyt(a.kirkas)}, täysin pilvinen ${lyhyt(a.pilvinen)})`
     : `${kerros(a.kirkas, 'kirkas')}; ${kerros(a.pilvinen, 'täysin pilvinen')} (pilvisyysennustetta ei ole)`;
   return `Silakka, valomalli ${klo(t)} (${a.vaihe}, aurinko ${luku(a.h, 1)}°): ${paa}`
-    + ` · Kd(PAR) ${luku(kd.kd, 2)} m⁻¹ (${lahde})` + (isFinite(a.pohja) ? ` · mallin pohja ${m(a.pohja)} m` : '')
+    + ` · Kd(PAR) ${luku(kd.kd, 2)} m⁻¹ (${lahde})` + pohjaOsa(a, m)
     + ' · työoletus 10–1–0,1 lx, ei lämpö-, happi- eikä vaihemallia';
 }
 function vesiTilaTeksti() {
