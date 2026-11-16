@@ -544,7 +544,7 @@
       this.lohiReuna = isFinite(opts.lohiReuna) ? opts.lohiReuna : 0.4;
       this.jyrkka = opts.jyrkka || [0.3, 0.05];   // v26: [vähintään Hs m, jyrkkyys osuutena]   // v25: pehmeän reunan leveys (°C), 0 = terävä
       this.aaltoRajat = opts.aaltoRajat || [0.35, 0.5];   // merkitsevä aallonkorkeus (m)
-      this.tasot = { lampo: true, lohi: true, syvyys: true, tuuli: true, vaylat: true, havainnot: true, aaltoraja: true, jalki: true, matalikot: true, ais: false, sst: false, virta: true, aalto: false, tausta: true };
+      this.tasot = { lampo: true, lohi: true, syvyys: true, tuuli: true, vaylat: true, havainnot: true, aaltoraja: true, jalki: true, matalikot: true, ais: false, sst: false, virta: true, aalto: false, tausta: true, silakka: false };   // v43: silakka = valomallin napautusteksti
       this.syvyys = null;   // puraSyvyys()-tulos
       this.vaylat = null;   // puraVaylat()-tulos
       this.ylaVara = 0; this.alaVara = 0;   // ohjainten peittämä osa ylhäällä ja alhaalla (px)
@@ -1418,6 +1418,7 @@
         ['▲ suurin aalto', '#ff3c3c'], ['▲ jyrkin', '#b07cff']]);   // v30
       if (this.sillat.some(s => this._nakyvissa(s.lat, s.lon))) rivit.push([['Silta: alikulku → nyt', '#e9f1f7'], ['mahtuu', '#e9f1f7', SILTAVARIT.mahtuu],
         ['ei mahdu', '#e9f1f7', SILTAVARIT.ei], ['ei vedenkorkeutta', '#e9f1f7', SILTAVARIT.tuntematon]]);   // v35
+      if (this.tasot.silakka) rivit.push([['Silakka: napauta karttaa – valokerros (malli, kartan aika)', '#9fd8ff']]);   // v43
       if (this.tasot.lampo && d.phy) rivit.push([['Lämpö (malli) ' + f(this.askel) + ' °C välein', '#ffb24a']]);
       if (this.tasot.sst && d.sst) rivit.push([['Satelliitti: katkoviiva', '#ffffff']]);
       if (this.tasot.virta && d.phy) rivit.push([['Virta: nuoli ≈ 0,9 km/h (0,25 m/s)', '#78ebff']]);

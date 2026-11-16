@@ -18,6 +18,10 @@ v8: ajaa ensin myös Traficomin syvyyskäyrien päivityksen (hae_syvyys.py, data
 v9: lisäksi Väyläviraston väylät (hae_vaylat.py, data/vaylat.json) ja IL:n tuuliennuste kartan
 pisteisiin (hae_tuuli.py, päivätiedostoihin). Näiden epäonnistuminen ei vaikuta Copernicus-hakuun.
 
+v43 (Hannu 16.11.2026, silakkatietopohja v006 kohta 1.1): alueille, joilla alueet.js:ssä on "silakka"-kohta (nyt vain Luoto),
+lisäksi valon vaimennus BGC-mallista (kd ja Secchi zsd, hetkiarvo klo 12 UTC päiväaineistossa) päivätiedostoihin ja
+mallin pohjan syvyys (deptho, staattinen) hakemistoon. Virhe ei vaikuta muihin hakuihin.
+
 v13: alueet luetaan tiedostosta alueet.js (sama tiedosto kuin sovelluksessa). Jokainen alue haetaan erikseen
 omaan kansioonsa: Luoto data/ (kuten ennen), muut data/<tunnus>/. Yhden alueen virhe ei estä muita.
 
@@ -56,7 +60,16 @@ LAHTEET = {
     "sst": dict(tuote="SST_BAL_SST_L4_NRT_OBSERVATIONS_010_007_b",
                 ehdokkaat=["DMI-BALTIC-SST-L4-NRT-OBS_FULL_TIME_SERIE"],
                 muuttujat=["analysed_sst"]),
+    # v43: PUM CMEMS-BAL-PUM-003-006-007: kd [m-1] "Light Attenuation" ja zsd [m] Secchi, hetkiarvot klo 12 UTC
+    # päiväaineistossa (ei tuntiaineistoa). deptho staattisessa mask_bathy-tiedostossa.
+    "bgc": dict(tuote="BALTICSEA_ANALYSISFORECAST_BGC_003_007",
+                ehdokkaat=["cmems_mod_bal_bgc_anfc_P1D-m"],
+                muuttujat=["kd", "zsd"]),
+    "pohja": dict(tuote="BALTICSEA_ANALYSISFORECAST_PHY_003_006",
+                  ehdokkaat=["cmems_mod_bal_phy_anfc_static", "cmems_mod_bal_bgc_anfc_static"],
+                  muuttujat=["deptho"]),
 }
+KD_KERROIN, ZSD_KERROIN, POHJA_KERROIN = 1000, 100, 10   # v43: kd 0,001 m-1, zsd cm, pohja dm
 
 
 # ---------------------------------------------------------------- muunnos (testattava ilman verkkoa)
@@ -150,7 +163,7 @@ def tiedostonimi(pvm):
     return "p_" + pvm.replace("-", "") + ".json"
 
 
-def rakenna(phy, wav, sst, luotu, virheet, syvyys=None, tuuli=None, vaylat=None, alue=None):
+def rakenna(phy, wav, sst, luotu, virheet, syvyys=None, tuuli=None, vaylat=None, alue=None, bgc=None, pohja=None):
     """Kokoaa hakemiston ja päivätiedostot.
     phy = dict(ajat, lat, lon, syvyydet, thetao[aika, syvyys, lat, lon], u[aika, lat, lon], v, dataset,
                u3/v3[aika, lat, lon] = virta VIRTA_SYV m:ssä tai None)
@@ -185,6 +198,15 @@ def rakenna(phy, wav, sst, luotu, virheet, syvyys=None, tuuli=None, vaylat=None,
             hakemisto["wav"]["huippu"] = "Tp (VTPK)"       # v30: päivätiedostoissa wav.huippu (s)
     if sst:
         hakemisto["sst"] = sst
+    b_paivat = {}
+    if bgc:   # v43: valon vaimennus päivittäin (12 UTC); ruudukko hakemistoon, arvot päivätiedostoihin
+        hakemisto["bgc"] = {"dataset": bgc["dataset"], "lat": pyorista(bgc["lat"], 4), "lon": pyorista(bgc["lon"], 4),
+                            "kerroin": {"kd": KD_KERROIN, "zsd": ZSD_KERROIN}, "aika": "hetkiarvo klo 12 UTC",
+                            "muuttujat": [k for k in ("kd", "zsd") if bgc.get(k) is not None]}
+        b_paivat = paivittain(bgc["ajat"])
+    if pohja:   # v43: mallin pohjan syvyys (m × 10)
+        hakemisto["pohja"] = {"dataset": pohja["dataset"], "lat": pyorista(pohja["lat"], 4), "lon": pyorista(pohja["lon"], 4),
+                              "kerroin": POHJA_KERROIN, "syv": kokonaisluvut(pohja["deptho"], POHJA_KERROIN)}
 
     p_paivat = paivittain(phy["ajat"])
     w_paivat = paivittain(wav["ajat"]) if wav else {}
@@ -213,6 +235,13 @@ def rakenna(phy, wav, sst, luotu, virheet, syvyys=None, tuuli=None, vaylat=None,
             sis["wav"] = w
         if "ajat" not in sis:
             sis["ajat"] = w["ajat"] if iw else []
+        ib = b_paivat.get(pvm, [])
+        if ib:
+            b = {"aika": iso(np.datetime64(bgc["ajat"][ib[0]]))}
+            for k, kerroin in (("kd", KD_KERROIN), ("zsd", ZSD_KERROIN)):
+                if bgc.get(k) is not None:
+                    b[k] = kokonaisluvut(np.asarray(bgc[k])[ib[0]], kerroin)
+            sis["bgc"] = b
         it = t_paivat.get(pvm, [])
         if it:
             sis["tuuli"] = {"ajat": [tuuli["ajat"][i] for i in it],
@@ -317,6 +346,56 @@ def hae_wav(nyt, alue=None):
                 hs=ds["VHM0"].values, suunta=ds["VMDR"].values if "VMDR" in ds else None,
                 jakso=ds["VTM10"].values if "VTM10" in ds else None,
                 huippu=ds["VTPK"].values if "VTPK" in ds else None)
+
+
+def pinta2d(da):
+    """v43: muuttuja (time, [depth], lat, lon) -> numpy (time, lat, lon); syvyystasoista ylin."""
+    if "depth" in getattr(da, "dims", ()):
+        da = da.isel(depth=0)
+    return np.ma.filled(np.ma.asarray(da.transpose("time", "latitude", "longitude").values, dtype=float), np.nan)
+
+
+def hae_bgc(nyt, alue=None):
+    """v43: kd ja zsd päiväaineistosta; jos toinen ei onnistu, haetaan pelkkä toinen."""
+    lahde, alku, loppu = LAHTEET["bgc"], nyt - timedelta(days=1), nyt + timedelta(days=10)
+    virhe = None
+    for muuttujat in (["kd", "zsd"], ["kd"], ["zsd"]):
+        try:
+            ds, ds_id = avaa(dict(lahde, muuttujat=muuttujat), alku, loppu, alue=alue)
+            break
+        except Exception as e:  # noqa: BLE001
+            virhe = e
+            print("bgc: muuttujat", muuttujat, "eivät onnistuneet:", e, file=sys.stderr)
+    else:
+        raise RuntimeError(f"bgc: {virhe}")
+    tulos = dict(dataset=ds_id, ajat=ds["time"].values, lat=ds["latitude"].values, lon=ds["longitude"].values, kd=None, zsd=None)
+    for k in ("kd", "zsd"):
+        if k in ds:
+            tulos[k] = pinta2d(ds[k])
+    print("bgc:", ", ".join(f"{k} {np.nanmin(tulos[k]):.3f}–{np.nanmax(tulos[k]):.3f}" for k in ("kd", "zsd")
+                             if tulos[k] is not None and np.isfinite(tulos[k]).any()))
+    return tulos
+
+
+def hae_pohja(alue=None):
+    """v43: mallin pohjan syvyys (deptho) staattisesta aineistosta. Aikarajausta ei ole; osa (dataset_part) kokeillaan."""
+    import copernicusmarine
+    A = alue or ALUE
+    virheet = []
+    for ds_id in LAHTEET["pohja"]["ehdokkaat"]:
+        for osa in ("bathy", None):
+            kw = dict(dataset_id=ds_id, variables=["deptho"], minimum_latitude=A["lat_min"], maximum_latitude=A["lat_max"],
+                      minimum_longitude=A["lon_min"], maximum_longitude=A["lon_max"])
+            if osa:
+                kw["dataset_part"] = osa
+            try:
+                ds = copernicusmarine.open_dataset(**kw)
+                d = np.ma.filled(np.ma.asarray(ds["deptho"].transpose("latitude", "longitude").values, dtype=float), np.nan)
+                print(f"pohja: {ds_id}{' / ' + osa if osa else ''}, {np.nanmin(d):.1f}–{np.nanmax(d):.1f} m")
+                return dict(dataset=ds_id, lat=ds["latitude"].values, lon=ds["longitude"].values, deptho=d)
+            except Exception as e:  # noqa: BLE001
+                virheet.append(f"{ds_id}{'/' + osa if osa else ''}: {str(e)[:150]}")
+    raise RuntimeError(" | ".join(virheet))
 
 
 def hae_sst(nyt, alue=None):
@@ -465,7 +544,30 @@ def hae_alue(alue, perus, nyt, luotu):
     except Exception as e:  # noqa: BLE001
         traceback.print_exc()
         virheet.append(f"tuuli: {str(e)[:200]}")
-    hakemisto, tiedostot = rakenna(tulokset["phy"], tulokset.get("wav"), sst, luotu, virheet, syvyys, tuuli, vaylat, rajat)
+    bgc = pohja = None
+    vanha_pohja = vanha.get("pohja") if vanha else None
+    if alue.get("silakka"):   # v43: silakan valokerros (kohta 1.1): valon vaimennus; mallin pohja kerran (ei muutu)
+        hakijat = [("bgc", lambda: hae_bgc(nyt, rajat))] + ([] if vanha_pohja else [("pohja", lambda: hae_pohja(rajat))])
+        for nimi, hakija in hakijat:
+            alku = time.monotonic()
+            try:
+                t = hakija()
+                if nimi == "bgc":
+                    bgc = t
+                    print(f"bgc: OK {t['dataset']}, {len(t['ajat'])} päivää, {len(t['lat'])}x{len(t['lon'])} ruutua, "
+                          f"{time.monotonic() - alku:.0f} s")
+                else:
+                    pohja = t
+            except Exception as e:  # noqa: BLE001
+                traceback.print_exc()
+                virheet.append(f"{nimi}: {str(e)[:300]}")
+                print(f"{nimi}: VIRHE {e}", file=sys.stderr)
+        if vanha_pohja:
+            print("pohja: edellisestä ajosta (staattinen)")
+    hakemisto, tiedostot = rakenna(tulokset["phy"], tulokset.get("wav"), sst, luotu, virheet, syvyys, tuuli, vaylat, rajat,
+                                   bgc=bgc, pohja=pohja)
+    if alue.get("silakka") and vanha_pohja and "pohja" not in hakemisto:
+        hakemisto["pohja"] = vanha_pohja
     hakemisto["tunnus"], hakemisto["nimi"] = tunnus, alue.get("nimi", tunnus)
     kirjoita(kansio, hakemisto, tiedostot)
     return True
