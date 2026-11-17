@@ -46,7 +46,10 @@
   .ikarivi { margin:-4px 2px 10px; }   /* v57 */
   .ikaselite { display:flex; flex-wrap:wrap; gap:4px 14px; font-size:14px; margin:2px 0 4px; }
   .ikaselite i { display:inline-block; width:18px; height:0; border-top:2px solid; vertical-align:middle; margin-right:5px; }
-  #ikaKayra svg { width:100%; height:auto; display:block; touch-action:pan-y; }
+  .ikakayra svg { width:100%; height:auto; display:block; touch-action:pan-y; }
+  .ikaennakko { font-size:17px; margin:2px 0 6px; } .ikaotsake { font-size:13px; color:var(--himmea); margin-top:6px; }
+  .ikataulu tr.oma td { color:var(--syaani); }
+  .lohetrivi { font-size:14px; padding:2px 8px 4px; color:var(--teksti); }   /* v58 kartan viikkorivi */
   .ikataulu { width:100%; border-collapse:collapse; font-size:14px; margin:6px 0; }
   .ikataulu th, .ikataulu td { text-align:right; padding:1px 4px; } .ikataulu th:first-child, .ikataulu td:first-child { text-align:left; }
   table { width:100%; border-collapse:collapse; font-size:16px; }
@@ -163,6 +166,8 @@
     .karttanapit button { width:40px; height:40px; font-size:20px; }
     body.kartalla .alapalkki .kmh { font-size:24px; }
     .kartta-tieto, .datatila { max-height:40vh; }
+    .kartta-ohjaimet .lohetrivi { grid-column:1 / -1; font-size:13px; padding:0 8px 2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .kartta-ohjaimet .lohetrivi.auki { white-space:normal; }   /* v58: vaaka-asennossa yksi rivi, napautus avaa */
   }
 </style>
 </head>
@@ -234,6 +239,7 @@
         <div class="sirut" id="sirut">
           <button data-taso="lohi">Lohikerros</button>
           <span class="lohivali" id="lohiRivi"><input id="lohiMin" inputmode="decimal">–<input id="lohiMax" inputmode="decimal">°C</span>
+          <button data-taso="lohet">Lohet</button>
           <button data-taso="silakka">Silakka</button>
           <button data-taso="tuuli">Tuuli</button>
           <button data-taso="vaylat">Väylät</button>
@@ -247,6 +253,7 @@
           <button data-taso="aalto">Aalto</button>
           <button data-taso="sst">Satelliitti</button>
         </div>
+        <div class="lohetrivi" id="lohetRivi" hidden></div>
       </div>
       <div class="karttanapit" id="karttaNapit">
         <button id="zoomPlus">+</button><button id="zoomMiinus">−</button><button id="keskitaOma">◎</button><button id="lohiTaalla" title="Lohikerros omalla kohdalla">🐟</button><button id="kohdeNappi" title="Menomatkan kohde: napauta kohdepiste">🎯</button><button id="vesiNappi" title="Meriveden korkeus ja 12 h ennuste">🌊</button>
@@ -303,10 +310,14 @@
       <div id="reissut" class="pieni">Ei vielä reissuja.</div>
     </div>
     <div class="kortti" id="ikaKortti">
-      <h2 id="ikaOtsikko">Lohen saapuminen ikäluokittain (arvio)</h2>
+      <h2 id="ikaOtsikko">Lohet alueella (arvio)</h2>
+      <div class="ikaennakko" id="ikaEnnakko"></div>
       <div class="ikaselite" id="ikaSelite"></div>
-      <div id="ikaKayra"></div>
-      <div class="pieni" id="ikaLuku">Napauta käyrää: päivän osuudet.</div>
+      <div class="ikaotsake">Liikkeellä päivittäin</div>
+      <div class="ikakayra" id="ikaTiheys"></div>
+      <div class="ikaotsake">Saapunut (haarukka varjostettu)</div>
+      <div class="ikakayra" id="ikaKayra"></div>
+      <div class="pieni" id="ikaLuku">Napauta kuvaajaa: päivän tilanne.</div>
       <table class="ikataulu" id="ikaTaulu"></table>
       <div class="pieni" id="ikaTiedot"></div>
     </div>
@@ -413,7 +424,7 @@
 <script src="kartta.js?v=35"></script>
 <script src="sillat.js?v=2"></script>
 <script src="silakka.js?v=8"></script>
-<script src="ikaluokat.js?v=1"></script>
+<script src="ikaluokat.js?v=2"></script>
 <script src="reitti.js?v=9"></script>
 <script src="ais.js?v=23"></script>
 <script>
@@ -1127,6 +1138,7 @@ function valitseAika(indeksi) {
   const t = new Date(ajat[kartta.aika]), ero = Math.round((t - Date.now()) / 3600000);
   const eroTxt = Math.abs(ero) < 1 ? 'nyt' : (Math.abs(ero) < 48 ? (ero > 0 ? '+' : '') + ero + ' h' : (ero > 0 ? '+' : '') + Math.round(ero / 24) + ' vrk');
   $('karttaAika').innerHTML = `${pvm(t)} klo ${klo(t)}<small>${eroTxt} · malli${ero >= 48 ? ' (ennuste)' : ''}</small>`;
+  piirraLohetRivi();   // v58: viikkoarvio kartan valitulle päivälle
   kartta.piirra();
   if (kartta.valittu && !kartta.valittuOma) naytaPiste(kartta.valittu[0], kartta.valittu[1]);
 }
@@ -1368,6 +1380,7 @@ function aaltoRajat() {
 }
 function piirraLohiRivi() {
   $('lohiRivi').style.display = kartta && kartta.tasot.lohi ? 'flex' : 'none';
+  piirraLohetRivi();   // v58
   $('lohiMin').value = luku(asetukset.lohiMin);
   $('lohiMax').value = luku(asetukset.lohiMax);
 }
@@ -1396,6 +1409,7 @@ function avaaKarttaNakyma() {
     kartta.silakkaFn = silakkaRuudut;   // v50
     paivitaReititKartalle();   // v30
     kartta.lohiTaalla = lohiTaalla; $('lohiTaalla').classList.toggle('paalla', lohiTaalla);
+    if (kartta.tasot.lohet === undefined) kartta.tasot.lohet = true;   // v58: lohien viikkoarvio oletuksena näkyvissä
     document.querySelectorAll('#sirut button').forEach(b => {
       b.classList.toggle('paalla', !!kartta.tasot[b.dataset.taso]);
       b.addEventListener('click', () => {
@@ -1979,12 +1993,12 @@ function lueKlooni(teksti) {
 // 1) Nousun lämpöraja: hakemiston phy.pinta (hae_copernicus.pintalampo) = alueen meriruutujen pintalämmön 10/50/90 %
 //    koko datajaksolta; ylitys mediaanista (Malli.lampoYlitys). Ei vaadi päivätiedostoja.
 let nousuTeksti = '';
-// ---------- v57: ikäluokkaennuste (silakkatietopohja v007 kohta 7.7, Hannu 17.11.2026) ----------
-// Koko rannikolle yksi tiedosto data/ikaluokat.json: huhtikuun pintalämpö Trelleborg–Sassnitz (hakuajo täydentää puuttuvat
-// vuodet, käytännössä kerran vuodessa toukokuun alussa). Malli ja parametrit ikaluokat.js:ssä.
+// ---------- v58: lohet alueittain (silakkatietopohja v009 kohta 7.7, Hannu 17.11.2026) ----------
+// Malli ikaluokat.js:ssä: toteutunut ajoitus Tornionjoen jokilaskurilla + huhtikuun lämpöero + viive alueelle.
+// data/ikaluokat.json: huhtikuun pintalämmöt (hakuajo täydentää puuttuvat vuodet, käytännössä kerran vuodessa).
 // var eikä let/const: piirra() voi ajaa ennen tätä riviä käynnistyksessä (let antaisi ReferenceErrorin).
 var ikaData = null, ikaHaettu = false;
-var IKA_VARIT = ['#3987e5', '#d95926', '#199e70'];   // 3MV, 2MV, kossit – värisokeustarkistus tummalla pohjalla #122236 läpi
+var IKA_VARIT = ['#3987e5', '#d95926', '#199e70'];   // isot, 2MV, kossit – värisokeustarkistus tummalla pohjalla #122236 läpi
 async function lataaIkaluokat() {
   const url = 'data/ikaluokat.json';
   try {
@@ -1996,75 +2010,118 @@ async function lataaIkaluokat() {
   ikaHaettu = true;
   piirraIkaluokat();
 }
-const ikaPv = d => d.getUTCDate() + '.' + (d.getUTCMonth() + 1) + '.';
-const ikaPros = x => Math.round(x * 100) + ' %';
 function ikaHuhti() { return (ikaData && ikaData.huhtikuu) || {}; }
 function ikaSiirtoTeksti(a) {
-  const s = a.siirto;
-  if (!s.vuosi) return 'Huhtikuun lämpöä ei vielä ole' + (ikaHaettu && !ikaData ? ' (tiedostoa ei saatu)' : '') + ': käyrät ilman lämpösiirtoa.';
-  const p = s.poikkeama, suunta = Math.abs(s.vrk) < 0.05 ? '' : s.vrk < 0 ? ' aiemmaksi' : ' myöhemmäksi';
-  let t = `Huhtikuu ${s.vuosi} Trelleborg–Sassnitz ${luku(s.T)} °C, ${luku(Math.abs(p))} °C ${p >= 0 ? 'lämpimämpi' : 'kylmempi'} kuin 2016–2025 `
-    + `keskimäärin (${luku(s.ref)} °C, ${s.n} v) → käyrät ${luku(Math.abs(s.vrk))} vrk${suunta}.`;
-  if (s.vuosi < a.kausiVuosi) t += ` Huhtikuun ${a.kausiVuosi} lämpö tulee toukokuun alussa; siihen asti käytetään vuoden ${s.vuosi} arvoa.`;
+  const s = a.siirto, I = Ikaluokat;
+  if (s.syy === 'ei-dataa') return 'Huhtikuun lämpöjä ei vielä ole' + (ikaHaettu && !ikaData ? ' (tiedostoa ei saatu)' : '') + ': ajoitus kuten 2025.';
+  if (s.syy === 'ei-pohjavuotta') return `Huhtikuun ${s.refVuosi} lämpö puuttuu (on vain ${s.vuosi}): ajoitus kuten ${s.refVuosi}.`;
+  if (s.syy === 'pohjavuosi') return `Lämpöero: käytössä vain huhtikuu ${s.refVuosi} → ajoitus kuten ${s.refVuosi}.`;
+  const e = s.T - s.ref, suunta = Math.abs(s.vrk) < 0.05 ? '' : s.vrk < 0 ? ' aiemmaksi' : ' myöhemmäksi';
+  let t = `Huhtikuu ${s.vuosi} Trelleborg–Sassnitz ${luku(s.T)} °C, ${s.refVuosi} ${luku(s.ref)} °C (${e >= 0 ? '+' : '−'}${luku(Math.abs(e))} °C) → ${luku(Math.abs(s.vrk))} vrk${suunta} kuin ${s.refVuosi}.`;
+  if (s.vuosi < a.kausiVuosi) t += ` Huhtikuun ${a.kausiVuosi} lämpö tulee toukokuun alussa; siihen asti vuoden ${s.vuosi} arvo.`;
   return t;
 }
-function ikaRiviTeksti(a) {
-  if (a.kaudella) return 'Saapunut (arvio): ' + a.luokat.map(L => `${L.lyhyt} ${ikaPros(L.osuus)}`).join(', ');
-  return `Saapuminen ${a.kausiVuosi} (arvio), puolet: ` + a.luokat.map(L => `${L.lyhyt} ${ikaPv(L.puolet)}`).join(', ');
+/** Vesillä-rivi: ennakko omalle (GPS) tai valitulle alueelle. */
+function ikaRiviTeksti(t, al) {
+  const a = Ikaluokat.alueArvio(t, ikaHuhti(), al);
+  return a ? `${al.nimi}: ${Ikaluokat.ennakkoTeksti(a)}` : '';
 }
-/** Kertymäkäyrät 1.5.–31.8. (SVG): kolme 2 px viivaa, 0/50/100 % apuviivat, nimet käyrän vieressä, tänään-viiva kaudella. */
-function ikaKayraSvg(a, huhti) {
-  const I = Ikaluokat, kv = a.kausiVuosi, vp = (m, d) => Math.round((Date.UTC(kv, m - 1, d) - Date.UTC(kv, 0, 1)) / 864e5) + 1;
-  const alku = vp(5, 1), loppu = vp(8, 31), W = 320, H = 150, x0 = 24, x1 = W - 6, y0 = 8, y1 = H - 20;
-  const X = d => x0 + (d - alku) / (loppu - alku) * (x1 - x0), Y = o => y1 - o * (y1 - y0);
-  const k = I.kayrat(kv, huhti, alku, loppu);
-  let g = '';
-  [0, 0.5, 1].forEach(o => { g += `<line x1="${x0}" x2="${x1}" y1="${Y(o)}" y2="${Y(o)}" stroke="#1f3550"/>`
-    + `<text x="${x0 - 3}" y="${Y(o) + 3.5}" font-size="10" fill="#8fa6ba" text-anchor="end">${o * 100}</text>`; });
-  [[5, 1], [6, 1], [7, 1], [8, 1]].forEach(([m, d]) => { const x = X(vp(m, d));
-    g += `<line x1="${x}" x2="${x}" y1="${y1}" y2="${y1 + 3}" stroke="#5d7690"/><text x="${x}" y="${H - 6}" font-size="10" fill="#8fa6ba" text-anchor="${m === 5 ? 'start' : 'middle'}">${d}.${m}.</text>`; });
-  if (a.kaudella) { const x = X(I.paiva(new Date()).vpv);
-    g += `<line x1="${x}" x2="${x}" y1="${y0}" y2="${y1}" stroke="#e9f1f7" stroke-dasharray="3 3" opacity="0.6"/><text x="${x + 3}" y="${y0 + 8}" font-size="10" fill="#e9f1f7">tänään</text>`; }
-  g += I.IKALUOKAT.map((L, i) => `<polyline points="${k.map(r => X(r.vpv).toFixed(1) + ',' + Y(r.osuudet[i]).toFixed(1)).join(' ')}" fill="none" stroke="${IKA_VARIT[i]}" stroke-width="2" stroke-linejoin="round"/>`).join('');
-  const tasot = [[0.8, 0.8416], [0.5, 0], [0.2, -0.8416]];   // nimet eri korkeuksille, ettei osu viereiseen käyrään
-  g += a.luokat.map((L, i) => { const [o, z] = tasot[i], x = X(L.mu + z * I.HAJONTA), y = Y(o);
-    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="${IKA_VARIT[i]}" stroke="#122236" stroke-width="2"/>`
-      + `<text x="${(x + 6).toFixed(1)}" y="${(y + 3.5).toFixed(1)}" font-size="11" fill="#e9f1f7">${L.lyhyt}</text>`; }).join('');
-  g += `<line id="ikaKursori" x1="0" x2="0" y1="${y0}" y2="${y1}" stroke="#ffd54a" stroke-width="1" visibility="hidden"/>`;
-  return { svg: `<svg viewBox="0 0 ${W} ${H}" aria-label="lohen saapumisen kertymä ikäluokittain ${kv}">${g}</svg>`, W, x0, x1, alku, loppu, X };
+/** Kartan viikkorivi kartan valitulle päivälle (7 vrk ikkuna). */
+function piirraLohetRivi() {
+  const el = $('lohetRivi');
+  if (!el || !kartta || !window.Ikaluokat || !IKA_VARIT) return;
+  const nayta = !!kartta.tasot.lohet;
+  if (el.hidden === nayta) { el.hidden = !nayta; setTimeout(mitoitaKartta, 0); }
+  el.onclick = () => { el.classList.toggle('auki'); mitoitaKartta(); };
+  if (!nayta) return;
+  const ajat = karttaAjat(), t = ajat.length ? new Date(ajat[kartta.aika]) : new Date(), I = Ikaluokat;
+  const a = I.viikkoArvio(t, ikaHuhti(), valittuAlue);
+  if (!a) { el.textContent = ''; return; }
+  const vk = a.vpv && a.tasoNyt >= 0.05 ? ` ${I.pvT(a.kausiVuosi, a.vpv - 3)}–${I.pvT(a.kausiVuosi, a.vpv + 3)}` : '';
+  el.textContent = `🐟 Lohet${vk} (arvio): ${I.viikkoTeksti(a)}`;
+}
+/** Kaksi kuvaajaa samalla aika-akselilla: päivittäin liikkeellä (pinottu) ja saapunut % (haarukka varjostettuna). */
+function ikaKuvaajat(a) {
+  const I = Ikaluokat, kv = a.kausiVuosi, alku = I.vpvPaivasta(kv, 5, 1), loppu = I.vpvPaivasta(kv, 8, 31);
+  const W = 320, x0 = 24, x1 = W - 6, X = d => x0 + (d - alku) / (loppu - alku) * (x1 - x0), k = I.kayrat(a, alku, loppu);
+  const akseli = (H, y1) => [[5, 1], [6, 1], [7, 1], [8, 1]].map(([m, d]) => { const x = X(I.vpvPaivasta(kv, m, d));
+    return `<line x1="${x}" x2="${x}" y1="${y1}" y2="${y1 + 3}" stroke="#5d7690"/><text x="${x}" y="${H - 5}" font-size="10" fill="#8fa6ba" text-anchor="${m === 5 ? 'start' : 'middle'}">${d}.${m}.</text>`; }).join('');
+  const tanaan = (y0, y1) => a.kaudella ? `<line x1="${X(a.vpv)}" x2="${X(a.vpv)}" y1="${y0}" y2="${y1}" stroke="#e9f1f7" stroke-dasharray="3 3" opacity="0.7"/>` : '';
+  const kursori = (id, y0, y1) => `<line id="${id}" x1="0" x2="0" y1="${y0}" y2="${y1}" stroke="#ffd54a" stroke-width="1" visibility="hidden"/>`;
+  // 1. liikkeellä: pinottu, isot alimpana
+  let H = 122, y0 = 16, y1 = H - 18, mx = Math.max(...k.map(r => r.paiva.reduce((s, v) => s + v, 0))), Y = v => y1 - v / mx * (y1 - y0);
+  let g = `<line x1="${x0}" x2="${x1}" y1="${y1}" y2="${y1}" stroke="#1f3550"/>` + akseli(H, y1);
+  const pj = a.paajoukko.keski;
+  g += `<rect x="${X(pj.alku)}" y="${y0 - 14}" width="${X(pj.loppu) - X(pj.alku)}" height="${y1 - y0 + 14}" fill="#e9f1f7" opacity="0.06"/>`
+    + `<text x="${(X(pj.alku) + X(pj.loppu)) / 2}" y="${y0 - 5}" font-size="10" fill="#8fa6ba" text-anchor="middle">pääjoukko ${I.pvT(kv, pj.alku)}–${I.pvT(kv, pj.loppu)}</text>`;
+  const pohja = k.map(() => 0);
+  [0, 1, 2].forEach(i => {
+    const yla = k.map((r, j) => pohja[j] + r.paiva[i]);
+    const pts = k.map((r, j) => `${X(r.vpv).toFixed(1)},${Y(yla[j]).toFixed(1)}`).concat(k.slice().reverse().map((r, jj) => `${X(r.vpv).toFixed(1)},${Y(pohja[k.length - 1 - jj]).toFixed(1)}`)).join(' ');
+    g += `<polygon points="${pts}" fill="${IKA_VARIT[i]}" opacity="0.85" stroke="#122236" stroke-width="1"/>`;
+    yla.forEach((v, j) => { pohja[j] = v; });
+  });
+  g += tanaan(y0, y1) + kursori('ikaKursori1', y0, y1);
+  const svg1 = `<svg viewBox="0 0 ${W} ${H}" aria-label="lohia liikkeellä päivittäin ${kv}">${g}</svg>`;
+  // 2. saapunut %
+  H = 140; y0 = 8; y1 = H - 18; Y = o => y1 - o * (y1 - y0);
+  g = '';
+  [0, 0.5, 1].forEach(o => { g += `<line x1="${x0}" x2="${x1}" y1="${Y(o)}" y2="${Y(o)}" stroke="#1f3550"/><text x="${x0 - 3}" y="${Y(o) + 3.5}" font-size="10" fill="#8fa6ba" text-anchor="end">${o * 100}</text>`; });
+  g += akseli(H, y1);
+  [0, 1, 2].forEach(i => {   // haarukka: aikainen (suurempi viive) – myöhäinen (pienempi viive)
+    const pts = k.map(r => `${X(r.vpv).toFixed(1)},${Y(r.aik[i]).toFixed(1)}`).concat(k.slice().reverse().map(r => `${X(r.vpv).toFixed(1)},${Y(r.myoh[i]).toFixed(1)}`)).join(' ');
+    g += `<polygon points="${pts}" fill="${IKA_VARIT[i]}" opacity="0.18"/>`;
+  });
+  g += [0, 1, 2].map(i => `<polyline points="${k.map(r => X(r.vpv).toFixed(1) + ',' + Y(r.keski[i]).toFixed(1)).join(' ')}" fill="none" stroke="${IKA_VARIT[i]}" stroke-width="2" stroke-linejoin="round"/>`).join('');
+  const z = [0.8416, 0, -0.8416], tasot = [0.8, 0.5, 0.2];   // nimet eri korkeuksille, ettei osu viereiseen käyrään
+  g += a.luokat.map((L, i) => { const x = X(L.mu + z[i] * I.HAJONTA), y = Y(tasot[i]);
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="${IKA_VARIT[i]}" stroke="#122236" stroke-width="2"/><text x="${(x + 6).toFixed(1)}" y="${(y + 3.5).toFixed(1)}" font-size="11" fill="#e9f1f7">${L.lyhyt}</text>`; }).join('');
+  g += tanaan(y0, y1) + kursori('ikaKursori2', y0, y1);
+  const svg2 = `<svg viewBox="0 0 ${W} ${H}" aria-label="lohia saapunut ${kv}">${g}</svg>`;
+  return { svg1, svg2, W, x0, x1, alku, loppu, X };
 }
 function piirraIkaluokat() {
-  const rivi = $('ikaRivi'), kortti = $('ikaKortti');
-  if (!window.Ikaluokat || !rivi || !kortti || !IKA_VARIT) return;
-  const I = Ikaluokat, huhti = ikaHuhti(), a = I.arvio(new Date(), huhti), kv = a.kausiVuosi;
-  rivi.textContent = ikaRiviTeksti(a) + ' ›'; rivi.hidden = false;
+  if (!window.Ikaluokat || !IKA_VARIT) return;
+  const rivi = $('ikaRivi'), kortti = $('ikaKortti'), I = Ikaluokat, huhti = ikaHuhti(), nyt = new Date();
+  if (!rivi || !kortti) return;
+  const oma = aktiivinenAlue();
+  rivi.textContent = ikaRiviTeksti(nyt, oma) + ' ›'; rivi.hidden = !oma;
   rivi.onclick = () => { avaa('v-raportit'); kortti.scrollIntoView(); };
-  $('ikaOtsikko').textContent = `Lohen saapuminen ikäluokittain ${kv} (arvio)`;
-  $('ikaSelite').innerHTML = a.luokat.map((L, i) => `<span><i style="border-color:${IKA_VARIT[i]}"></i>${L.nimi}: puolet ${ikaPv(L.puolet)}${a.kaudella ? ', nyt ' + ikaPros(L.osuus) : ''}</span>`).join('');
-  const k = ikaKayraSvg(a, huhti);
-  $('ikaKayra').innerHTML = k.svg;
-  const svg = $('ikaKayra').firstChild, kursori = svg.querySelector('#ikaKursori');
+  piirraLohetRivi();
+  const al = valittuAlue, a = I.alueArvio(nyt, huhti, al);
+  if (!a) { kortti.hidden = true; return; }
+  kortti.hidden = false;
+  const kv = a.kausiVuosi, pv = d => I.pvT(kv, d);
+  $('ikaOtsikko').textContent = `Lohet: ${al.nimi} ${kv} (arvio)`;
+  $('ikaEnnakko').textContent = I.ennakkoTeksti(a);
+  $('ikaSelite').innerHTML = a.luokat.map((L, i) => `<span><i style="border-color:${IKA_VARIT[i]}"></i>${L.nimi}, ${L.paino}: puolet ${pv(L.mu)} (${pv(L.muAik)}–${pv(L.muMyoh)})</span>`).join('');
+  const k = ikaKuvaajat(a);
+  $('ikaTiheys').innerHTML = k.svg1; $('ikaKayra').innerHTML = k.svg2;
+  const svgt = [$('ikaTiheys').firstChild, $('ikaKayra').firstChild];
   const nayta = ev => {
-    const r = svg.getBoundingClientRect(), xv = (ev.clientX - r.left) / r.width * k.W;
+    const r = ev.currentTarget.getBoundingClientRect(), xv = (ev.clientX - r.left) / r.width * k.W;
     const d = Math.max(k.alku, Math.min(k.loppu, Math.round(k.alku + (xv - k.x0) / (k.x1 - k.x0) * (k.loppu - k.alku))));
-    const o = I.kayrat(kv, huhti, d, d)[0].osuudet, x = k.X(d);
-    kursori.setAttribute('x1', x); kursori.setAttribute('x2', x); kursori.setAttribute('visibility', 'visible');
-    $('ikaLuku').textContent = `${ikaPv(I.paivaksi(kv, d))}: ` + a.luokat.map((L, i) => `${L.lyhyt} ${ikaPros(o[i])}`).join(' · ');
+    svgt.forEach((s, j) => { const c = s.querySelector('#ikaKursori' + (j + 1)); c.setAttribute('x1', k.X(d)); c.setAttribute('x2', k.X(d)); c.setAttribute('visibility', 'visible'); });
+    const p = I.paivaksi(kv, d), b = I.alueArvio(new Date(Date.UTC(p.getUTCFullYear(), p.getUTCMonth(), p.getUTCDate(), 9)), huhti, al);
+    const c = b.kokoNyt, jarj = [0, 1, 2].sort((x, y) => c[y] - c[x]).filter(i => c[i] >= 0.05);
+    $('ikaLuku').textContent = `${pv(d)}: ${b.tasoSana}` + (b.tasoNyt >= 0.05 ? ' · viikon kaloista ' + jarj.map(i => `${b.luokat[i].lyhyt} ${Math.round(c[i] * 100)} %`).join(', ') : '')
+      + ' · saapunut ' + b.luokat.map(L => `${L.lyhyt} ${Math.round(L.osuusNyt * 100)} %`).join(', ');
   };
-  svg.addEventListener('pointerdown', nayta); svg.addEventListener('pointermove', ev => { if (ev.buttons || ev.pointerType === 'mouse') nayta(ev); });
-  const pvt = [[5, 15], [5, 29], [6, 12], [6, 26], [7, 10], [7, 24]].map(([m, d]) => Math.round((Date.UTC(kv, m - 1, d) - Date.UTC(kv, 0, 1)) / 864e5) + 1);
-  const rivit = pvt.map(d => I.kayrat(kv, huhti, d, d)[0]);
-  $('ikaTaulu').innerHTML = '<tr><th>Saapunut</th>' + rivit.map(r => `<th>${ikaPv(I.paivaksi(kv, r.vpv))}</th>`).join('') + '</tr>'
-    + a.luokat.map((L, i) => `<tr><td>${L.lyhyt}</td>` + rivit.map(r => `<td>${Math.round(r.osuudet[i] * 100)}</td>`).join('') + '</tr>').join('');
-  const O = I.OSUUDET, v = ikaData && ikaData.vertailu, h = huhti, lahteet = Object.keys(h).filter(y => h[y] && h[y].lahde);
-  const lahdeTxt = lahteet.length ? ` Lämpö: Copernicus DMI-satelliittianalyysi, ${lahteet.filter(y => h[y].lahde === 'REP').length} v uusinta-ajosta ja `
-    + `${lahteet.filter(y => h[y].lahde === 'NRT').length} v reaaliaikaisesta` + (v && isFinite(v.erotus) ? ` (ero samana huhtikuuna ${v.vuosi}: ${v.erotus > 0 ? '+' : ''}${luku(v.erotus, 2)} °C)` : '') + '.' : '';
+  svgt.forEach(s => { s.addEventListener('pointerdown', nayta); s.addEventListener('pointermove', ev => { if (ev.buttons || ev.pointerType === 'mouse') nayta(ev); }); });
+  // alueet etelästä pohjoiseen
+  const alueet = ALUELISTA.map(x => ({ x, a: I.alueArvio(nyt, huhti, x) })).filter(o => o.a).sort((p, q) => q.a.viive.km - p.a.viive.km);
+  $('ikaTaulu').innerHTML = '<tr><th>Alue</th><th>Alkaa</th><th>Huippu</th><th>Kossit</th><th>±vrk</th></tr>'
+    + alueet.map(({ x, a: b }) => `<tr class="${x === al ? 'oma' : ''}"><td>${x.nimi.split('–')[0]}</td><td>${pv(b.paajoukko.keski.alku)}</td><td>${pv(b.paajoukko.keski.huippu)}</td>`
+      + `<td>${pv(b.luokat[2].mu)}</td><td>${I.haarukka(b)}</td></tr>`).join('');
+  const O = I.OSUUDET, v = ikaData && ikaData.vertailu, T = I.TOTEUMA, vi = a.viive;
   $('ikaTiedot').innerHTML = [
-    'Kertymä = kuinka suuri osa ikäluokan lohista on ohittanut Suomen rannikon (rannikon keskiarvo, ei Luotoa erikseen). Taulukossa %.',
-    ikaSiirtoTeksti(a) + lahdeTxt,
-    `Osuudet ${O.lahde}: kaikuluotaus kossit ${O.kaiku.kossi.toLocaleString('fi-FI')} (${Math.round(O.kaiku.kossi / O.kaiku.yht * 100)} %), monimerivuotiset ${O.kaiku.msw.toLocaleString('fi-FI')}; jokisaaliin suomunäytteet kossit ${ikaPros(O.suomu.kossi)}, 2MV ${ikaPros(O.suomu['2MV'])}. Päivitetään vuoden 2027 selvityksestä.`,
-    'Malli: Karlsson ym. 1994 (Ruotsin istutuslohet 1974–92): 2MV keskimäärin 16.6., 3MV 14 vrk aiemmin, kossit 14 vrk myöhemmin, hajonta 17 vrk, 4,6 vrk/°C. '
-      + 'Tarkistus 2025 Kattilakoskella: monimerivuotisten huippu 24.–26.6. sopii, kossit tulivat noin viikon mallia myöhemmin. Ei vielä kalibroitu omilla saaliilla.',
+    `Pohja: toteutunut nousu – ${T.teksti} (jokilaskuri noin ${I.JOKI_KM} km jokisuusta). Tältä alueelta laskurille ${Math.round(vi.km)} km merta + ${I.JOKI_KM} km jokea, `
+      + `${I.NOPEUS[0]}–${I.NOPEUS[1]} km/vrk → ${luku(vi.min, 0)}–${luku(vi.max, 0)} vrk; varjostus = tämä haarukka. Alkaa = viikon kalamäärä yli puolet huipusta.`,
+    ikaSiirtoTeksti(a) + (v && isFinite(v.erotus) ? ` (Satelliittilähteiden ero huhtikuussa ${v.vuosi}: ${v.erotus > 0 ? '+' : ''}${luku(v.erotus, 2)} °C.)` : ''),
+    `Koko: 2MV noin 4–8 kg (Luke 2026), lisämerivuosi +4–5 kg → isot yli 8 kg, kossit alle 4 kg. Osuudet ${O.lahde}: kaikuluotaus kossit ${O.kaiku.kossi.toLocaleString('fi-FI')} `
+      + `(${Math.round(O.kaiku.kossi / O.kaiku.yht * 100)} %), monimerivuotiset ${O.kaiku.msw.toLocaleString('fi-FI')}; suomunäytteet kossit ${Math.round(O.suomu.kossi * 100)} %, 2MV ${Math.round(O.suomu['2MV'] * 100)} %.`,
+    'Ikäluokan sisäinen hajonta 15,5 vrk ja isot 14 vrk ennen 2MV:tä: Karlsson ym. 1994. 2026: nousu kiihtyi juhannuksena 2MV-kalojen myötä (Luke 9.7.2026). '
+      + 'Päivittyy: huhtikuun lämpö toukokuun alussa, pohjavuosi helmikuun biologisesta selvityksestä. Ei vielä kalibroitu omilla saaliilla.',
   ].map(t => `<p>${t}</p>`).join('');
 }
 function piirraNousu() {
