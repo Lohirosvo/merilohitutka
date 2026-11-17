@@ -630,6 +630,7 @@
       this.havainnot = opts.havainnot || [];   // havainnot.js
       this.jalki = opts.jalki || [];   // oma reittijälki 24 h (v20)
       this.matalikot = []; this.matalikkoVali = '10–20';
+      this.silakkaFn = null;   // v50: (aikaIndeksi) => { lat, lon, luokka[i][j] (0 ei, 1 sopiva, 2 optimi), vaiheet, kaudella } tai null
       this.lohiTaalla = false; this.valittuOma = false;   // v24: lohikerros omalla kohdalla (profiili seuraa venettä)
       this.ais = [];   // AIS-kohteet (v23): [{ lat, lon, t, sog, cog, suunta, liikkuu, vari, nimi }]   // matalikot()-tuloksen lista ja selitteen väli (v21)
       this.laatat = new Map(); this.onNapautus = opts.onNapautus || (() => {});
@@ -763,6 +764,7 @@
       }
       if (this.tasot.syvyys && this.syvyys) this._syvyys();   // lämpökäyrien päälle: 20 m ja 6 m erottuvat
       if (this.tasot.matalikot && this.matalikot.length) this._matalikot();
+      if (this.tasot.silakka && this.silakkaFn) this._silakka();   // v50: pohjan sopivuus silakan vaiheelle
       if (this.tasot.vaylat && this.vaylat) this._vaylat();
       if (this.tasot.havainnot && this.havainnot.length) this._havainnot();   // virta- ja tuulinuolten alle
       if (d && this.tasot.virta && d.phy) this._virta();
@@ -1069,6 +1071,25 @@
 
     }
 
+    /** Silakka (v50, tietopohja kohta 6 ensimmäinen versio): mallin ruuduittain pohjan syvyyden sopivuus silakan
+     *  vaiheelle: optimi = täytetty piste, sopiva = rengas, ei sovi = ei mitään. Pisteet eivät peitä lohikerroksen värejä. */
+    _silakka() {
+      const r = this.silakkaFn(this.aika); if (!r || !r.luokka) return;
+      const g = this.ctx, dl = Math.abs(r.lat[1] - r.lat[0]) || 0.01, dn = Math.abs(r.lon[1] - r.lon[0]) || 0.02;
+      const [xa, ya] = this.ruutu(r.lat[0], r.lon[0]), [xb, yb] = this.ruutu(r.lat[0] + dl, r.lon[0] + dn);
+      const koko = Math.min(Math.abs(xb - xa), Math.abs(yb - ya)), sade = Math.max(1.5, Math.min(4.5, koko * 0.15));
+      if (koko < 6) return;   // liian pieni zoom: pisteet sotkisivat
+      g.save(); g.lineWidth = Math.max(1, sade * 0.35);
+      for (let i = 0; i < r.lat.length; i++) for (let j = 0; j < r.lon.length; j++) {
+        const L = r.luokka[i] && r.luokka[i][j]; if (!L) continue;
+        const [x, y] = this.ruutu(r.lat[i], r.lon[j]);
+        if (x < -sade || y < -sade || x > this.w + sade || y > this.h + sade) continue;
+        g.beginPath(); g.arc(x, y, sade, 0, 2 * Math.PI);
+        if (L === 2) { g.fillStyle = 'rgba(79,227,255,0.9)'; g.fill(); g.strokeStyle = 'rgba(0,30,50,0.8)'; g.stroke(); }
+        else { g.strokeStyle = 'rgba(79,227,255,0.9)'; g.stroke(); }
+      }
+      g.restore();
+    }
     _aalto() {
       const wv = this.data.wav, g = this.ctx;
       const t = lahinAika(wv.ajat, Date.parse(this.data.phy ? this.data.phy.ajat[this.aika] : wv.ajat[0]));
@@ -1493,7 +1514,13 @@
         ['▲ suurin aalto', '#ff3c3c'], ['▲ jyrkin', '#b07cff']]);   // v30
       if (this.sillat.some(s => this._nakyvissa(s.lat, s.lon))) rivit.push([['Silta: alikulku → nyt', '#e9f1f7'], ['mahtuu', '#e9f1f7', SILTAVARIT.mahtuu],
         ['ei mahdu', '#e9f1f7', SILTAVARIT.ei], ['ei vedenkorkeutta', '#e9f1f7', SILTAVARIT.tuntematon]]);   // v35
-      if (this.tasot.silakka) rivit.push([['Silakka: napauta karttaa – valokerros (malli, kartan aika)', '#9fd8ff']]);   // v43
+      if (this.tasot.silakka) {   // v43, v50
+        const r = this.silakkaFn ? this.silakkaFn(this.aika) : null;
+        if (r && r.luokka) {
+          rivit.push([['Silakka' + (r.vaiheet ? ' (' + r.vaiheet + ')' : '') + ', pohja:', '#9fd8ff'], ['● optimi', '#4fe3ff'], ['○ sopiva', '#4fe3ff']]);
+          rivit.push([['', '#9fd8ff'], [(r.kaudella ? 'työoletus' : 'lohikauden ulkopuolella: laskenta') + ' · napauta: kerros', '#9fd8ff']]);
+        } else rivit.push([['Silakka: napauta karttaa – kerros (malli, kartan aika)', '#9fd8ff']]);
+      }
       if (this.tasot.lampo && d.phy) rivit.push([['Lämpö (malli) ' + f(this.askel) + ' °C välein', '#ffb24a']]);
       if (this.tasot.sst && d.sst) rivit.push([['Satelliitti: katkoviiva', '#ffffff']]);
       if (this.tasot.virta && d.phy) rivit.push([['Virta: nuoli ≈ 0,9 km/h (0,25 m/s)', '#78ebff']]);

@@ -395,7 +395,7 @@
 <script src="malli.js?v=25"></script>
 <script src="fmi.js?v=14"></script>
 <script src="nopeus.js?v=20"></script>
-<script src="kartta.js?v=33"></script>
+<script src="kartta.js?v=34"></script>
 <script src="sillat.js?v=2"></script>
 <script src="silakka.js?v=4"></script>
 <script src="reitti.js?v=9"></script>
@@ -1366,6 +1366,7 @@ function avaaKarttaNakyma() {
     if (tila.tasot) Object.assign(kartta.tasot, tila.tasot);
     kartta.tasot.tausta = true; kartta.tasot.syvyys = true;   // Hannu 10.11.: aina päällä, ei nappia
     kartta.syvyys = syvyys; kartta.vaylat = vaylat; laskeMatalikot();
+    kartta.silakkaFn = silakkaRuudut;   // v50
     paivitaReititKartalle();   // v30
     kartta.lohiTaalla = lohiTaalla; $('lohiTaalla').classList.toggle('paalla', lohiTaalla);
     document.querySelectorAll('#sirut button').forEach(b => {
@@ -1738,6 +1739,40 @@ function kerrosPisteessa(lat, lon, t) {
   if (!(ti >= 0) || Math.abs(Date.parse(k.ajat[ti]) - t.getTime()) > (k.ajat.length > 2 ? 3 : 24) * 3600000) return null;
   const pt = k.pt ? KarttaMalli.lahinArvo(k, 'pt', ti, lat, lon) : NaN, mld = k.mld ? KarttaMalli.lahinArvo(k, 'mld', ti, lat, lon) : NaN;
   return isFinite(pt) || isFinite(mld) ? { pt, mld } : null;
+}
+/** v50: silakkataso kartalle – pohjan sopivuus vaiheelle mallin ruuduittain (kerros-ruudukko). Pohja lasketaan kerran
+ *  (mallin pohja + merikartan käyrät, pohjaArvio), vaihe ja luokka kartan ajalle (muisti aikaleiman mukaan). */
+let silakkaVarasto = { avain: null, pohja: null, ajat: {} };
+function silakkaRuudut(aika) {
+  const al = valittuAlue, k = nakyma && nakyma.kerros;
+  if (!al.silakka || !window.Silakka || !Silakka.vaiheLampo || !k || !k.pt || !k.ajat || !k.ajat.length) return null;
+  if (silakkaVarasto.avain !== meri || silakkaVarasto.syv !== syvyys || silakkaVarasto.M !== matalikkoTulos || silakkaVarasto.lat !== k.lat) {
+    const pl = pohjaLahde();
+    silakkaVarasto = { avain: meri, syv: syvyys, M: matalikkoTulos, lat: k.lat, ajat: {},
+      pohja: k.lat.map(la => k.lon.map(lo => {
+        const malli = pl ? KarttaMalli.lahinArvo(pl, 'syv', 0, la, lo) : NaN;
+        if (!isFinite(malli)) return NaN;   // maa tai mallin ulkopuolella
+        return syvyys && KarttaMalli.pohjaArvio ? KarttaMalli.pohjaArvio(syvyys, matalikkoTulos, la, lo, malli).arvio : malli;
+      })) };
+  }
+  const ajat = karttaAjat(), ms = ajat && ajat[aika] ? Date.parse(ajat[aika]) : Date.now();
+  if (silakkaVarasto.ajat[ms]) return silakkaVarasto.ajat[ms];
+  const ti = KarttaMalli.lahinAika(k.ajat, ms);
+  if (!(ti >= 0) || Math.abs(Date.parse(k.ajat[ti]) - ms) > 3 * 3600000) return null;
+  const ai = lahinIndeksiAjoista(nakyma.phy ? nakyma.phy.ajat : [], ms, 5400000), vaiheet = new Set();
+  const luokka = k.lat.map((la, i) => k.lon.map((lo, j) => {
+    const pt = k.pt[ti] && k.pt[ti][i] ? k.pt[ti][i][j] : null, z = silakkaVarasto.pohja[i][j];
+    if (pt === null || !isFinite(z)) return 0;
+    const pinta = ai >= 0 ? KarttaMalli.lahinArvo(nakyma.phy, 'lampo', ai, la, lo) : NaN, v = Silakka.vaiheLampo(pt, pinta);
+    if (!v || !Silakka.VAIHEET[v].pohja) return 0;
+    vaiheet.add(Silakka.VAIHEET[v].nimi);
+    const s = Silakka.sopivuus(z, Silakka.VAIHEET[v].pohja);
+    return s === 'optimi' ? 2 : s === 'sopiva' ? 1 : 0;
+  }));
+  const r = { lat: k.lat, lon: k.lon, luokka, vaiheet: vaiheet.size === 1 ? [...vaiheet][0] : vaiheet.size ? 'vaihe ruuduittain' : '',
+              kaudella: Silakka.kaudella(new Date(ms), al.silakka.kausi) };
+  silakkaVarasto.ajat[ms] = r;
+  return r;
 }
 /** v49: vaihemallin osa napautustekstiin. */
 function vaiheOsa(a, m) {
