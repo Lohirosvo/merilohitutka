@@ -43,6 +43,12 @@
   .rivi span:last-child { font-weight:700; text-align:right; }
   .yli { color:#ff8a7a; }
   .pieni { font-size:14px; color:var(--himmea); }
+  .ikarivi { margin:-4px 2px 10px; }   /* v57 */
+  .ikaselite { display:flex; flex-wrap:wrap; gap:4px 14px; font-size:14px; margin:2px 0 4px; }
+  .ikaselite i { display:inline-block; width:18px; height:0; border-top:2px solid; vertical-align:middle; margin-right:5px; }
+  #ikaKayra svg { width:100%; height:auto; display:block; touch-action:pan-y; }
+  .ikataulu { width:100%; border-collapse:collapse; font-size:14px; margin:6px 0; }
+  .ikataulu th, .ikataulu td { text-align:right; padding:1px 4px; } .ikataulu th:first-child, .ikataulu td:first-child { text-align:left; }
   table { width:100%; border-collapse:collapse; font-size:16px; }
   td, th { padding:3px 4px; text-align:right; } th { color:var(--himmea); font-weight:600; }
   td:first-child, th:first-child { text-align:left; }
@@ -171,6 +177,7 @@
       <div class="lahto" id="tilaLahto"></div>
       <ul id="tilaSyyt"></ul>
     </div>
+    <div class="pieni ikarivi" id="ikaRivi" role="button" hidden></div>
 
     <div class="kortti" id="vPaluu">
       <h2>Paluu</h2>
@@ -295,6 +302,14 @@
       <h2>Reissut</h2>
       <div id="reissut" class="pieni">Ei vielä reissuja.</div>
     </div>
+    <div class="kortti" id="ikaKortti">
+      <h2 id="ikaOtsikko">Lohen saapuminen ikäluokittain (arvio)</h2>
+      <div class="ikaselite" id="ikaSelite"></div>
+      <div id="ikaKayra"></div>
+      <div class="pieni" id="ikaLuku">Napauta käyrää: päivän osuudet.</div>
+      <table class="ikataulu" id="ikaTaulu"></table>
+      <div class="pieni" id="ikaTiedot"></div>
+    </div>
     <div class="kortti">
       <h2>Merelle ilman verkkoa</h2>
       <div class="pieni" id="offlineTila">Tarkistetaan…</div>
@@ -398,6 +413,7 @@
 <script src="kartta.js?v=35"></script>
 <script src="sillat.js?v=2"></script>
 <script src="silakka.js?v=8"></script>
+<script src="ikaluokat.js?v=1"></script>
 <script src="reitti.js?v=9"></script>
 <script src="ais.js?v=23"></script>
 <script>
@@ -732,6 +748,7 @@ function kaynnistaGps() {
 // ---------- Paluuikkuna ----------
 function piirra() {
   const nyt = new Date(), al = aktiivinenAlue();
+  piirraIkaluokat();   // v57
   const oma = dataAlue === al.tunnus, havainnot = oma ? havaintoData : [], ennuste = oma ? ennusteData : [];
   let t, otsikot, lahto;
   if (al.paluuikkuna) {
@@ -865,6 +882,7 @@ async function haeKaikki() {
     ennusteLahde = 'Lähde: ' + ok[0].lahde + (ok[0].puuska ? '' : ' – puuskaa ei saatu') + ' · ' + mista;
   }
   await lataaMeri();
+  lataaIkaluokat();   // v57: koko rannikon yhteinen tiedosto (huhtikuun lämpö), ei odoteta
   tallennaLS('mlt_data', { aika: nyt, alue: al.tunnus, havainnot: havaintoData, ennuste: ennusteData });
   paivitaOfflineTila();   // v26
   $('paivitetty').textContent = ' päivitetty klo ' + klo(nyt) + (virheet.length ? ' (osa hauista epäonnistui)' : '');
@@ -1961,6 +1979,94 @@ function lueKlooni(teksti) {
 // 1) Nousun lämpöraja: hakemiston phy.pinta (hae_copernicus.pintalampo) = alueen meriruutujen pintalämmön 10/50/90 %
 //    koko datajaksolta; ylitys mediaanista (Malli.lampoYlitys). Ei vaadi päivätiedostoja.
 let nousuTeksti = '';
+// ---------- v57: ikäluokkaennuste (silakkatietopohja v007 kohta 7.7, Hannu 17.11.2026) ----------
+// Koko rannikolle yksi tiedosto data/ikaluokat.json: huhtikuun pintalämpö Trelleborg–Sassnitz (hakuajo täydentää puuttuvat
+// vuodet, käytännössä kerran vuodessa toukokuun alussa). Malli ja parametrit ikaluokat.js:ssä.
+// var eikä let/const: piirra() voi ajaa ennen tätä riviä käynnistyksessä (let antaisi ReferenceErrorin).
+var ikaData = null, ikaHaettu = false;
+var IKA_VARIT = ['#3987e5', '#d95926', '#199e70'];   // 3MV, 2MV, kossit – värisokeustarkistus tummalla pohjalla #122236 läpi
+async function lataaIkaluokat() {
+  const url = 'data/ikaluokat.json';
+  try {
+    const r = await fetch(url, { cache: 'no-cache' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    await tallennaVarastoon(url, r.clone());
+    ikaData = await r.json();
+  } catch (e) { if (!ikaData) ikaData = await haeVarastosta(url); }
+  ikaHaettu = true;
+  piirraIkaluokat();
+}
+const ikaPv = d => d.getUTCDate() + '.' + (d.getUTCMonth() + 1) + '.';
+const ikaPros = x => Math.round(x * 100) + ' %';
+function ikaHuhti() { return (ikaData && ikaData.huhtikuu) || {}; }
+function ikaSiirtoTeksti(a) {
+  const s = a.siirto;
+  if (!s.vuosi) return 'Huhtikuun lämpöä ei vielä ole' + (ikaHaettu && !ikaData ? ' (tiedostoa ei saatu)' : '') + ': käyrät ilman lämpösiirtoa.';
+  const p = s.poikkeama, suunta = Math.abs(s.vrk) < 0.05 ? '' : s.vrk < 0 ? ' aiemmaksi' : ' myöhemmäksi';
+  let t = `Huhtikuu ${s.vuosi} Trelleborg–Sassnitz ${luku(s.T)} °C, ${luku(Math.abs(p))} °C ${p >= 0 ? 'lämpimämpi' : 'kylmempi'} kuin 2016–2025 `
+    + `keskimäärin (${luku(s.ref)} °C, ${s.n} v) → käyrät ${luku(Math.abs(s.vrk))} vrk${suunta}.`;
+  if (s.vuosi < a.kausiVuosi) t += ` Huhtikuun ${a.kausiVuosi} lämpö tulee toukokuun alussa; siihen asti käytetään vuoden ${s.vuosi} arvoa.`;
+  return t;
+}
+function ikaRiviTeksti(a) {
+  if (a.kaudella) return 'Saapunut (arvio): ' + a.luokat.map(L => `${L.lyhyt} ${ikaPros(L.osuus)}`).join(', ');
+  return `Saapuminen ${a.kausiVuosi} (arvio), puolet: ` + a.luokat.map(L => `${L.lyhyt} ${ikaPv(L.puolet)}`).join(', ');
+}
+/** Kertymäkäyrät 1.5.–31.8. (SVG): kolme 2 px viivaa, 0/50/100 % apuviivat, nimet käyrän vieressä, tänään-viiva kaudella. */
+function ikaKayraSvg(a, huhti) {
+  const I = Ikaluokat, kv = a.kausiVuosi, vp = (m, d) => Math.round((Date.UTC(kv, m - 1, d) - Date.UTC(kv, 0, 1)) / 864e5) + 1;
+  const alku = vp(5, 1), loppu = vp(8, 31), W = 320, H = 150, x0 = 24, x1 = W - 6, y0 = 8, y1 = H - 20;
+  const X = d => x0 + (d - alku) / (loppu - alku) * (x1 - x0), Y = o => y1 - o * (y1 - y0);
+  const k = I.kayrat(kv, huhti, alku, loppu);
+  let g = '';
+  [0, 0.5, 1].forEach(o => { g += `<line x1="${x0}" x2="${x1}" y1="${Y(o)}" y2="${Y(o)}" stroke="#1f3550"/>`
+    + `<text x="${x0 - 3}" y="${Y(o) + 3.5}" font-size="10" fill="#8fa6ba" text-anchor="end">${o * 100}</text>`; });
+  [[5, 1], [6, 1], [7, 1], [8, 1]].forEach(([m, d]) => { const x = X(vp(m, d));
+    g += `<line x1="${x}" x2="${x}" y1="${y1}" y2="${y1 + 3}" stroke="#5d7690"/><text x="${x}" y="${H - 6}" font-size="10" fill="#8fa6ba" text-anchor="${m === 5 ? 'start' : 'middle'}">${d}.${m}.</text>`; });
+  if (a.kaudella) { const x = X(I.paiva(new Date()).vpv);
+    g += `<line x1="${x}" x2="${x}" y1="${y0}" y2="${y1}" stroke="#e9f1f7" stroke-dasharray="3 3" opacity="0.6"/><text x="${x + 3}" y="${y0 + 8}" font-size="10" fill="#e9f1f7">tänään</text>`; }
+  g += I.IKALUOKAT.map((L, i) => `<polyline points="${k.map(r => X(r.vpv).toFixed(1) + ',' + Y(r.osuudet[i]).toFixed(1)).join(' ')}" fill="none" stroke="${IKA_VARIT[i]}" stroke-width="2" stroke-linejoin="round"/>`).join('');
+  const tasot = [[0.8, 0.8416], [0.5, 0], [0.2, -0.8416]];   // nimet eri korkeuksille, ettei osu viereiseen käyrään
+  g += a.luokat.map((L, i) => { const [o, z] = tasot[i], x = X(L.mu + z * I.HAJONTA), y = Y(o);
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="${IKA_VARIT[i]}" stroke="#122236" stroke-width="2"/>`
+      + `<text x="${(x + 6).toFixed(1)}" y="${(y + 3.5).toFixed(1)}" font-size="11" fill="#e9f1f7">${L.lyhyt}</text>`; }).join('');
+  g += `<line id="ikaKursori" x1="0" x2="0" y1="${y0}" y2="${y1}" stroke="#ffd54a" stroke-width="1" visibility="hidden"/>`;
+  return { svg: `<svg viewBox="0 0 ${W} ${H}" aria-label="lohen saapumisen kertymä ikäluokittain ${kv}">${g}</svg>`, W, x0, x1, alku, loppu, X };
+}
+function piirraIkaluokat() {
+  const rivi = $('ikaRivi'), kortti = $('ikaKortti');
+  if (!window.Ikaluokat || !rivi || !kortti || !IKA_VARIT) return;
+  const I = Ikaluokat, huhti = ikaHuhti(), a = I.arvio(new Date(), huhti), kv = a.kausiVuosi;
+  rivi.textContent = ikaRiviTeksti(a) + ' ›'; rivi.hidden = false;
+  rivi.onclick = () => { avaa('v-raportit'); kortti.scrollIntoView(); };
+  $('ikaOtsikko').textContent = `Lohen saapuminen ikäluokittain ${kv} (arvio)`;
+  $('ikaSelite').innerHTML = a.luokat.map((L, i) => `<span><i style="border-color:${IKA_VARIT[i]}"></i>${L.nimi}: puolet ${ikaPv(L.puolet)}${a.kaudella ? ', nyt ' + ikaPros(L.osuus) : ''}</span>`).join('');
+  const k = ikaKayraSvg(a, huhti);
+  $('ikaKayra').innerHTML = k.svg;
+  const svg = $('ikaKayra').firstChild, kursori = svg.querySelector('#ikaKursori');
+  const nayta = ev => {
+    const r = svg.getBoundingClientRect(), xv = (ev.clientX - r.left) / r.width * k.W;
+    const d = Math.max(k.alku, Math.min(k.loppu, Math.round(k.alku + (xv - k.x0) / (k.x1 - k.x0) * (k.loppu - k.alku))));
+    const o = I.kayrat(kv, huhti, d, d)[0].osuudet, x = k.X(d);
+    kursori.setAttribute('x1', x); kursori.setAttribute('x2', x); kursori.setAttribute('visibility', 'visible');
+    $('ikaLuku').textContent = `${ikaPv(I.paivaksi(kv, d))}: ` + a.luokat.map((L, i) => `${L.lyhyt} ${ikaPros(o[i])}`).join(' · ');
+  };
+  svg.addEventListener('pointerdown', nayta); svg.addEventListener('pointermove', ev => { if (ev.buttons || ev.pointerType === 'mouse') nayta(ev); });
+  const pvt = [[5, 15], [5, 29], [6, 12], [6, 26], [7, 10], [7, 24]].map(([m, d]) => Math.round((Date.UTC(kv, m - 1, d) - Date.UTC(kv, 0, 1)) / 864e5) + 1);
+  const rivit = pvt.map(d => I.kayrat(kv, huhti, d, d)[0]);
+  $('ikaTaulu').innerHTML = '<tr><th>Saapunut</th>' + rivit.map(r => `<th>${ikaPv(I.paivaksi(kv, r.vpv))}</th>`).join('') + '</tr>'
+    + a.luokat.map((L, i) => `<tr><td>${L.lyhyt}</td>` + rivit.map(r => `<td>${Math.round(r.osuudet[i] * 100)}</td>`).join('') + '</tr>').join('');
+  const O = I.OSUUDET, v = ikaData && ikaData.vertailu, h = huhti, lahteet = Object.keys(h).filter(y => h[y] && h[y].lahde);
+  const lahdeTxt = lahteet.length ? ` Lämpö: Copernicus DMI-satelliittianalyysi, ${lahteet.filter(y => h[y].lahde === 'REP').length} v uusinta-ajosta ja `
+    + `${lahteet.filter(y => h[y].lahde === 'NRT').length} v reaaliaikaisesta` + (v && isFinite(v.erotus) ? ` (ero samana huhtikuuna ${v.vuosi}: ${v.erotus > 0 ? '+' : ''}${luku(v.erotus, 2)} °C)` : '') + '.' : '';
+  $('ikaTiedot').innerHTML = [
+    'Kertymä = kuinka suuri osa ikäluokan lohista on ohittanut Suomen rannikon (rannikon keskiarvo, ei Luotoa erikseen). Taulukossa %.',
+    ikaSiirtoTeksti(a) + lahdeTxt,
+    `Osuudet ${O.lahde}: kaikuluotaus kossit ${O.kaiku.kossi.toLocaleString('fi-FI')} (${Math.round(O.kaiku.kossi / O.kaiku.yht * 100)} %), monimerivuotiset ${O.kaiku.msw.toLocaleString('fi-FI')}; jokisaaliin suomunäytteet kossit ${ikaPros(O.suomu.kossi)}, 2MV ${ikaPros(O.suomu['2MV'])}. Päivitetään vuoden 2027 selvityksestä.`,
+    'Malli: Karlsson ym. 1994 (Ruotsin istutuslohet 1974–92): 2MV keskimäärin 16.6., 3MV 14 vrk aiemmin, kossit 14 vrk myöhemmin, hajonta 17 vrk, 4,6 vrk/°C. '
+      + 'Tarkistus 2025 Kattilakoskella: monimerivuotisten huippu 24.–26.6. sopii, kossit tulivat noin viikon mallia myöhemmin. Ei vielä kalibroitu omilla saaliilla.',
+  ].map(t => `<p>${t}</p>`).join('');
+}
 function piirraNousu() {
   const el = $('nousuTila'), lisa = $('nousuLisa'), raja = asetukset.nousuLampo, nimi = valittuAlue.nimi;
   const r = meri && meri.phy && meri.phy.pinta ? Malli.lampoYlitys(meri.phy.pinta, raja, Date.now()) : null;

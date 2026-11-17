@@ -21,6 +21,12 @@ pisteisiin (hae_tuuli.py, päivätiedostoihin). Näiden epäonnistuminen ei vaik
 v54 (17.11.2026): alueille, joilla "silakka": {"happi": true} (Eckerö), BGC-hakuun myös pohjan happi o2b (mmol/m3,
 päivätiedoston bgc.o2b); jos se ei onnistu, haetaan kd/zsd kuten ennen.
 
+v57 (17.11.2026, silakkatietopohja v007 kohta 7.7): huhtikuun pintalämpö Trelleborg–Sassnitz-väliltä vuosille 2016–
+viimeisin huhtikuu tiedostoon data/ikaluokat.json (sovelluksen ikäluokkaennuste). Edellinen tiedosto luetaan julkaistulta
+sivulta, ja vain puuttuvat vuodet haetaan: 2016–2024 uusinta-ajosta (REP, 1.1.1982–31.12.2024), 2025– NRT-tuotteesta,
+jonka arkisto on liukuva (10.8.2023–, data.marine.copernicus.eu 17.11.2026) – siksi arvot säilytetään tiedostossa.
+Haku tehdään ennen alueita, eikä sen virhe estä alueiden hakua.
+
 v48 (16.11.2026): silakka-alueille myös pohjan lämpö (bottomT) ja sekoittumiskerroksen paksuus (mlotst) PHY-mallista
 (tuntiaineisto 3 h välein, varalla päiväaineisto) päivätiedostoihin (kerros.pt °C × 100, kerros.mld m × 10). Oma haku.
 
@@ -69,6 +75,11 @@ LAHTEET = {
     "sst": dict(tuote="SST_BAL_SST_L4_NRT_OBSERVATIONS_010_007_b",
                 ehdokkaat=["DMI-BALTIC-SST-L4-NRT-OBS_FULL_TIME_SERIE"],
                 muuttujat=["analysed_sst"]),
+    # v57: uusinta-ajo huhtikuiden vertailujaksoon (NRT-arkisto ei ulotu vuoteen 2016). Datasetin tunnus STAC-
+    # metatiedosta (sextant.ifremer.fr), ei vielä kokeiltu ajossa: virheessä avaa() listaa tuotteen datasetit lokiin.
+    "sst_rep": dict(tuote="SST_BAL_SST_L4_REP_OBSERVATIONS_010_016",
+                    ehdokkaat=["DMI_BAL_SST_L4_REP_OBSERVATIONS_010_016"],
+                    muuttujat=["analysed_sst"]),
     # v43: PUM CMEMS-BAL-PUM-003-006-007: kd [m-1] "Light Attenuation" ja zsd [m] Secchi, hetkiarvot klo 12 UTC
     # päiväaineistossa (ei tuntiaineistoa). deptho staattisessa mask_bathy-tiedostossa.
     "bgc": dict(tuote="BALTICSEA_ANALYSISFORECAST_BGC_003_007",
@@ -85,6 +96,10 @@ LAHTEET = {
 }
 KD_KERROIN, ZSD_KERROIN, POHJA_KERROIN = 1000, 100, 10   # v43: kd 0,001 m-1, zsd cm, pohja dm
 PT_KERROIN, MLD_KERROIN = 100, 10                         # v48: pohjan lämpö 0,01 °C, sekoittumiskerros dm
+# v57: ikäluokkaennusteen huhtikuun lämpö. Paikka Trelleborg–Sassnitz [L49: Karlsson ym. 1994 regressio
+# saalispäivä = 212 − 4,6 × huhtikuun lämpö]; laatikon rajat arvio [A]. Vähintään 25 päivää huhtikuusta.
+IKA_ALUE = dict(lat_min=54.60, lat_max=55.30, lon_min=13.15, lon_max=13.65)
+IKA_ENSIMMAINEN, IKA_REP_VIIMEINEN, IKA_MIN_PAIVAT = 2016, 2024, 25
 O2_KERROIN = 1                                            # v54: pohjan happi mmol/m3 (1 ml/l = 44,66 mmol/m3)
 
 
@@ -504,6 +519,97 @@ def palauta_edelliset(kansio, vanha, osoite=None):
     print("Edellisen ajon data jätetään voimaan.", file=sys.stderr)
 
 
+
+# ---------------------------------------------------------------- v57: ikäluokkaennusteen huhtikuun lämpö
+
+def huhtikuun_lampo(lahde, vuosi):
+    """Huhtikuun keskimääräinen pintalämpö (°C) laatikossa IKA_ALUE: päivittäinen alueen keskiarvo, sitten päivien keskiarvo."""
+    alku = datetime(vuosi, 4, 1, tzinfo=timezone.utc)
+    loppu = datetime(vuosi, 4, 30, 23, 59, tzinfo=timezone.utc)
+    ds, ds_id = avaa(lahde, alku, loppu, alue=IKA_ALUE)
+    a = np.asarray(ds["analysed_sst"].values, dtype=float)
+    a = a.reshape(a.shape[0], -1) if a.ndim >= 2 else a.reshape(-1, 1)
+    if np.isfinite(a).any() and np.nanmean(a) > 200:   # kelvin -> °C
+        a = a - 273.15
+    with np.errstate(all="ignore"):
+        paivat = np.nanmean(a, axis=1)
+    ok = np.isfinite(paivat)
+    return {"T": round(float(paivat[ok].mean()), 2) if ok.any() else None, "paivia": int(ok.sum()), "dataset": ds_id}
+
+
+def hae_json_sivulta(osoite):
+    try:
+        with urllib.request.urlopen(osoite, timeout=30) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def kirjoita_json(polku, sis):
+    os.makedirs(os.path.dirname(polku) or ".", exist_ok=True)
+    with open(polku, "w", encoding="utf-8") as f:
+        json.dump(sis, f, ensure_ascii=False, indent=1)
+
+
+def viimeisin_huhtikuu(nyt):
+    """Viimeisin kokonaan datassa oleva huhtikuu (NRT-viive ~1 vrk → 3.5. alkaen kuluva vuosi)."""
+    return nyt.year if nyt >= datetime(nyt.year, 5, 3, tzinfo=timezone.utc) else nyt.year - 1
+
+
+def paivita_ikaluokat(perus, nyt, osoite=None, hae=huhtikuun_lampo, vanha=None):
+    """Kirjoittaa perus/ikaluokat.json. Vanhat vuodet säilyvät; puuttuvat haetaan (epäonnistunut vuosi yritetään
+    uudelleen seuraavana päivänä, ei joka ajossa). Palauttaa tiedoston sisällön."""
+    polku = os.path.join(perus, "ikaluokat.json")
+    if vanha is None:
+        osoite = (osoite or sivun_osoite()) + "ikaluokat.json"
+        vanha = lue_vanha(polku) or hae_json_sivulta(osoite)
+        if vanha is None:   # toinen yritys: katkos ei saa johtaa koko sarjan uudelleenhakuun ja vajaaseen tiedostoon
+            time.sleep(5)
+            vanha = hae_json_sivulta(osoite) or {}
+    if vanha.get("huhtikuu"):
+        kirjoita_json(polku, vanha)   # aikakatkaisunkin jälkeen julkaisuun menee vähintään edellinen
+    tanaan = nyt.strftime("%Y-%m-%d")
+    huhti = dict(vanha.get("huhtikuu") or {})
+    yritetty = dict(vanha.get("yritetty") or {})
+    virheet = []
+    for v in range(IKA_ENSIMMAINEN, viimeisin_huhtikuu(nyt) + 1):
+        if str(v) in huhti or yritetty.get(str(v)) == tanaan:
+            continue
+        jarj = [("REP", "sst_rep"), ("NRT", "sst")] if v <= IKA_REP_VIIMEINEN else [("NRT", "sst"), ("REP", "sst_rep")]
+        for nimi, avain in jarj:
+            try:
+                r = hae(LAHTEET[avain], v)
+                if r["T"] is not None and r["paivia"] >= IKA_MIN_PAIVAT:
+                    huhti[str(v)] = dict(r, lahde=nimi)
+                    yritetty.pop(str(v), None)
+                    print(f"  huhtikuu {v}: {r['T']} °C ({nimi}, {r['paivia']} pv)")
+                    break
+                virheet.append(f"{v} {nimi}: vain {r['paivia']} päivää")
+            except Exception as e:  # noqa: BLE001
+                virheet.append(f"{v} {nimi}: {str(e)[:200]}")
+        if str(v) not in huhti:
+            yritetty[str(v)] = tanaan
+    # Lähteiden vertailu yhdeltä yhteiseltä vuodelta (kerran): NRT − REP samalle huhtikuulle.
+    vert = vanha.get("vertailu")
+    rep = huhti.get(str(IKA_REP_VIIMEINEN))
+    if not vert and rep and rep.get("lahde") == "REP":
+        try:
+            r = hae(LAHTEET["sst"], IKA_REP_VIIMEINEN)
+            vert = {"vuosi": IKA_REP_VIIMEINEN, "REP": rep["T"], "NRT": r["T"], "paivia": r["paivia"],
+                    "erotus": round(r["T"] - rep["T"], 2) if r["T"] is not None else None}
+        except Exception as e:  # noqa: BLE001
+            vert = {"vuosi": IKA_REP_VIIMEINEN, "virhe": str(e)[:200]}
+    tulos = {"versio": 1, "paivitetty": iso(nyt), "paikka": "Trelleborg–Sassnitz", "laatikko": IKA_ALUE,
+             "huhtikuu": dict(sorted(huhti.items())), "vertailu": vert, "yritetty": yritetty, "virheet": virheet}
+    if huhti:
+        kirjoita_json(polku, tulos)
+    else:
+        print("  ikäluokat: ei yhtään huhtikuuta – tiedostoa ei kirjoiteta", file=sys.stderr)
+    for v in virheet:
+        print("  ikäluokat:", v, file=sys.stderr)
+    return tulos
+
+
 def lue_alueet(tiedosto=None):
     """Alueet tiedostosta alueet.js (JSON-taulukko kohdan 'ALUEET = ' jälkeen). Puuttuessa vain Luoto."""
     tiedosto = tiedosto or os.path.join(os.path.dirname(os.path.abspath(__file__)), "alueet.js")
@@ -647,6 +753,11 @@ def main(polku):
     nyt = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
     luotu = iso(datetime.now(timezone.utc))  # todellinen hakuhetki (näytetään käyttäjälle)
     onnistui = []
+    try:   # v57: ensin (pieni haku, kerran vuodessa); virhe ei estä alueita
+        paivita_ikaluokat(perus, nyt)
+    except Exception as e:  # noqa: BLE001
+        traceback.print_exc()
+        print(f"Ikäluokat: VIRHE {e}", file=sys.stderr)
     for alue in lue_alueet():
         alku = time.monotonic()
         try:
