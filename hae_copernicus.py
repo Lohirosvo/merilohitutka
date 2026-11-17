@@ -21,6 +21,12 @@ pisteisiin (hae_tuuli.py, päivätiedostoihin). Näiden epäonnistuminen ei vaik
 v54 (17.11.2026): alueille, joilla "silakka": {"happi": true} (Eckerö), BGC-hakuun myös pohjan happi o2b (mmol/m3,
 päivätiedoston bgc.o2b); jos se ei onnistu, haetaan kd/zsd kuten ennen.
 
+v59 (17.11.2026, Hannu: "Kallan … 20 m vesillä / noin 5 km rannasta 6-8 C … tuulet alle 8 m/s paras viikko. Käytä
+toteutuneita tuulia ja veden pintalämpötiloja … lomaviikon valinta 2028"): data/lomadata.json = joka kesältä 2016– (1.5.–31.7.)
+satelliitin pintalämpö pisteessä LOMA_PISTE (vrk-keskiarvo) ja Kallanin sääaseman tuuli (päiväsaikaan 6–20 tunnit, joina
+10 min keskituuli tasatunnilla < 8 m/s). Vain puuttuvat kesät haetaan; edellinen tiedosto julkaistulta sivulta. Ajetaan
+alueiden jälkeen; tiedosto kirjoitetaan jokaisen kesän jälkeen, jotta aikakatkaisu ei hukkaa jo haettua.
+
 v57 (17.11.2026, silakkatietopohja v007 kohta 7.7): huhtikuun pintalämpö Trelleborg–Sassnitz-väliltä vuosille 2016–
 viimeisin huhtikuu tiedostoon data/ikaluokat.json (sovelluksen ikäluokkaennuste). Edellinen tiedosto luetaan julkaistulta
 sivulta, ja vain puuttuvat vuodet haetaan: 2016–2024 uusinta-ajosta (REP, 1.1.1982–31.12.2024), 2025– NRT-tuotteesta,
@@ -100,6 +106,12 @@ PT_KERROIN, MLD_KERROIN = 100, 10                         # v48: pohjan lämpö 
 # saalispäivä = 212 − 4,6 × huhtikuun lämpö]; laatikon rajat arvio [A]. Vähintään 25 päivää huhtikuusta.
 IKA_ALUE = dict(lat_min=54.60, lat_max=55.30, lon_min=13.15, lon_max=13.65)
 IKA_ENSIMMAINEN, IKA_REP_VIIMEINEN, IKA_MIN_PAIVAT = 2016, 2024, 25
+# v59: lomaviikko. Piste: Kallanin eteläpuoli, merikartan 20 m:n käyrä, noin 5 km lähimmästä 1 m:n käyrästä [K Traficom-käyristä];
+# asema: IL Pietarsaari Kallan (lähin tuuliasema pisteen 63,7515 N 22,5228 E ympäriltä).
+LOMA_PISTE = dict(lat=63.740, lon=22.530)
+LOMA_ASEMA = dict(nimi="Pietarsaari Kallan", lat=63.7515, lon=22.5228)
+LOMA_JAKSO = ((5, 1), (7, 31))          # 1.5.–31.7. = 92 päivää
+LOMA_PAIVA_H = (6, 20)                  # Suomen aikaa, tunnit 6, 7, …, 20 (15 tuntia)
 O2_KERROIN = 1                                            # v54: pohjan happi mmol/m3 (1 ml/l = 44,66 mmol/m3)
 
 
@@ -610,6 +622,135 @@ def paivita_ikaluokat(perus, nyt, osoite=None, hae=huhtikuun_lampo, vanha=None):
     return tulos
 
 
+
+# ---------------------------------------------------------------- v59: lomaviikko (Kallan)
+
+def loma_paivat(vuosi):
+    a = datetime(vuosi, *LOMA_JAKSO[0], tzinfo=timezone.utc)
+    b = datetime(vuosi, *LOMA_JAKSO[1], tzinfo=timezone.utc)
+    return a, (b - a).days + 1
+
+
+def loma_sst(lahde, vuosi):
+    """Vuorokauden pintalämpö (°C × 10, kokonaisluku tai None) pisteen ympäriltä (±0,015° lat, ±0,03° lon) 1.5.–31.7."""
+    a, n = loma_paivat(vuosi)
+    laatikko = dict(lat_min=LOMA_PISTE["lat"] - 0.015, lat_max=LOMA_PISTE["lat"] + 0.015,
+                    lon_min=LOMA_PISTE["lon"] - 0.03, lon_max=LOMA_PISTE["lon"] + 0.03)
+    ds, ds_id = avaa(lahde, a, a + timedelta(days=n) - timedelta(minutes=1), alue=laatikko)
+    x = np.asarray(ds["analysed_sst"].values, dtype=float)
+    x = x.reshape(x.shape[0], -1)
+    if np.isfinite(x).any() and np.nanmean(x) > 200:
+        x = x - 273.15
+    with np.errstate(all="ignore"):
+        pv = np.nanmean(x, axis=1)
+    ajat = [paikallinen_pvm(t) for t in ds["time"].values] if "time" in ds else []
+    out = [None] * n
+    for i, v in enumerate(pv):
+        j = (datetime.fromisoformat(ajat[i]).replace(tzinfo=timezone.utc) - a).days if i < len(ajat) else i
+        if 0 <= j < n and np.isfinite(v):
+            out[j] = int(round(float(v) * 10))
+    return out, ds_id
+
+
+def loma_tuuli(vuosi, pyynto=None):
+    """Kallanin aseman päiväkohtaiset [tunteja < 8 m/s, tunteja yhteensä] klo 6–20 Suomen aikaa (7 vrk:n kyselyt)."""
+    import hae_tuuli
+    pyynto = pyynto or hae_tuuli._pyynto
+    a, n = loma_paivat(vuosi)
+    hki = ZoneInfo("Europe/Helsinki")
+    out = [[0, 0] for _ in range(n)]
+    asema = None
+    alku = a - timedelta(hours=3)                       # Suomen aamu kesäajassa = UTC −3 h
+    loppu = a + timedelta(days=n) - timedelta(hours=3)
+    t = alku
+    while t < loppu:
+        t2 = min(t + timedelta(hours=167), loppu)
+        xml = pyynto({"service": "WFS", "version": "2.0.0", "request": "getFeature",
+                      "storedquery_id": "fmi::observations::weather::simple", "parameters": "ws_10min", "timestep": "60",
+                      "bbox": ",".join(f"{v:.3f}" for v in (LOMA_ASEMA["lon"] - 0.05, LOMA_ASEMA["lat"] - 0.03,
+                                                          LOMA_ASEMA["lon"] + 0.05, LOMA_ASEMA["lat"] + 0.03)),
+                      "starttime": t.strftime("%Y-%m-%dT%H:%M:%SZ"), "endtime": t2.strftime("%Y-%m-%dT%H:%M:%SZ")})
+        rivit = hae_tuuli.jasenna(xml)
+        if rivit:   # lähin asema (bboxissa voi olla useampi)
+            paikat = {(r[0], r[1]) for r in rivit}
+            lahin = min(paikat, key=lambda p: (p[0] - LOMA_ASEMA["lat"]) ** 2 + ((p[1] - LOMA_ASEMA["lon"]) * 0.44) ** 2)
+            asema = asema or {"lat": lahin[0], "lon": lahin[1]}
+            for lat, lon, aika, param, arvo in rivit:
+                if (lat, lon) != lahin or param.lower() != "ws_10min" or not np.isfinite(arvo):
+                    continue
+                tl = datetime.fromisoformat(aika.replace("Z", "+00:00")).astimezone(hki)
+                if tl.minute != 0 or not (LOMA_PAIVA_H[0] <= tl.hour <= LOMA_PAIVA_H[1]):
+                    continue
+                j = (datetime(tl.year, tl.month, tl.day, tzinfo=timezone.utc) - a).days
+                if 0 <= j < n:
+                    out[j][1] += 1
+                    out[j][0] += 1 if arvo < 8.0 else 0
+        t = t2
+    return out, asema
+
+
+def paivita_lomadata(perus, nyt, osoite=None, hae_sst=loma_sst, hae_tuuli_fn=loma_tuuli, vanha=None, aikaraja_s=900):
+    """data/lomadata.json: puuttuvat kokonaiset kesät (31.7. ohi) 2016 alkaen. Tiedosto kirjoitetaan kesä kerrallaan."""
+    polku = os.path.join(perus, "lomadata.json")
+    if vanha is None:
+        osoite = (osoite or sivun_osoite()) + "lomadata.json"
+        vanha = lue_vanha(polku) or hae_json_sivulta(osoite)
+        if vanha is None:
+            time.sleep(5)
+            vanha = hae_json_sivulta(osoite) or {}
+    vuodet = dict(vanha.get("vuodet") or {})
+    yritetty = dict(vanha.get("yritetty") or {})
+    tanaan, virheet, asema = nyt.strftime("%Y-%m-%d"), [], vanha.get("asema")
+    viimeinen = nyt.year if nyt >= datetime(nyt.year, 8, 2, tzinfo=timezone.utc) else nyt.year - 1
+    alku_t = time.monotonic()
+
+    def kirjoita_nyt():
+        if vuodet:
+            kirjoita_json(polku, {"versio": 1, "paivitetty": iso(nyt), "piste": LOMA_PISTE, "asema": asema,
+                                  "asemaNimi": LOMA_ASEMA["nimi"], "jakso": ["05-01", "07-31"], "tuuliRaja": 8.0,
+                                  "paivaTunnit": list(LOMA_PAIVA_H), "vuodet": dict(sorted(vuodet.items())),
+                                  "yritetty": yritetty, "virheet": virheet})
+    if vuodet:
+        kirjoita_nyt()
+    for v in range(IKA_ENSIMMAINEN, viimeinen + 1):
+        if str(v) in vuodet or yritetty.get(str(v)) == tanaan:
+            continue
+        if time.monotonic() - alku_t > aikaraja_s:
+            virheet.append(f"{v}: aikaraja, jatketaan seuraavassa ajossa")
+            break
+        rivi = {}
+        jarj = [("REP", "sst_rep"), ("NRT", "sst")] if v <= IKA_REP_VIIMEINEN else [("NRT", "sst"), ("REP", "sst_rep")]
+        for nimi, avain in jarj:
+            try:
+                sst, ds_id = hae_sst(LAHTEET[avain], v)
+                if sum(x is not None for x in sst) >= 80:
+                    rivi.update(sst=sst, sstLahde=nimi)
+                    break
+                virheet.append(f"{v} SST {nimi}: vain {sum(x is not None for x in sst)} päivää")
+            except Exception as e:  # noqa: BLE001
+                virheet.append(f"{v} SST {nimi}: {str(e)[:160]}")
+        try:
+            tuuli, a = hae_tuuli_fn(v)
+            if sum(1 for o in tuuli if o[1] >= 10) >= 60:
+                rivi["tuuli"] = tuuli
+                asema = asema or a
+            else:
+                virheet.append(f"{v} tuuli: vain {sum(1 for o in tuuli if o[1] >= 10)} päivää")
+        except Exception as e:  # noqa: BLE001
+            virheet.append(f"{v} tuuli: {str(e)[:160]}")
+        if "sst" in rivi and "tuuli" in rivi:
+            vuodet[str(v)] = rivi
+            yritetty.pop(str(v), None)
+            print(f"  lomadata {v}: SST {rivi['sstLahde']}, tuulipäiviä {sum(1 for o in rivi['tuuli'] if o[1] >= 10)}")
+            kirjoita_nyt()
+        else:
+            yritetty[str(v)] = tanaan
+    kirjoita_nyt()
+    for x in virheet:
+        print("  lomadata:", x, file=sys.stderr)
+    return {"vuodet": vuodet, "yritetty": yritetty, "virheet": virheet, "asema": asema}
+
+
 def lue_alueet(tiedosto=None):
     """Alueet tiedostosta alueet.js (JSON-taulukko kohdan 'ALUEET = ' jälkeen). Puuttuessa vain Luoto."""
     tiedosto = tiedosto or os.path.join(os.path.dirname(os.path.abspath(__file__)), "alueet.js")
@@ -768,6 +909,11 @@ def main(polku):
             ok = False
         onnistui.append(ok)
         print(f"===== Alue {alue.get('tunnus')}: {'OK' if ok else 'VIRHE'}, {time.monotonic() - alku:.0f} s")
+    try:   # v59: alueiden jälkeen (ensimmäinen ajo ~11 kesää); virhe ei vaikuta muuhun
+        paivita_lomadata(perus, nyt)
+    except Exception as e:  # noqa: BLE001
+        traceback.print_exc()
+        print(f"Lomadata: VIRHE {e}", file=sys.stderr)
     if not all(onnistui):
         sys.exit(1)   # lokiin punainen merkki; julkaisu tehdään silti (continue-on-error)
 

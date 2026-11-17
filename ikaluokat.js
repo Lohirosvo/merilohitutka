@@ -18,6 +18,15 @@
  *     (elokuun puolivälin jälkeen alle 100/vrk [L61]).
  *  5. Osuudet (kpl): kossit 32 % kaikuluotauksesta, monimerivuotiset 68 % jaettuna suomunäytteiden suhteessa 43:29 [L61, K].
  *  6. Painot: 2MV 4–8 kg [L Luke/Yle 2026]; lisämerivuosi +4–5 kg [L HY] → isot yli 8 kg, kossit alle 4 kg [K].
+ *
+ * v59 LOMAVIIKKO (Hannu 17.11.: "Kallan optimoi lohen vaelluksen voimakkuus ja 20 m vesillä / noin 5 km rannasta 6-8 C
+ * vedenlämpötila ja tuulet alle 8 m/s paras viikko. Käytä toteutuneita tuulia ja veden pintalämpötiloja … 2028 veikkaus"):
+ * jokaiselle toteutuneelle kesälle (data/lomadata.json) päivä kerrallaan
+ *   kala  = mallin viikkotaso pisteessä sen vuoden huhtikuulla (0–1),
+ *   lämpö = satelliitin pintalämpö 6–8 °C,
+ *   tuuli = päiväsaikaan (6–20) vähintään 2/3 tunneista keskituuli < 8 m/s [A: "tuulet alle 8" päiväksi tulkittuna],
+ *   arvo  = kala × (lämpö ja tuuli kunnossa).
+ * Tavoitevuoden viikot (ma–su) saman kalenteripäivän mukaan; arvo × 7 = "hyviä kalapäiviä viikossa" keskimäärin.
  */
 (function (root) {
   'use strict';
@@ -196,8 +205,59 @@
     return out;
   }
 
+  // ---------------------------------------------------------------- v59 lomaviikko
+  const LOMA = { lampo: [6, 8], tuuliOsuus: 2 / 3, tuuliMinTunnit: 10 };
+  function isoViikko(d) {   // d: Date (UTC-päivä)
+    const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())), pv = (t.getUTCDay() + 6) % 7;
+    t.setUTCDate(t.getUTCDate() - pv + 3);
+    const eka = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
+    return 1 + Math.round(((t - eka) / 86400000 - 3 + ((eka.getUTCDay() + 6) % 7)) / 7);
+  }
+  /** Viikkotasot päiville d1..d2 (yksi huipun laskenta). */
+  function tasoSarja(mus, d1, d2) {
+    const y = s => s.reduce((a, b) => a + b, 0);
+    let mx = 0; for (let k = 100; k <= 270; k++) mx = Math.max(mx, y(saapuvat(mus, k - 3, k + 3)));
+    const out = []; for (let d = d1; d <= d2; d++) out.push(mx ? y(saapuvat(mus, d - 3, d + 3)) / mx : 0);
+    return out;
+  }
+  /** Päiväkohtaiset arvot yhdelle toteutuneelle kesälle: [{ kala, lampo (bool|null), tuuli (bool|null), T }]. */
+  function lomaVuosi(vuosi, rivi, huhti, piste) {
+    const alue = { rajat: { lat_min: piste.lat, lat_max: piste.lat, lon_min: piste.lon, lon_max: piste.lon } };
+    const k = keskipaivat(vuosi, huhti, alue), v0 = vpvPaivasta(vuosi, 5, 1), n = (rivi.sst || []).length;
+    const kala = tasoSarja(k.mu.map(m => m.keski), v0, v0 + n - 1);
+    return (rivi.sst || []).map((s, j) => {
+      const T = typeof s === 'number' ? s / 10 : null, w = (rivi.tuuli || [])[j];
+      return { kala: kala[j], T, lampo: T === null ? null : T >= LOMA.lampo[0] && T <= LOMA.lampo[1],
+        tuuli: !w || w[1] < LOMA.tuuliMinTunnit ? null : w[0] / w[1] >= LOMA.tuuliOsuus };
+    });
+  }
+  /** Tavoitevuoden viikot (ma–su, 1.5.–31.7.) toteutuneiden kesien keskiarvona. */
+  function lomaviikot(lomadata, huhti, tavoite) {
+    const vuodet = Object.keys((lomadata && lomadata.vuodet) || {}).sort();
+    if (!vuodet.length || !lomadata.piste) return null;
+    const paivat = {}; vuodet.forEach(y => { paivat[y] = lomaVuosi(+y, lomadata.vuodet[y], huhti, lomadata.piste); });
+    const a0 = Date.UTC(tavoite, 4, 1), n = 92, viikot = [];
+    let ma = a0 - (((new Date(a0).getUTCDay() + 6) % 7) * 86400000);
+    for (; ma < a0 + n * 86400000; ma += 7 * 86400000) {
+      const jj = []; for (let i = 0; i < 7; i++) { const j = Math.round((ma + i * 86400000 - a0) / 86400000); if (j >= 0 && j < n) jj.push(j); }
+      if (jj.length < 4) continue;   // vajaat reunaviikot pois
+      const kaikki = [], vuosittain = {};
+      vuodet.forEach(y => { const pv = paivat[y]; vuosittain[y] = 0;
+        jj.forEach(j => { const p = pv[j]; if (!p) return; kaikki.push(p); if (p.lampo && p.tuuli) vuosittain[y] += p.kala; }); });
+      const ka = (f, s) => { const x = s.filter(p => f(p) !== null); return x.length ? x.reduce((a, p) => a + f(p), 0) / x.length : NaN; };
+      const mo = kaikki.filter(p => p.lampo !== null && p.tuuli !== null);
+      viikot.push({ vk: isoViikko(new Date(ma)), alku: new Date(ma), loppu: new Date(ma + 6 * 86400000), paivia: jj.length,
+        kala: ka(p => p.kala, kaikki), lampo: ka(p => p.lampo === null ? null : +p.lampo, kaikki), tuuli: ka(p => p.tuuli === null ? null : +p.tuuli, kaikki),
+        molemmat: ka(p => +(p.lampo && p.tuuli), mo), arvo: 7 * ka(p => p.kala * (p.lampo && p.tuuli ? 1 : 0), mo), vuosittain });
+    }
+    const jarj = viikot.map((w, i) => i).filter(i => isFinite(viikot[i].arvo)).sort((x, y) => viikot[y].arvo - viikot[x].arvo);
+    const parhaat = {}; vuodet.forEach(y => { let b = null; viikot.forEach(w => { if (!b || w.vuosittain[y] > b.vuosittain[y]) b = w; }); parhaat[y] = b && b.vuosittain[y] > 0 ? b.vk : null; });
+    return { tavoite, vuodet, viikot, jarjestys: jarj, parhaatVuosittain: parhaat };
+  }
+
   const Ikaluokat = { IKALUOKAT, HAJONTA, KERROIN, VALI_3MV, KAUSI, TOTEUMA, JOKI_KM, NOPEUS, TORNIO, OSUUDET, MSW_SIIRTO,
     phi, paiva, paivaksi, pvT, vpvPaivasta, kausiVuosi, matka, keskus, viive, siirto, keskipaivat, saapuvat, viikkoTaso,
+    LOMA, isoViikko, tasoSarja, lomaVuosi, lomaviikot,
     paajoukko, koostumus, haarukka, alueArvio, viikkoArvio, seuraavaVaihto, ennakkoTeksti, viikkoTeksti, kayrat };
   if (typeof module !== 'undefined' && module.exports) module.exports = Ikaluokat; else root.Ikaluokat = Ikaluokat;
 })(typeof window !== 'undefined' ? window : this);
