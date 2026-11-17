@@ -1,4 +1,4 @@
-/* Merilohitutka – alueet.js (v32)
+/* Merilohitutka – alueet.js (v33)
  * Kalastusalueet. Yksi lähde: sovellus lataa tämän skriptinä ja hae_copernicus.py lukee saman tiedoston.
  * Hakasulkeiden [ ] välissä on oltava puhdasta JSONia (ei kommentteja, ei pilkkua viimeisen alkion jälkeen).
  *
@@ -50,6 +50,9 @@
  *   jos pinta ≥ 5 °C. Kutu pohjan lämmöstä 8–14 °C [L1, L2, L4; Eckerön oma aineisto puuttuu → A]; syönnös aina kaudella [A];
  *   kilohaili jos pohja ≥ 5 °C ja pohjan happi ≥ 1 ml/l [L12, L13; pohjan arvot syvän kerroksen likiarvona A].
  *   happi (v32): haetaan pohjan happi (Copernicus BGC o2b).
+ *   Pori (v33, Hannu 17.11. "Tehdään niin"): ei tietopohjassa → Kaskisen asetukset (sama Selkämeri, osa-alue 30) [A].
+ *   Kutu Porin edustalla todettu (Tahkoluoto, Alleco 2020: mätiä löytyi; syyskudun selvitys tehty, tulos tarkistamatta) [L].
+ *   Kokemäenjoen sameampi vesi → Copernicuksen Kd voi olla liian pieni, kerros liian syvällä [A]. Syyskutu jää kauden ulkopuolelle.
  *   Kaskinen–Kristiinankaupunki (v29): tietopohja 3.3, Kd 0,32 (Selkämeren Secchi 5,29 m → 1,7/5,29).
  *   Koordinaatit Hannun antamat (asteet, minuutit, sekunnit).
  * v23: Ohtakari toiseksi paluukohteeksi (Hannu 14.11.); merkki satamaan 64,08944 23,40594 (predictwind.com), paluukohteen tyyli.
@@ -145,6 +148,8 @@
     "tunnus": "pori", "nimi": "Pori", "lyhyt": "Pori", "polku": "pori/",
     "rajat": { "lat_min": 61.40, "lat_max": 61.90, "lon_min": 20.85, "lon_max": 21.60 },
     "keski": [61.65, 21.28], "zoom": 10.3, "paluuikkuna": false,
+    "silakka": { "kdOletus": 0.32, "kausi": ["05-01", "08-31"], "paiva": "valo", "kohta": "3.3, Porille sovellettu",
+                 "vaiheet": { "odottava": [5, 10, 25, 40], "kutu": [0.5, 3, 10, 15], "syonnos": [10, 20, 40, 60] } },
     "lahtopisteet": [
       {"nimi": "Reposaaren luiska", "minne": "Reposaaren luiskalle", "mista": "Reposaaren luiskalta", "tyyppi": "luiska", "lat": 61.615497, "lon": 21.44245, "kautta": {"nimi": "Reposaaren aallonmurtaja", "teksti": "aallonmurtajan kautta", "lat": 61.599539, "lon": 21.458564}},
       {"nimi": "Reposaaren aallonmurtaja", "minne": "Reposaaren aallonmurtajalle", "mista": "Reposaaren aallonmurtajalta", "tyyppi": "luiska", "lat": 61.599539, "lon": 21.458564}

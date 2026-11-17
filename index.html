@@ -390,7 +390,7 @@
   <button data-v="v-raportit">⋯<br>RAPORTIT</button>
 </nav>
 
-<script src="alueet.js?v=32"></script>
+<script src="alueet.js?v=33"></script>
 <script src="havainnot.js?v=15"></script>
 <script src="malli.js?v=25"></script>
 <script src="fmi.js?v=14"></script>
@@ -1049,7 +1049,7 @@ function piirraMeriTila() {
   if (vaylat) osat.push(`Väylät: Väylävirasto, vesiväyläaineisto (CC BY 4.0). Ei navigointikäyttöön`);
   if (typeof aisTila === 'function' && aisTila()) osat.push(aisTila());
   if (typeof vesiTilaTeksti === 'function' && vesiTilaTeksti()) osat.push(vesiTilaTeksti());   // v35
-  if (meri.bgc || valittuAlue.silakka) osat.push(`Silakkamalli (v54; alueet: ${silakkaAlueet()}${valittuAlue.silakka && valittuAlue.silakka.paiva === 'valo' ? '; tällä alueella päivän kerros yleissäännöllä, vaihe vain paikan sopivuuteen' : ''}): valon vaimennus `
+  if (meri.bgc || valittuAlue.silakka) osat.push(`Silakkamalli (v55; alueet: ${silakkaAlueet()}${valittuAlue.silakka && valittuAlue.silakka.paiva === 'valo' ? '; tällä alueella päivän kerros yleissäännöllä, vaihe vain paikan sopivuuteen' : ''}): valon vaimennus `
     + (meri.bgc ? `Copernicus BGC ${meri.bgc.dataset} (${(meri.bgc.muuttujat || []).join(', ')}, ${meri.bgc.aika || 'klo 12 UTC'})` : 'ei vielä haettu (oletus Kd ' + luku(valittuAlue.silakka ? valittuAlue.silakka.kdOletus : NaN, 2) + ')')
     + `, mallin pohja ${meri.pohja ? meri.pohja.dataset : 'puuttuu'}`
     + `, pohjan lämpö ja sekoittumiskerros ${meri.kerros ? meri.kerros.dataset + ' (' + (meri.kerros.muuttujat || []).map(x => x === 'pt' ? 'bottomT' : 'mlotst').join(', ') + ')' : 'ei vielä haettu'}`
