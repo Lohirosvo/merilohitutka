@@ -18,6 +18,9 @@ v8: ajaa ensin myös Traficomin syvyyskäyrien päivityksen (hae_syvyys.py, data
 v9: lisäksi Väyläviraston väylät (hae_vaylat.py, data/vaylat.json) ja IL:n tuuliennuste kartan
 pisteisiin (hae_tuuli.py, päivätiedostoihin). Näiden epäonnistuminen ei vaikuta Copernicus-hakuun.
 
+v54 (17.11.2026): alueille, joilla "silakka": {"happi": true} (Eckerö), BGC-hakuun myös pohjan happi o2b (mmol/m3,
+päivätiedoston bgc.o2b); jos se ei onnistu, haetaan kd/zsd kuten ennen.
+
 v48 (16.11.2026): silakka-alueille myös pohjan lämpö (bottomT) ja sekoittumiskerroksen paksuus (mlotst) PHY-mallista
 (tuntiaineisto 3 h välein, varalla päiväaineisto) päivätiedostoihin (kerros.pt °C × 100, kerros.mld m × 10). Oma haku.
 
@@ -82,6 +85,7 @@ LAHTEET = {
 }
 KD_KERROIN, ZSD_KERROIN, POHJA_KERROIN = 1000, 100, 10   # v43: kd 0,001 m-1, zsd cm, pohja dm
 PT_KERROIN, MLD_KERROIN = 100, 10                         # v48: pohjan lämpö 0,01 °C, sekoittumiskerros dm
+O2_KERROIN = 1                                            # v54: pohjan happi mmol/m3 (1 ml/l = 44,66 mmol/m3)
 
 
 # ---------------------------------------------------------------- muunnos (testattava ilman verkkoa)
@@ -213,8 +217,9 @@ def rakenna(phy, wav, sst, luotu, virheet, syvyys=None, tuuli=None, vaylat=None,
     b_paivat = {}
     if bgc:   # v43: valon vaimennus päivittäin (12 UTC); ruudukko hakemistoon, arvot päivätiedostoihin
         hakemisto["bgc"] = {"dataset": bgc["dataset"], "lat": pyorista(bgc["lat"], 4), "lon": pyorista(bgc["lon"], 4),
-                            "kerroin": {"kd": KD_KERROIN, "zsd": ZSD_KERROIN}, "aika": "hetkiarvo klo 12 UTC",
-                            "muuttujat": [k for k in ("kd", "zsd") if bgc.get(k) is not None]}
+                            "kerroin": dict({"kd": KD_KERROIN, "zsd": ZSD_KERROIN}, **({"o2b": O2_KERROIN} if bgc.get("o2b") is not None else {})),
+                            "aika": "hetkiarvo klo 12 UTC",
+                            "muuttujat": [k for k in ("kd", "zsd", "o2b") if bgc.get(k) is not None]}
         b_paivat = paivittain(bgc["ajat"])
     k_paivat = {}
     if kerros:   # v48: pohjan lämpö ja sekoittumiskerros; ruudukko hakemistoon, arvot päivätiedostoihin
@@ -256,7 +261,7 @@ def rakenna(phy, wav, sst, luotu, virheet, syvyys=None, tuuli=None, vaylat=None,
         ib = b_paivat.get(pvm, [])
         if ib:
             b = {"aika": iso(np.datetime64(bgc["ajat"][ib[0]]))}
-            for k, kerroin in (("kd", KD_KERROIN), ("zsd", ZSD_KERROIN)):
+            for k, kerroin in (("kd", KD_KERROIN), ("zsd", ZSD_KERROIN), ("o2b", O2_KERROIN)):
                 if bgc.get(k) is not None:
                     b[k] = kokonaisluvut(np.asarray(bgc[k])[ib[0]], kerroin)
             sis["bgc"] = b
@@ -380,11 +385,13 @@ def pinta2d(da):
     return np.ma.filled(np.ma.asarray(da.transpose("time", "latitude", "longitude").values, dtype=float), np.nan)
 
 
-def hae_bgc(nyt, alue=None):
-    """v43: kd ja zsd päiväaineistosta; jos toinen ei onnistu, haetaan pelkkä toinen."""
+def hae_bgc(nyt, alue=None, lisa=None):
+    """v43: kd ja zsd päiväaineistosta; jos toinen ei onnistu, haetaan pelkkä toinen.
+    v54: lisa (esim. ["o2b"] = pohjan happi, mmol/m3) yritetään ensin mukaan; jos ei onnistu, haetaan ilman."""
     lahde, alku, loppu = LAHTEET["bgc"], nyt - timedelta(days=1), nyt + timedelta(days=10)
     virhe = None
-    for muuttujat in (["kd", "zsd"], ["kd"], ["zsd"]):
+    yritykset = ([["kd", "zsd"] + list(lisa)] if lisa else []) + [["kd", "zsd"], ["kd"], ["zsd"]]
+    for muuttujat in yritykset:
         try:
             ds, ds_id = avaa(dict(lahde, muuttujat=muuttujat), alku, loppu, alue=alue)
             break
@@ -393,11 +400,11 @@ def hae_bgc(nyt, alue=None):
             print("bgc: muuttujat", muuttujat, "eivät onnistuneet:", e, file=sys.stderr)
     else:
         raise RuntimeError(f"bgc: {virhe}")
-    tulos = dict(dataset=ds_id, ajat=ds["time"].values, lat=ds["latitude"].values, lon=ds["longitude"].values, kd=None, zsd=None)
-    for k in ("kd", "zsd"):
+    tulos = dict(dataset=ds_id, ajat=ds["time"].values, lat=ds["latitude"].values, lon=ds["longitude"].values, kd=None, zsd=None, o2b=None)
+    for k in ("kd", "zsd", "o2b"):
         if k in ds:
             tulos[k] = pinta2d(ds[k])
-    print("bgc:", ", ".join(f"{k} {np.nanmin(tulos[k]):.3f}–{np.nanmax(tulos[k]):.3f}" for k in ("kd", "zsd")
+    print("bgc:", ", ".join(f"{k} {np.nanmin(tulos[k]):.3f}–{np.nanmax(tulos[k]):.3f}" for k in ("kd", "zsd", "o2b")
                              if tulos[k] is not None and np.isfinite(tulos[k]).any()))
     return tulos
 
@@ -604,7 +611,8 @@ def hae_alue(alue, perus, nyt, luotu):
     bgc = pohja = kerros = None
     vanha_pohja = vanha.get("pohja") if vanha else None
     if alue.get("silakka"):   # v43: silakan valokerros (kohta 1.1): valon vaimennus; mallin pohja kerran (ei muutu)
-        hakijat = [("bgc", lambda: hae_bgc(nyt, rajat)), ("kerros", lambda: hae_kerros(nyt, rajat))] \
+        lisa = ["o2b"] if alue["silakka"].get("happi") else None   # v54: kilohaili (Eckerö) tarvitsee pohjan hapen
+        hakijat = [("bgc", lambda: hae_bgc(nyt, rajat, lisa)), ("kerros", lambda: hae_kerros(nyt, rajat))] \
             + ([] if vanha_pohja else [("pohja", lambda: hae_pohja(rajat))])
         for nimi, hakija in hakijat:
             alku = time.monotonic()

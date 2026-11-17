@@ -1,4 +1,4 @@
-/* Merilohitutka – alueet.js (v31)
+/* Merilohitutka – alueet.js (v32)
  * Kalastusalueet. Yksi lähde: sovellus lataa tämän skriptinä ja hae_copernicus.py lukee saman tiedoston.
  * Hakasulkeiden [ ] välissä on oltava puhdasta JSONia (ei kommentteja, ei pilkkua viimeisen alkion jälkeen).
  *
@@ -44,6 +44,12 @@
  *   Vaasa ja Norrskär (v31): tietopohja 3.2 (Ehnholm 1951, aineisto 1938–49 [L1]); Kd 0,31 (Merenkurkun Secchi 5,50 m → 1,7/5,50).
  *   Päivämäärärajat ovat 1940-luvun aineistosta ja kutu on sen jälkeen aikaistunut (~7,7 vrk/vuosikymmen [L35]) → lämpöehdot
  *   ensisijaisia; "odottava" kauden alusta (ei 15.5.), korkeakesän kutu "pinta yli 14 °C" heinäkuussa [A].
+ *   Eckerö (v32): tietopohja 3.4. Silakka + kilohaili; kausi 1.5.–15.6. (lohen ohitus toukokuu–kesäkuun alku [L43, K]);
+ *   Kd 0,31 (Ahvenanmeren Secchi 5,40 m). Säännöissä paiva/yo = vaiheen päivä- ja yösääntö (silakka.js saantoKerros):
+ *   harppaus = harppauskerroksen alla, syvanteet = viereisissä syvänteissä, matalikko = kutumatalikolla, pinta20 = ylin 20 m
+ *   jos pinta ≥ 5 °C. Kutu pohjan lämmöstä 8–14 °C [L1, L2, L4; Eckerön oma aineisto puuttuu → A]; syönnös aina kaudella [A];
+ *   kilohaili jos pohja ≥ 5 °C ja pohjan happi ≥ 1 ml/l [L12, L13; pohjan arvot syvän kerroksen likiarvona A].
+ *   happi (v32): haetaan pohjan happi (Copernicus BGC o2b).
  *   Kaskinen–Kristiinankaupunki (v29): tietopohja 3.3, Kd 0,32 (Selkämeren Secchi 5,29 m → 1,7/5,29).
  *   Koordinaatit Hannun antamat (asteet, minuutit, sekunnit).
  * v23: Ohtakari toiseksi paluukohteeksi (Hannu 14.11.); merkki satamaan 64,08944 23,40594 (predictwind.com), paluukohteen tyyli.
@@ -152,6 +158,12 @@
     "tunnus": "eckero", "nimi": "Ahvenanmaa–Eckerö", "lyhyt": "Eckerö", "polku": "eckero/",
     "rajat": { "lat_min": 60.00, "lat_max": 60.42, "lon_min": 19.10, "lon_max": 20.00 },
     "keski": [60.20, 19.55], "zoom": 10.5, "paluuikkuna": false,
+    "silakka": { "kdOletus": 0.31, "kausi": ["05-01", "06-15"], "paiva": "valo", "kohta": "3.4", "malli": "saannot", "happi": true,
+      "vaiheet": [
+        {"tunnus": "kutu", "nimi": "silakka, kutu", "pt": [8, 14], "pohja": [0.5, 3, 10, 15], "paiva": "syvanteet", "yo": "matalikko"},
+        {"tunnus": "syonnos", "nimi": "silakka, syönnös", "pohja": [20, 40, 80, 150], "paiva": "harppaus", "yo": "valo"},
+        {"tunnus": "kilohaili", "nimi": "kilohaili", "pt": [5, 40], "o2": [1, 99], "pohja": [20, 40, 100, 200], "paiva": "harppaus", "yo": "pinta20"}
+      ] },
     "lahtopisteet": [
       {"nimi": "Torp", "minne": "Torpin luiskalle", "mista": "Torpin luiskalta", "tyyppi": "luiska", "lat": 60.180297, "lon": 19.598986},
       {"nimi": "Eckerö meripelastus", "minne": "Eckerön meripelastuskeskukselle", "mista": "Eckerön meripelastuskeskukselta", "tyyppi": "luiska", "lat": 60.219206, "lon": 19.538847}

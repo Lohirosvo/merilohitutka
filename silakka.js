@@ -1,4 +1,4 @@
-/* Merilohitutka – silakka.js (v53, 17.11.2026; v43 ensimmäinen)
+/* Merilohitutka – silakka.js (v54, 17.11.2026; v43 ensimmäinen)
  * Silakan valokerros (tietopohja merilohitutka_silakkakerros_tiedot_v006.md, kohta 1.1), ensin Luoto–Tankar.
  * Hannu 16.11.: "Nyt tehdään ja en heitä noppaa. Luotan claudeen" → valinnat alla, perustelut tilannekuvassa v066.
  *
@@ -149,18 +149,7 @@
         if (P && o.pohja >= 10 && o.pohja <= 20) return Object.assign(t, { ohje: 'viereisissä 10–20 m:n syvänteissä: tässä pohjan tuntumassa', kerros: tuntuma() });
         return Object.assign(t, { ohje: 'viereisissä 10–20 m:n syvänteissä' + (P ? `, ei tässä (pohja ${o.pohja < 10 ? 'alle 10' : 'yli 20'} m)` : ''), kerros: null });
       }
-      // syönnös: harppauskerroksen alla tai pohjassa
-      const M = isFinite(o.mld) && o.mld !== null;
-      if (!M || (P && o.mld >= o.pohja - 0.5)) return Object.assign(t, { ohje: 'harppauskerrosta ei ole (sekoittunut pohjaan asti): valon mukaan', kerros: valo });
-      // v52: malli sekoittunut omaan (matalampaan) pohjaansa asti → harppauskerroksesta ei tietoa merikartan syvyydellä
-      if (isFinite(o.pohjaMalli) && o.pohjaMalli !== null && o.mld >= o.pohjaMalli - 0.5)
-        return Object.assign(t, { ohje: 'harppauskerroksesta ei tietoa (malli sekoittunut mallin pohjaan asti): valon mukaan', kerros: valo });
-      if (!valo || valo.tila === 'hajallaan') return Object.assign(t, { ohje: 'valon mukaan', kerros: valo });
-      const yla = Math.max(valo.yla, o.mld);
-      if (P && yla >= o.pohja - POHJAN_TUNTUMA) return Object.assign(t, { ohje: 'harppauskerroksen alla = pohjan tuntumassa', kerros: tuntuma() });
-      // valokerros ulottuu harppauskerroksen alle → sen alaraja; muuten (valo loppuu ennen) harppauskerroksesta pohjaan [A]
-      const ala = valo.ala > yla ? valo.ala : (P ? o.pohja : yla + POHJAN_TUNTUMA), alaP = P ? Math.min(ala, o.pohja) : ala;
-      return Object.assign(t, { ohje: 'harppauskerroksen alla', kerros: { tila: 'valo', yla, opt: Math.min(Math.max(valo.opt, yla), alaP), ala: alaP } });
+      return Object.assign(t, harppausKerros(o));   // syönnös: harppauskerroksen alla tai pohjassa
     }
     if (vrk === 'yö' && tunnus === 'kutu') {
       if (P && o.pohja <= raja[3]) return Object.assign(t, { ohje: 'kutumatalikolla', kerros: valo });
@@ -171,10 +160,10 @@
   /** v53: päivä t (Date) muodossa 'KK-PP' (Suomen aikaa likimain: UTC + 2 h). */
   function pvmTunnus(t) { const d = new Date(t.getTime() + 2 * 3600000); return String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0'); }
   /** v53: sääntömallin voimassa olevat vaiheet. saannot = alueen vaiheet [{ tunnus, nimi, pinta?, t5?, pt?, pvm?, ellei?, pohja }],
-   *  x = { pinta, t5, pt, pvm 'KK-PP' }. Puuttuva lämpö → lämpöehto ei täyty. */
+   *  x = { pinta, t5, pt, o2 (pohjan happi ml/l, v54), pvm 'KK-PP' }. Puuttuva arvo → ehto ei täyty. */
   function vaiheetSaannoista(saannot, x) {
     const sis = (v, r) => typeof v === 'number' && isFinite(v) && v >= r[0] && v <= r[1];
-    let akt = (saannot || []).filter(r => (!r.pinta || sis(x.pinta, r.pinta)) && (!r.t5 || sis(x.t5, r.t5)) && (!r.pt || sis(x.pt, r.pt))
+    let akt = (saannot || []).filter(r => (!r.pinta || sis(x.pinta, r.pinta)) && (!r.t5 || sis(x.t5, r.t5)) && (!r.pt || sis(x.pt, r.pt)) && (!r.o2 || sis(x.o2, r.o2))
       && (!r.pvm || (x.pvm >= r.pvm[0] && x.pvm <= r.pvm[1])));
     const on = new Set(akt.map(r => r.tunnus));
     return akt.filter(r => !r.ellei || !r.ellei.some(e => on.has(e)));
@@ -197,6 +186,40 @@
     }
     return z < syvyydet[0] && isFinite(arvot[0]) && arvot[0] !== null ? arvot[0] : NaN;
   }
+  /** Harppauskerroksen alla tai pohjassa (v49 syönnös, v54 erillinen): o = { valo, mld, pohja, pohjaMalli } → { ohje, kerros }. */
+  function harppausKerros(o) {
+    const P = isFinite(o.pohja) && o.pohja > 0, valo = o.valo || null, M = isFinite(o.mld) && o.mld !== null;
+    const tuntuma = () => ({ tila: 'pohja', yla: Math.max(0, o.pohja - POHJAN_TUNTUMA), opt: Math.max(0, o.pohja - POHJAN_TUNTUMA / 2), ala: o.pohja });
+    if (!M || (P && o.mld >= o.pohja - 0.5)) return { ohje: 'harppauskerrosta ei ole (sekoittunut pohjaan asti): valon mukaan', kerros: valo };
+    // v52: malli sekoittunut omaan (matalampaan) pohjaansa asti → harppauskerroksesta ei tietoa merikartan syvyydellä
+    if (isFinite(o.pohjaMalli) && o.pohjaMalli !== null && o.mld >= o.pohjaMalli - 0.5)
+      return { ohje: 'harppauskerroksesta ei tietoa (malli sekoittunut mallin pohjaan asti): valon mukaan', kerros: valo };
+    if (!valo || valo.tila === 'hajallaan') return { ohje: 'valon mukaan', kerros: valo };
+    const yla = Math.max(valo.yla, o.mld);
+    if (P && yla >= o.pohja - POHJAN_TUNTUMA) return { ohje: 'harppauskerroksen alla = pohjan tuntumassa', kerros: tuntuma() };
+    // valokerros ulottuu harppauskerroksen alle → sen alaraja; muuten (valo loppuu ennen) harppauskerroksesta pohjaan [A]
+    const ala = valo.ala > yla ? valo.ala : (P ? o.pohja : yla + POHJAN_TUNTUMA), alaP = P ? Math.min(ala, o.pohja) : ala;
+    return { ohje: 'harppauskerroksen alla', kerros: { tila: 'valo', yla, opt: Math.min(Math.max(valo.opt, yla), alaP), ala: alaP } };
+  }
+  /** v54: sääntömallin vaiheen kerros (tietopohja 3.4 Eckerö: päivä- ja yösääntö vaiheittain; puuttuu = valon mukaan).
+   *  r = sääntö { paiva?: 'valo'|'harppaus'|'syvanteet', yo?: 'valo'|'matalikko'|'pinta20', pohja }, o = { vrk, valo, mld, pohja,
+   *  pohjaMalli, pinta } → { ohje, kerros (null = ei tässä) }. */
+  function saantoKerros(r, o) {
+    const P = isFinite(o.pohja) && o.pohja > 0, valo = o.valo || null;
+    const tapa = o.vrk === 'päivä' ? r.paiva : o.vrk === 'yö' ? r.yo : null;
+    if (tapa === 'harppaus') return harppausKerros(o);
+    if (tapa === 'syvanteet') {
+      if (P && o.pohja >= 10 && o.pohja <= 20) return { ohje: 'viereisissä 10–20 m:n syvänteissä: tässä pohjan tuntumassa', kerros: { tila: 'pohja', yla: Math.max(0, o.pohja - POHJAN_TUNTUMA), opt: Math.max(0, o.pohja - POHJAN_TUNTUMA / 2), ala: o.pohja } };
+      return { ohje: 'viereisissä syvänteissä' + (P ? `, ei tässä (pohja ${o.pohja < 10 ? 'alle 10' : 'yli 20'} m)` : ''), kerros: null };
+    }
+    if (tapa === 'matalikko') return P && r.pohja && o.pohja <= r.pohja[3] ? { ohje: 'kutumatalikolla', kerros: valo }
+      : { ohje: 'kutumatalikoilla' + (P ? ', ei tässä' : ''), kerros: null };
+    if (tapa === 'pinta20') {
+      if (!(isFinite(o.pinta) && o.pinta !== null && o.pinta >= 5)) return { ohje: 'ylin 20 m, jos pinta vähintään 5 °C: liian kylmä', kerros: null };
+      return { ohje: 'ylin 20 m', kerros: { tila: 'valo', yla: 0, opt: Math.min(10, P ? o.pohja : 10), ala: P ? Math.min(20, o.pohja) : 20 } };
+    }
+    return { ohje: 'valon mukaan (yleissääntö)', kerros: valo };
+  }
   /** Onko päivä t (Date) kaudella k = ['KK-PP', 'KK-PP'] (Suomen aikaa likimain: UTC + 2 h). */
   function kaudella(t, k) {
     if (!k || k.length !== 2) return true;
@@ -205,7 +228,8 @@
   }
 
   const Silakka = { RAJAT, VAIHEET, aurinko, haurwitz, pintavalo, pilviKerroin, kdPar, valokerros, vaihe, arvio,
-                    vaiheLampo, sopivuus, vaiheMalli, kaudella, vali, pvmTunnus, vaiheetSaannoista, sopivuusMonesta, lampoSyvyydella };
+                    vaiheLampo, sopivuus, vaiheMalli, kaudella, vali, pvmTunnus, vaiheetSaannoista, sopivuusMonesta, lampoSyvyydella,
+                    harppausKerros, saantoKerros, ML_L: 44.66 };   // 1 ml/l O2 = 44,66 mmol/m3 [K]
   if (typeof module !== 'undefined' && module.exports) module.exports = Silakka;
   else root.Silakka = Silakka;
 })(typeof window !== 'undefined' ? window : this);
