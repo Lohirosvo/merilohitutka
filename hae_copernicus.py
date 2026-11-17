@@ -21,6 +21,11 @@ pisteisiin (hae_tuuli.py, päivätiedostoihin). Näiden epäonnistuminen ei vaik
 v54 (17.11.2026): alueille, joilla "silakka": {"happi": true} (Eckerö), BGC-hakuun myös pohjan happi o2b (mmol/m3,
 päivätiedoston bgc.o2b); jos se ei onnistu, haetaan kd/zsd kuten ennen.
 
+v60 (17.11.2026, Hannu: "säädettävissä olevilla arvoilla … Vedenlämpö ja etäisyys 2-12 km. Vajaapäivä käy jos 5 h min
+24-03 ei huomioida"): lomadata versio 2 = pintalämpö 11 pisteessä 2–12 km rannasta (1 km välein, länteen Kallanin
+eteläpuolen rantapisteestä) ja tuntituulet (Suomen ajan tunnit 0–23, m/s × 10). Sovellus valitsee rajat. Versio 1 haetaan
+uudelleen.
+
 v59 (17.11.2026, Hannu: "Kallan … 20 m vesillä / noin 5 km rannasta 6-8 C … tuulet alle 8 m/s paras viikko. Käytä
 toteutuneita tuulia ja veden pintalämpötiloja … lomaviikon valinta 2028"): data/lomadata.json = joka kesältä 2016– (1.5.–31.7.)
 satelliitin pintalämpö pisteessä LOMA_PISTE (vrk-keskiarvo) ja Kallanin sääaseman tuuli (päiväsaikaan 6–20 tunnit, joina
@@ -49,6 +54,7 @@ omaan kansioonsa: Luoto data/ (kuten ennen), muut data/<tunnus>/. Yhden alueen v
 Käyttö:  python hae_copernicus.py polku/data/meri.json
 """
 import json
+import math
 import os
 import sys
 import time
@@ -111,7 +117,17 @@ IKA_ENSIMMAINEN, IKA_REP_VIIMEINEN, IKA_MIN_PAIVAT = 2016, 2024, 25
 LOMA_PISTE = dict(lat=63.740, lon=22.530)
 LOMA_ASEMA = dict(nimi="Pietarsaari Kallan", lat=63.7515, lon=22.5228)
 LOMA_JAKSO = ((5, 1), (7, 31))          # 1.5.–31.7. = 92 päivää
-LOMA_PAIVA_H = (6, 20)                  # Suomen aikaa, tunnit 6, 7, …, 20 (15 tuntia)
+LOMA_PAIVA_H = (6, 20)                  # v59 (versio 1); v60 tallentaa kaikki tunnit
+# v60: poikkileikkaus rannasta länteen. Rantapiste = lähin 1 m:n käyrän piste Kallanin itäpuolella [K Traficom-käyristä];
+# suunta 270° [A: avomeri lännessä]; 2–12 km 1 km:n välein.
+LOMA_RANTA = dict(lat=63.7387, lon=22.6261)
+LOMA_KM = list(range(2, 13))
+LOMA_VERSIO = 2
+
+
+def loma_pisteet():
+    km_aste = 111.32 * math.cos(math.radians(LOMA_RANTA["lat"]))
+    return [{"km": k, "lat": LOMA_RANTA["lat"], "lon": round(LOMA_RANTA["lon"] - k / km_aste, 4)} for k in LOMA_KM]
 O2_KERROIN = 1                                            # v54: pohjan happi mmol/m3 (1 ml/l = 44,66 mmol/m3)
 
 
@@ -632,35 +648,45 @@ def loma_paivat(vuosi):
 
 
 def loma_sst(lahde, vuosi):
-    """Vuorokauden pintalämpö (°C × 10, kokonaisluku tai None) pisteen ympäriltä (±0,015° lat, ±0,03° lon) 1.5.–31.7."""
+    """v60: vuorokauden pintalämpö (°C × 10 tai None) poikkileikkauksen pisteissä 1.5.–31.7.: [[11 arvoa] × 92]."""
     a, n = loma_paivat(vuosi)
-    laatikko = dict(lat_min=LOMA_PISTE["lat"] - 0.015, lat_max=LOMA_PISTE["lat"] + 0.015,
-                    lon_min=LOMA_PISTE["lon"] - 0.03, lon_max=LOMA_PISTE["lon"] + 0.03)
+    pp = loma_pisteet()
+    laatikko = dict(lat_min=LOMA_RANTA["lat"] - 0.02, lat_max=LOMA_RANTA["lat"] + 0.02,
+                    lon_min=min(p["lon"] for p in pp) - 0.02, lon_max=max(p["lon"] for p in pp) + 0.02)
     ds, ds_id = avaa(lahde, a, a + timedelta(days=n) - timedelta(minutes=1), alue=laatikko)
-    x = np.asarray(ds["analysed_sst"].values, dtype=float)
-    x = x.reshape(x.shape[0], -1)
+    x = np.asarray(ds["analysed_sst"].values, dtype=float)          # (aika, lat, lon)
     if np.isfinite(x).any() and np.nanmean(x) > 200:
         x = x - 273.15
-    with np.errstate(all="ignore"):
-        pv = np.nanmean(x, axis=1)
+    lat = np.asarray(ds["latitude"].values, dtype=float)
+    lon = np.asarray(ds["longitude"].values, dtype=float)
     ajat = [paikallinen_pvm(t) for t in ds["time"].values] if "time" in ds else []
-    out = [None] * n
-    for i, v in enumerate(pv):
-        j = (datetime.fromisoformat(ajat[i]).replace(tzinfo=timezone.utc) - a).days if i < len(ajat) else i
-        if 0 <= j < n and np.isfinite(v):
-            out[j] = int(round(float(v) * 10))
+    out = [[None] * len(pp) for _ in range(n)]
+    for k, p in enumerate(pp):
+        mi = np.abs(lat - p["lat"]) <= 0.021          # ±1 solu (0,02°): maasolu (luoto) ei jätä pistettä tyhjäksi
+        mj = np.abs(lon - p["lon"]) <= 0.021
+        if not mi.any():
+            mi = np.abs(lat - p["lat"]) == np.abs(lat - p["lat"]).min()
+        if not mj.any():
+            mj = np.abs(lon - p["lon"]) == np.abs(lon - p["lon"]).min()
+        with np.errstate(all="ignore"):
+            pv = np.nanmean(x[:, mi][:, :, mj].reshape(x.shape[0], -1), axis=1)
+        for i, v in enumerate(pv):
+            j = (datetime.fromisoformat(ajat[i]).replace(tzinfo=timezone.utc) - a).days if i < len(ajat) else i
+            if 0 <= j < n and np.isfinite(v):
+                out[j][k] = int(round(float(v) * 10))
     return out, ds_id
 
 
 def loma_tuuli(vuosi, pyynto=None):
-    """Kallanin aseman päiväkohtaiset [tunteja < 8 m/s, tunteja yhteensä] klo 6–20 Suomen aikaa (7 vrk:n kyselyt)."""
+    """v60: Kallanin aseman tuntituulet (10 min keskituuli tasatunnilla, m/s × 10 tai None), Suomen ajan tunnit 0–23:
+    [[24 arvoa] × 92]. 7 vrk:n kyselyt (IL:n raja 168 h)."""
     import hae_tuuli
     pyynto = pyynto or hae_tuuli._pyynto
     a, n = loma_paivat(vuosi)
     hki = ZoneInfo("Europe/Helsinki")
-    out = [[0, 0] for _ in range(n)]
+    out = [[None] * 24 for _ in range(n)]
     asema = None
-    alku = a - timedelta(hours=3)                       # Suomen aamu kesäajassa = UTC −3 h
+    alku = a - timedelta(hours=3)                       # Suomen keskiyö kesäajassa = UTC −3 h
     loppu = a + timedelta(days=n) - timedelta(hours=3)
     t = alku
     while t < loppu:
@@ -679,12 +705,11 @@ def loma_tuuli(vuosi, pyynto=None):
                 if (lat, lon) != lahin or param.lower() != "ws_10min" or not np.isfinite(arvo):
                     continue
                 tl = datetime.fromisoformat(aika.replace("Z", "+00:00")).astimezone(hki)
-                if tl.minute != 0 or not (LOMA_PAIVA_H[0] <= tl.hour <= LOMA_PAIVA_H[1]):
+                if tl.minute != 0:
                     continue
                 j = (datetime(tl.year, tl.month, tl.day, tzinfo=timezone.utc) - a).days
                 if 0 <= j < n:
-                    out[j][1] += 1
-                    out[j][0] += 1 if arvo < 8.0 else 0
+                    out[j][tl.hour] = int(round(arvo * 10))
         t = t2
     return out, asema
 
@@ -698,6 +723,8 @@ def paivita_lomadata(perus, nyt, osoite=None, hae_sst=loma_sst, hae_tuuli_fn=lom
         if vanha is None:
             time.sleep(5)
             vanha = hae_json_sivulta(osoite) or {}
+    if vanha.get("versio") != LOMA_VERSIO:   # v60: muoto muuttui → kaikki kesät uudelleen
+        vanha = {}
     vuodet = dict(vanha.get("vuodet") or {})
     yritetty = dict(vanha.get("yritetty") or {})
     tanaan, virheet, asema = nyt.strftime("%Y-%m-%d"), [], vanha.get("asema")
@@ -706,9 +733,9 @@ def paivita_lomadata(perus, nyt, osoite=None, hae_sst=loma_sst, hae_tuuli_fn=lom
 
     def kirjoita_nyt():
         if vuodet:
-            kirjoita_json(polku, {"versio": 1, "paivitetty": iso(nyt), "piste": LOMA_PISTE, "asema": asema,
-                                  "asemaNimi": LOMA_ASEMA["nimi"], "jakso": ["05-01", "07-31"], "tuuliRaja": 8.0,
-                                  "paivaTunnit": list(LOMA_PAIVA_H), "vuodet": dict(sorted(vuodet.items())),
+            kirjoita_json(polku, {"versio": LOMA_VERSIO, "paivitetty": iso(nyt), "piste": LOMA_PISTE, "asema": asema,
+                                  "asemaNimi": LOMA_ASEMA["nimi"], "jakso": ["05-01", "07-31"], "ranta": LOMA_RANTA,
+                                  "suunta": 270, "pisteet": loma_pisteet(), "vuodet": dict(sorted(vuodet.items())),
                                   "yritetty": yritetty, "virheet": virheet})
     if vuodet:
         kirjoita_nyt()
@@ -723,25 +750,27 @@ def paivita_lomadata(perus, nyt, osoite=None, hae_sst=loma_sst, hae_tuuli_fn=lom
         for nimi, avain in jarj:
             try:
                 sst, ds_id = hae_sst(LAHTEET[avain], v)
-                if sum(x is not None for x in sst) >= 80:
+                paivia = sum(1 for d in sst if any(x is not None for x in d))
+                if paivia >= 80:
                     rivi.update(sst=sst, sstLahde=nimi)
                     break
-                virheet.append(f"{v} SST {nimi}: vain {sum(x is not None for x in sst)} päivää")
+                virheet.append(f"{v} SST {nimi}: vain {paivia} päivää")
             except Exception as e:  # noqa: BLE001
                 virheet.append(f"{v} SST {nimi}: {str(e)[:160]}")
         try:
             tuuli, a = hae_tuuli_fn(v)
-            if sum(1 for o in tuuli if o[1] >= 10) >= 60:
+            paivia = sum(1 for d in tuuli if sum(x is not None for x in d) >= 12)
+            if paivia >= 60:
                 rivi["tuuli"] = tuuli
                 asema = asema or a
             else:
-                virheet.append(f"{v} tuuli: vain {sum(1 for o in tuuli if o[1] >= 10)} päivää")
+                virheet.append(f"{v} tuuli: vain {paivia} päivää")
         except Exception as e:  # noqa: BLE001
             virheet.append(f"{v} tuuli: {str(e)[:160]}")
         if "sst" in rivi and "tuuli" in rivi:
             vuodet[str(v)] = rivi
             yritetty.pop(str(v), None)
-            print(f"  lomadata {v}: SST {rivi['sstLahde']}, tuulipäiviä {sum(1 for o in rivi['tuuli'] if o[1] >= 10)}")
+            print(f"  lomadata {v}: SST {rivi['sstLahde']}, tuulipäiviä {sum(1 for d in rivi['tuuli'] if sum(x is not None for x in d) >= 12)}")
             kirjoita_nyt()
         else:
             yritetty[str(v)] = tanaan

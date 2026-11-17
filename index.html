@@ -49,6 +49,9 @@
   .ikakayra svg { width:100%; height:auto; display:block; touch-action:pan-y; }
   .ikaennakko { font-size:17px; margin:2px 0 6px; } .ikaotsake { font-size:13px; color:var(--himmea); margin-top:6px; }
   .ikataulu tr.oma td { color:var(--syaani); }
+  .lomaasetukset { display:flex; flex-wrap:wrap; gap:4px 10px; font-size:15px; margin:4px 0 6px; align-items:center; }
+  .lomaasetukset input { width:2.6em; font-size:16px; padding:3px 4px; background:#0d1b2b; color:var(--teksti); border:1px solid var(--reuna); border-radius:6px; text-align:center; }
+  .lomaasetukset button { font-size:14px; padding:4px 8px; }
   .lomataulu td.palkki { width:34%; } .lomataulu td.palkki i { display:inline-block; height:10px; background:var(--syaani); border-radius:2px; vertical-align:middle; margin-right:4px; }
   .lohetrivi { font-size:14px; padding:2px 8px 4px; color:var(--teksti); }   /* v58 kartan viikkorivi */
   .ikataulu { width:100%; border-collapse:collapse; font-size:14px; margin:6px 0; }
@@ -325,6 +328,13 @@
     <div class="kortti" id="lomaKortti">
       <h2 id="lomaOtsikko">Lomaviikko (arvio)</h2>
       <div class="ikaennakko" id="lomaParas">Odottaa dataa…</div>
+      <div class="lomaasetukset" id="lomaAsetukset">
+        <label>Lämpö <input id="lomaTmin" inputmode="decimal">–<input id="lomaTmax" inputmode="decimal"> °C</label>
+        <label>etäisyys <input id="lomaDmin" inputmode="decimal">–<input id="lomaDmax" inputmode="decimal"> km</label>
+        <label>tuuli alle <input id="lomaTuuli" inputmode="decimal"> m/s vähintään <input id="lomaTunnit" inputmode="decimal"> h</label>
+        <label>klo <input id="lomaAlku" inputmode="decimal">–<input id="lomaLoppu" inputmode="decimal"></label>
+        <button id="lomaOletus">Oletukset</button>
+      </div>
       <table class="ikataulu lomataulu" id="lomaTaulu"></table>
       <div class="pieni" id="lomaTiedot"></div>
     </div>
@@ -431,7 +441,7 @@
 <script src="kartta.js?v=35"></script>
 <script src="sillat.js?v=2"></script>
 <script src="silakka.js?v=8"></script>
-<script src="ikaluokat.js?v=3"></script>
+<script src="ikaluokat.js?v=4"></script>
 <script src="reitti.js?v=9"></script>
 <script src="ais.js?v=23"></script>
 <script>
@@ -2026,31 +2036,51 @@ async function lataaIkaluokat() {
   lomaHaettu = true;
   piirraLomaviikko();
 }
-/** v59 (Hannu 17.11.): lomaviikko Kallanille – toteutuneet kesät × mallin kala; tavoitevuosi = seuraavan kauden jälkeinen. */
-function piirraLomaviikko() {
+/** v59 (Hannu 17.11.): lomaviikko Kallanille – toteutuneet kesät × mallin kala; tavoitevuosi = seuraavan kauden jälkeinen.
+ *  v60: rajat säädettävinä (Hannu: "säädettävissä olevilla arvoilla … Jostain on luovuttava"), tallessa mlt_loma. */
+var LOMA_KENTAT = [['lomaTmin', 'tMin', 0, 20], ['lomaTmax', 'tMax', 0, 25], ['lomaDmin', 'dMin', 2, 12], ['lomaDmax', 'dMax', 2, 12],
+  ['lomaTuuli', 'tuuli', 1, 25], ['lomaTunnit', 'tunnit', 1, 24], ['lomaAlku', 'alku', 0, 23], ['lomaLoppu', 'loppu', 1, 24]];
+function lomaAset() { return Object.assign({}, Ikaluokat.LOMA_OLETUS, lue('mlt_loma') || {}); }
+function lueLomaAset() {
+  const o = lomaAset();
+  for (const [id, k, a, b] of LOMA_KENTAT) { const v = parseFloat(String($(id).value).replace(',', '.')); if (isFinite(v)) o[k] = Math.max(a, Math.min(b, v)); }
+  if (o.tMin > o.tMax) [o.tMin, o.tMax] = [o.tMax, o.tMin];
+  if (o.dMin > o.dMax) [o.dMin, o.dMax] = [o.dMax, o.dMin];
+  if (o.alku >= o.loppu) o.loppu = Math.min(24, o.alku + 1);
+  tallennaLS('mlt_loma', o); piirraLomaviikko(true);
+}
+function piirraLomaviikko(pakota) {
   const el = $('lomaTaulu'); if (!el || !window.Ikaluokat || !IKA_VARIT) return;
-  const I = Ikaluokat, tavoite = I.kausiVuosi(new Date()) + 1, r = I.lomaviikot(lomaData, ikaHuhti(), tavoite);
+  const I = Ikaluokat, tavoite = I.kausiVuosi(new Date()) + 1, aset = lomaAset();
+  if (!$('lomaAsetukset').dataset.kytketty) {
+    $('lomaAsetukset').dataset.kytketty = '1';
+    LOMA_KENTAT.forEach(([id]) => $(id).addEventListener('change', lueLomaAset));
+    $('lomaOletus').addEventListener('click', () => { tallennaLS('mlt_loma', {}); piirraLomaviikko(true); });
+  }
+  LOMA_KENTAT.forEach(([id, k]) => { if (pakota || document.activeElement !== $(id)) $(id).value = luku(aset[k], Number.isInteger(aset[k]) ? 0 : 1); });
+  const r = I.lomaviikot(lomaData, ikaHuhti(), tavoite, aset);
   const pv = d => d.getUTCDate() + '.' + (d.getUTCMonth() + 1) + '.';
   $('lomaOtsikko').textContent = `Lomaviikko ${tavoite}: Kallan (arvio)`;
   if (!r) {
-    $('lomaParas').textContent = lomaHaettu ? 'Odottaa dataa: hakuajo hakee kesät 2016– (pintalämpö Copernicus, tuuli Kallanin asema).' : 'Haetaan…';
+    $('lomaParas').textContent = lomaData && lomaData.versio !== 2 ? 'Odottaa uutta dataa: hakuajo hakee etäisyydet 2–12 km ja tuntituulet uudelleen.'
+      : lomaHaettu ? 'Odottaa dataa: hakuajo hakee kesät 2016– (pintalämpö Copernicus, tuuli Kallanin asema).' : 'Haetaan…';
     el.innerHTML = ''; $('lomaTiedot').textContent = lomaData && lomaData.virheet && lomaData.virheet.length ? 'Hakuvirheet: ' + lomaData.virheet.slice(0, 3).join(' · ') : ''; return;
   }
-  const [a, b, c] = r.jarjestys.map(i => r.viikot[i]), luku1 = x => luku(x, 1);
-  $('lomaParas').textContent = a && a.arvo > 0 ? `Paras: vk ${a.vk} (${pv(a.alku)}–${pv(a.loppu)}) · ${luku1(a.arvo)} hyvää kalapäivää keskimäärin` + (b ? ` · seuraavat vk ${b.vk}` + (c ? ` ja vk ${c.vk}` : '') : '')
-    : 'Yhtään viikkoa ei täyttänyt ehtoja toteutuneina kesinä.';
-  const mx = Math.max(...r.viikot.map(w => w.arvo || 0)) || 1, pros = x => isFinite(x) ? Math.round(x * 100) : '–';
-  el.innerHTML = '<tr><th>Viikko</th><th>Kala</th><th>6–8°</th><th>Tuuli</th><th>Hyviä/vk</th></tr>'
+  const [a, b, c] = r.jarjestys.map(i => r.viikot[i]), luku1 = x => luku(x, 1), pros = x => isFinite(x) ? Math.round(x * 100) : '–';
+  $('lomaParas').textContent = a && a.arvo > 0 ? `Paras: vk ${a.vk} (${pv(a.alku)}–${pv(a.loppu)}) · ${luku1(a.arvo)} hyvää kalapäivää (kala ${pros(a.kala)} %, lämpö ${pros(a.lampo)} %, tuuli ${pros(a.tuuli)} %)`
+    + (b ? ` · seuraavat vk ${b.vk}` + (c ? ` ja vk ${c.vk}` : '') : '') : 'Yhtään viikkoa ei täyttänyt ehtoja toteutuneina kesinä – väljennä rajoja.';
+  const mx = Math.max(...r.viikot.map(w => w.arvo || 0)) || 1;
+  el.innerHTML = '<tr><th>Viikko</th><th>Kala</th><th>Lämpö</th><th>Tuuli</th><th>Hyviä/vk</th></tr>'
     + r.viikot.map(w => `<tr class="${a && w === a ? 'oma' : ''}"><td>${w.vk} · ${pv(w.alku)}</td><td>${pros(w.kala)}</td><td>${pros(w.lampo)}</td><td>${pros(w.tuuli)}</td>`
       + `<td class="palkki"><i style="width:${Math.round((w.arvo || 0) / mx * 60)}%"></i>${isFinite(w.arvo) ? luku1(w.arvo) : '–'}</td></tr>`).join('');
   const pv2 = r.vuodet.map(y => `${y} ${r.parhaatVuosittain[y] ? 'vk ' + r.parhaatVuosittain[y] : '–'}`).join(', ');
-  const L = lomaData, pist = L.piste, as = L.asema;
+  const L = lomaData, as = L.asema, o = r.asetukset, R = L.ranta || {};
   $('lomaTiedot').innerHTML = [
     `Toteutuneet kesät ${r.vuodet[0]}–${r.vuodet[r.vuodet.length - 1]} (${r.vuodet.length} kpl), viikot ${tavoite} saman kalenteripäivän mukaan. Paras viikko vuosittain: ${pv2}.`,
-    `Kala = mallin viikkotaso (% huipusta) kunkin vuoden huhtikuulla. 6–8° = satelliitin pintalämpö pisteessä ${luku(pist.lat, 3)} N ${luku(pist.lon, 3)} E (20 m:n käyrä noin 5 km rannasta), % päivistä. `
-      + `Tuuli = % päivistä, joina klo ${L.paivaTunnit[0]}–${L.paivaTunnit[1]} vähintään 2/3 tunneista keskituuli alle ${luku(L.tuuliRaja, 0)} m/s (${L.asemaNimi}${as ? ` ${luku(as.lat, 3)} N ${luku(as.lon, 3)} E` : ''}). `
-      + 'Hyviä/vk = kalamäärällä painotetut päivät, joina sekä lämpö että tuuli kunnossa.',
-    'Arvio, ei lupaus: vuosien vaihtelu on suuri (katso vuosittain paras). Kalan ajoitus on mallista, jota ei ole vielä tarkistettu Kallanin saaliilla.',
+    `Kala = mallin viikkotaso (% huipusta) kunkin vuoden huhtikuulla. Lämpö = % päivistä, joina satelliitin pintalämpö on ${luku(o.tMin, 1)}–${luku(o.tMax, 1)} °C jossain kohtaa ${luku(o.dMin, 0)}–${luku(o.dMax, 0)} km rannasta `
+      + `(poikkileikkaus länteen rantapisteestä ${luku(R.lat, 3)} N ${luku(R.lon, 3)} E, 1 km välein). Tuuli = % päivistä, joina klo ${o.alku}–${o.loppu} on vähintään ${luku(o.tunnit, 0)} peräkkäistä tuntia `
+      + `keskituuli alle ${luku(o.tuuli, 0)} m/s (${L.asemaNimi}${as ? ` ${luku(as.lat, 3)} N ${luku(as.lon, 3)} E` : ''}). Hyviä/vk = kalamäärällä painotetut päivät, joina sekä lämpö että tuuli kunnossa.`,
+    'Arvio, ei lupaus: vuosien vaihtelu on suuri (katso vuosittain paras). Kalan ajoitus on mallista, jota ei ole vielä tarkistettu Kallanin saaliilla. Aseman tuuli ei ole sama kuin veneen kohdalla.',
   ].map(t => `<p>${t}</p>`).join('');
 }
 function ikaHuhti() { return (ikaData && ikaData.huhtikuu) || {}; }
