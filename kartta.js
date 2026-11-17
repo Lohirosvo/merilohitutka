@@ -1518,7 +1518,8 @@
         const r = this.silakkaFn ? this.silakkaFn(this.aika) : null;
         if (r && r.luokka) {
           rivit.push([['Silakka' + (r.vaiheet ? ' (' + r.vaiheet + ')' : '') + ', pohja:', '#9fd8ff'], ['● optimi', '#4fe3ff'], ['○ sopiva', '#4fe3ff']]);
-          rivit.push([['', '#9fd8ff'], [(r.kaudella ? 'työoletus' : 'lohikauden ulkopuolella: laskenta') + ' · napauta: kerros', '#9fd8ff']]);
+          const lp = r.laskentaPvm ? ' ' + (+r.laskentaPvm.slice(3)) + '.' + (+r.laskentaPvm.slice(0, 2)) + '. säännöillä' : '';   // v56
+          rivit.push([['', '#9fd8ff'], [(r.kaudella ? 'työoletus' : 'lohikauden ulkopuolella: laskenta' + lp) + ' · napauta: kerros', '#9fd8ff']]);
         } else rivit.push([['Silakka: napauta karttaa – kerros (malli, kartan aika)', '#9fd8ff']]);
       }
       if (this.tasot.lampo && d.phy) rivit.push([['Lämpö (malli) ' + f(this.askel) + ' °C välein', '#ffb24a']]);
