@@ -1,4 +1,4 @@
-/* Merilohitutka – silakka.js (v51, 17.11.2026; v43 ensimmäinen)
+/* Merilohitutka – silakka.js (v53, 17.11.2026; v43 ensimmäinen)
  * Silakan valokerros (tietopohja merilohitutka_silakkakerros_tiedot_v006.md, kohta 1.1), ensin Luoto–Tankar.
  * Hannu 16.11.: "Nyt tehdään ja en heitä noppaa. Luotan claudeen" → valinnat alla, perustelut tilannekuvassa v066.
  *
@@ -26,6 +26,10 @@
  *   v51: alue voi antaa omat välit (alueet.js silakka.vaiheet) ja päiväsäännön (silakka.paiva): 'taulukko' = Luodon taulukon
  *   päivä- ja yösäännöt yllä; 'valo' = tietopohjan kohdan 2 yleissääntö (valokerros tai pohjan tuntuma, kumpi matalampi),
  *   vaihe vaikuttaa vain pohjan sopivuuteen (Kaskinen–Kristiinankaupunki, tietopohja 3.3).
+ * SÄÄNTÖMALLI (v53, tietopohja 3.2 Vaasa–Norrskär): alueen vaiheet ehtoina (pinta, 5 m:n lämpö, pohjan lämpö, päivämäärä
+ *   'KK-PP'); kaikki ehdot täyttävät vaiheet ovat voimassa yhtä aikaa (esim. kutu ulkosaaristossa + nuoret syönnöksellä).
+ *   "ellei" poistaa vaiheen, jos jokin luetelluista on voimassa. Pohjan sopivuus = paras voimassa olevista. Päivän kerros
+ *   yleissäännöllä (kohta 2).
  * AURINGON KORKEUS: tähtitieteellisen almanakan likiarvo (tarkkuus noin 0,01°), ei taittumista (kuten tietopohjan taulukko).
  */
 (function (root) {
@@ -127,7 +131,8 @@
   }
   /** Vaiheen pohjaväli alueelle: alueen oma (vaiheet[tunnus]) tai oletus (Luoto). */
   function vali(tunnus, vaiheet) { return vaiheet && vaiheet[tunnus] ? vaiheet[tunnus] : (VAIHEET[tunnus] || {}).pohja || null; }
-  /** Vaiheen kerros (v49). o = { pt, pinta, mld, pohja, vrk (vaihe()), valo (valokerros), vaiheet, paiva ('taulukko'|'valo') }.
+  /** Vaiheen kerros (v49). o = { pt, pinta, mld, pohja, vrk (vaihe()), valo (valokerros), vaiheet, paiva ('taulukko'|'valo'),
+   *  pohjaMalli (v52: mallin oma pohja; jos mld ulottuu siihen, harppauskerroksesta ei ole tietoa) }.
    *  Palauttaa { tunnus, nimi, ohje, kerros (tila/yla/opt/ala tai null = ei tässä), paikka, raja } tai null. */
   function vaiheMalli(o) {
     const tunnus = vaiheLampo(o.pt, o.pinta);
@@ -147,6 +152,9 @@
       // syönnös: harppauskerroksen alla tai pohjassa
       const M = isFinite(o.mld) && o.mld !== null;
       if (!M || (P && o.mld >= o.pohja - 0.5)) return Object.assign(t, { ohje: 'harppauskerrosta ei ole (sekoittunut pohjaan asti): valon mukaan', kerros: valo });
+      // v52: malli sekoittunut omaan (matalampaan) pohjaansa asti → harppauskerroksesta ei tietoa merikartan syvyydellä
+      if (isFinite(o.pohjaMalli) && o.pohjaMalli !== null && o.mld >= o.pohjaMalli - 0.5)
+        return Object.assign(t, { ohje: 'harppauskerroksesta ei tietoa (malli sekoittunut mallin pohjaan asti): valon mukaan', kerros: valo });
       if (!valo || valo.tila === 'hajallaan') return Object.assign(t, { ohje: 'valon mukaan', kerros: valo });
       const yla = Math.max(valo.yla, o.mld);
       if (P && yla >= o.pohja - POHJAN_TUNTUMA) return Object.assign(t, { ohje: 'harppauskerroksen alla = pohjan tuntumassa', kerros: tuntuma() });
@@ -160,6 +168,35 @@
     }
     return Object.assign(t, { ohje: 'valon mukaan', kerros: valo });
   }
+  /** v53: päivä t (Date) muodossa 'KK-PP' (Suomen aikaa likimain: UTC + 2 h). */
+  function pvmTunnus(t) { const d = new Date(t.getTime() + 2 * 3600000); return String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0'); }
+  /** v53: sääntömallin voimassa olevat vaiheet. saannot = alueen vaiheet [{ tunnus, nimi, pinta?, t5?, pt?, pvm?, ellei?, pohja }],
+   *  x = { pinta, t5, pt, pvm 'KK-PP' }. Puuttuva lämpö → lämpöehto ei täyty. */
+  function vaiheetSaannoista(saannot, x) {
+    const sis = (v, r) => typeof v === 'number' && isFinite(v) && v >= r[0] && v <= r[1];
+    let akt = (saannot || []).filter(r => (!r.pinta || sis(x.pinta, r.pinta)) && (!r.t5 || sis(x.t5, r.t5)) && (!r.pt || sis(x.pt, r.pt))
+      && (!r.pvm || (x.pvm >= r.pvm[0] && x.pvm <= r.pvm[1])));
+    const on = new Set(akt.map(r => r.tunnus));
+    return akt.filter(r => !r.ellei || !r.ellei.some(e => on.has(e)));
+  }
+  /** v53: paras pohjan sopivuus voimassa olevista vaiheista: { paikka, vaihe } (vaihe = se, jolle sopivuus laskettiin). */
+  function sopivuusMonesta(z, akt) {
+    const arvo = { optimi: 2, sopiva: 1, ei: 0 }; let paikka = null, vaihe = null;
+    for (const r of akt || []) { const v = sopivuus(z, r.pohja); if (v && (paikka === null || arvo[v] > arvo[paikka])) { paikka = v; vaihe = r; } }
+    return { paikka, vaihe };
+  }
+  /** Lämpö syvyydellä z profiilista (lineaarinen; NaN, jos z on syvintä tasoa syvemmällä tai dataa ei ole). */
+  function lampoSyvyydella(syvyydet, arvot, z) {
+    if (!syvyydet || !arvot) return NaN;
+    for (let i = 0; i < syvyydet.length - 1; i++) {
+      if (z >= syvyydet[i] && z <= syvyydet[i + 1]) {
+        const a = arvot[i], b = arvot[i + 1];
+        if (a === null || b === null || !isFinite(a) || !isFinite(b)) return NaN;
+        return a + (b - a) * (z - syvyydet[i]) / (syvyydet[i + 1] - syvyydet[i]);
+      }
+    }
+    return z < syvyydet[0] && isFinite(arvot[0]) && arvot[0] !== null ? arvot[0] : NaN;
+  }
   /** Onko päivä t (Date) kaudella k = ['KK-PP', 'KK-PP'] (Suomen aikaa likimain: UTC + 2 h). */
   function kaudella(t, k) {
     if (!k || k.length !== 2) return true;
@@ -168,7 +205,7 @@
   }
 
   const Silakka = { RAJAT, VAIHEET, aurinko, haurwitz, pintavalo, pilviKerroin, kdPar, valokerros, vaihe, arvio,
-                    vaiheLampo, sopivuus, vaiheMalli, kaudella, vali };
+                    vaiheLampo, sopivuus, vaiheMalli, kaudella, vali, pvmTunnus, vaiheetSaannoista, sopivuusMonesta, lampoSyvyydella };
   if (typeof module !== 'undefined' && module.exports) module.exports = Silakka;
   else root.Silakka = Silakka;
 })(typeof window !== 'undefined' ? window : this);

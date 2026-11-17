@@ -390,14 +390,14 @@
   <button data-v="v-raportit">⋯<br>RAPORTIT</button>
 </nav>
 
-<script src="alueet.js?v=29"></script>
+<script src="alueet.js?v=31"></script>
 <script src="havainnot.js?v=15"></script>
 <script src="malli.js?v=25"></script>
 <script src="fmi.js?v=14"></script>
 <script src="nopeus.js?v=20"></script>
 <script src="kartta.js?v=34"></script>
 <script src="sillat.js?v=2"></script>
-<script src="silakka.js?v=5"></script>
+<script src="silakka.js?v=7"></script>
 <script src="reitti.js?v=9"></script>
 <script src="ais.js?v=23"></script>
 <script>
@@ -1048,7 +1048,7 @@ function piirraMeriTila() {
   if (vaylat) osat.push(`Väylät: Väylävirasto, vesiväyläaineisto (CC BY 4.0). Ei navigointikäyttöön`);
   if (typeof aisTila === 'function' && aisTila()) osat.push(aisTila());
   if (typeof vesiTilaTeksti === 'function' && vesiTilaTeksti()) osat.push(vesiTilaTeksti());   // v35
-  if (meri.bgc || valittuAlue.silakka) osat.push(`Silakkamalli (v51; alueet: ${silakkaAlueet()}${valittuAlue.silakka && valittuAlue.silakka.paiva === 'valo' ? '; tällä alueella päivän kerros yleissäännöllä, vaihe vain paikan sopivuuteen' : ''}): valon vaimennus `
+  if (meri.bgc || valittuAlue.silakka) osat.push(`Silakkamalli (v53; alueet: ${silakkaAlueet()}${valittuAlue.silakka && valittuAlue.silakka.paiva === 'valo' ? '; tällä alueella päivän kerros yleissäännöllä, vaihe vain paikan sopivuuteen' : ''}): valon vaimennus `
     + (meri.bgc ? `Copernicus BGC ${meri.bgc.dataset} (${(meri.bgc.muuttujat || []).join(', ')}, ${meri.bgc.aika || 'klo 12 UTC'})` : 'ei vielä haettu (oletus Kd ' + luku(valittuAlue.silakka ? valittuAlue.silakka.kdOletus : NaN, 2) + ')')
     + `, mallin pohja ${meri.pohja ? meri.pohja.dataset : 'puuttuu'}`
     + `, pohjan lämpö ja sekoittumiskerros ${meri.kerros ? meri.kerros.dataset + ' (' + (meri.kerros.muuttujat || []).map(x => x === 'pt' ? 'bottomT' : 'mlotst').join(', ') + ')' : 'ei vielä haettu'}`
@@ -1131,11 +1131,19 @@ function lohiTeksti(lat, lon) {
   const mg = KarttaMalli.lohiMarginaali(pr.arvot, pr.syvyydet, asetukset.lohiMin, asetukset.lohiMax);
   const ero = !mg || k.loytyi ? '' : mg.maxT < asetukset.lohiMin ? ` · lämpimin vesi ${luku(mg.maxT)} °C, ${luku(asetukset.lohiMin - mg.maxT)} °C liian kylmää`
     : ` · kylmin vesi ${luku(mg.minT)} °C, ${luku(mg.minT - asetukset.lohiMax)} °C liian lämmintä`;
+  // v52: jos merikartan pohja eroaa mallin pohjasta yli 2 m, kerrotaan molemmat (mallin lämpö loppuu mallin pohjaan)
+  const mp = k.pohja + 0.5, kp = k.taysi ? NaN : karttaPohja(lat, lon, mp), eri = isFinite(kp) && Math.abs(kp - mp) > 2;
   if (!k.loytyi) return (k.taysi ? `Lohikerros ${vali}: ei 0–${luku(syvin, 0)} m:ssä`
-    : `Lohikerros ${vali}: ei 0–${luku(k.pohja + 0.5, 0)} m:ssä (mallin pohja ~${luku(k.pohja + 0.5, 0)} m)`) + ero;
-  const ala = k.pohjaan ? (k.taysi ? `yli ${luku(syvin, 0)} m` : `pohjaan (~${luku(k.pohja + 0.5, 0)} m)`) : luku(k.ala) + ' m';
+    : `Lohikerros ${vali}: ei 0–${luku(mp, 0)} m:ssä (mallin pohja ~${luku(mp, 0)} m${eri ? ', merikartta ~' + luku(kp, 0) + ' m' : ''})`) + ero;
+  const ala = k.pohjaan ? (k.taysi ? `yli ${luku(syvin, 0)} m` : eri ? `mallin pohjaan (~${luku(mp, 0)} m; merikartta ~${luku(kp, 0)} m)` : `pohjaan (~${luku(mp, 0)} m)`) : luku(k.ala) + ' m';
   const raja = mg && asetukset.lohiReuna > 0 && mg.m < asetukset.lohiReuna ? ` · rajalla: paras vesi ${luku(mg.m)} °C rajan sisällä` : '';
   return `Lohikerros ${vali}: ${luku(k.yla)} m – ${ala} (paksuus ${luku(k.paksuus)} m)${raja}`;
+}
+/** v52: pohjan arvio merikartan käyristä (pohjaArvio); NaN, jos käyristä ei saada arviota (tapa 'malli'). */
+function karttaPohja(lat, lon, malli) {
+  if (!syvyys || !KarttaMalli.pohjaArvio) return NaN;
+  const pa = KarttaMalli.pohjaArvio(syvyys, matalikkoTulos, lat, lon, malli);
+  return pa.tapa === 'malli' ? NaN : pa.arvio;
 }
 function etaisyys(m) { return m < 1000 ? Math.round(m / 10) * 10 + ' m' : luku(m / 1000) + ' km'; }
 function syvyysTeksti(lat, lon) {
@@ -1725,8 +1733,15 @@ function silakkaArvio(lat, lon, t) {
     // v49: vaihemalli pohjan lämmöstä (tietopohja 3.1); pinta = mallin pintalämpö lähimpään kartta-aikaan
     const ai = lahinIndeksiAjoista(nakyma && nakyma.phy ? nakyma.phy.ajat : [], t.getTime(), 5400000);
     a.pinta = ai >= 0 ? KarttaMalli.lahinArvo(nakyma.phy, 'lampo', ai, lat, lon) : NaN;
+    if (al.silakka.malli === 'saannot' && Silakka.vaiheetSaannoista) {   // v53: Merenkurkku (tietopohja 3.2)
+      const pr = ai >= 0 ? KarttaMalli.profiiliPisteessa(nakyma.phy, ai, lat, lon) : null;
+      const t5 = pr ? Silakka.lampoSyvyydella(pr.syvyydet, pr.arvot, 5) : NaN;
+      const akt = Silakka.vaiheetSaannoista(al.silakka.vaiheet, { pinta: a.pinta, t5, pt: a.kerros ? a.kerros.pt : NaN, pvm: Silakka.pvmTunnus(t) });
+      a.saannot = Object.assign({ akt, t5 }, Silakka.sopivuusMonesta(a.pohja, akt));
+      a.vaiheMalli = null;
+    } else
     a.vaiheMalli = a.kerros && Silakka.vaiheMalli ? Silakka.vaiheMalli({ pt: a.kerros.pt, pinta: a.pinta, mld: a.kerros.mld, pohja: a.pohja,
-      vrk: a.vaihe, valo: a.ennuste || a.kirkas, vaiheet: al.silakka.vaiheet, paiva: al.silakka.paiva }) : null;
+      vrk: a.vaihe, valo: a.ennuste || a.kirkas, vaiheet: al.silakka.vaiheet, paiva: al.silakka.paiva, pohjaMalli: malli }) : null;
     a.kaudella = Silakka.kaudella ? Silakka.kaudella(t, al.silakka.kausi) : true;
   }
   return a;
@@ -1760,8 +1775,18 @@ function silakkaRuudut(aika) {
   const ti = KarttaMalli.lahinAika(k.ajat, ms);
   if (!(ti >= 0) || Math.abs(Date.parse(k.ajat[ti]) - ms) > 3 * 3600000) return null;
   const ai = lahinIndeksiAjoista(nakyma.phy ? nakyma.phy.ajat : [], ms, 5400000), vaiheet = new Set();
+  const saannot = al.silakka.malli === 'saannot' && Silakka.vaiheetSaannoista, pvm = Silakka.pvmTunnus ? Silakka.pvmTunnus(new Date(ms)) : '';
   const luokka = k.lat.map((la, i) => k.lon.map((lo, j) => {
     const pt = k.pt[ti] && k.pt[ti][i] ? k.pt[ti][i][j] : null, z = silakkaVarasto.pohja[i][j];
+    if (saannot) {   // v53: Merenkurkku – voimassa olevat vaiheet ruudun lämmöistä ja päivästä, paras sopivuus
+      if (!isFinite(z)) return 0;
+      const pinta = ai >= 0 ? KarttaMalli.lahinArvo(nakyma.phy, 'lampo', ai, la, lo) : NaN;
+      const pr = ai >= 0 ? KarttaMalli.profiiliPisteessa(nakyma.phy, ai, la, lo) : null, t5 = pr ? Silakka.lampoSyvyydella(pr.syvyydet, pr.arvot, 5) : NaN;
+      const akt = Silakka.vaiheetSaannoista(al.silakka.vaiheet, { pinta, t5, pt: pt === null ? NaN : pt, pvm });
+      akt.forEach(r => vaiheet.add(r.nimi));
+      const s = Silakka.sopivuusMonesta(z, akt).paikka;
+      return s === 'optimi' ? 2 : s === 'sopiva' ? 1 : 0;
+    }
     if (pt === null || !isFinite(z)) return 0;
     const pinta = ai >= 0 ? KarttaMalli.lahinArvo(nakyma.phy, 'lampo', ai, la, lo) : NaN, v = Silakka.vaiheLampo(pt, pinta);
     const raja = v && Silakka.VAIHEET[v].pohja ? Silakka.vali(v, al.silakka.vaiheet) : null;
@@ -1770,13 +1795,27 @@ function silakkaRuudut(aika) {
     const s = Silakka.sopivuus(z, raja);
     return s === 'optimi' ? 2 : s === 'sopiva' ? 1 : 0;
   }));
-  const r = { lat: k.lat, lon: k.lon, luokka, vaiheet: vaiheet.size === 1 ? [...vaiheet][0] : vaiheet.size ? 'vaihe ruuduittain' : '',
+  const r = { lat: k.lat, lon: k.lon, luokka, vaiheet: vaiheet.size > 3 ? 'vaihe ruuduittain' : vaiheet.size ? [...vaiheet].join(' / ') : (saannot ? 'ei voimassa olevaa vaihetta' : ''),
               kaudella: Silakka.kaudella(new Date(ms), al.silakka.kausi) };
   silakkaVarasto.ajat[ms] = r;
   return r;
 }
 /** v49: vaihemallin osa napautustekstiin. */
+/** v53: sääntömallin osa (Merenkurkku). */
+function saantoOsa(a, m) {
+  const S = a.saannot, d = x => luku(x, x % 1 ? 1 : 0);
+  const peruste = r => [r.pinta ? `pinta ${luku(a.pinta, 1)} °C` : '', r.t5 ? `5 m ${luku(S.t5, 1)} °C` : '', r.pt && a.kerros ? `pohja ${luku(a.kerros.pt, 1)} °C` : '',
+    r.pvm && !r.pinta && !r.t5 && !r.pt ? `${d(+r.pvm[0].slice(3))}.${d(+r.pvm[0].slice(0, 2))}.–${d(+r.pvm[1].slice(3))}.${d(+r.pvm[1].slice(0, 2))}.` : ''].filter(Boolean).join(', ');
+  const nimet = S.akt.length ? S.akt.map(r => r.nimi + (peruste(r) ? ` (${peruste(r)})` : '')).join(' + ') : 'ei voimassa olevaa vaihetta';
+  const valo = a.ennuste || a.kirkas, milloin = a.vaihe === 'päivä' ? 'päivällä ' : a.vaihe === 'yö' ? 'yöllä ' : '';
+  const kerros = !S.akt.length || !valo ? '' : ` → ${milloin}valon mukaan (yleissääntö)` + (valo.tila === 'hajallaan' ? ' (hajallaan)' : ` ${m(valo.yla)}–${m(valo.ala)} m`);
+  let paikka = '';
+  if (S.paikka && S.vaihe) { const r = S.vaihe.pohja;
+    paikka = `; pohja ~${m(a.pohja)} m: ${S.paikka === 'optimi' ? 'optimissa' : S.paikka === 'sopiva' ? 'sopiva' : 'ei sovi'} (${S.vaihe.nimi}: opt. ${d(r[1])}–${d(r[2])} m, ${d(r[0])}–${d(r[3])} m)`; }
+  return ` · vaihe (työoletus): ${nimet}${kerros}${paikka}` + (a.kaudella ? '' : ' · lohikauden ulkopuolella: vaihe vain laskentana');
+}
 function vaiheOsa(a, m) {
+  if (a.saannot) return saantoOsa(a, m);
   const v = a.vaiheMalli; if (!v) return '';
   const k = a.kerros, pt = luku(k.pt, 1);
   const peruste = v.tunnus === 'odottava' ? `pohja ${pt} °C < 8 °C` : v.tunnus === 'kutu' ? `pohja ${pt} °C, 8–14 °C` : v.tunnus === 'syonnos' ? `pohja ${pt} °C > 14 °C` : `pinta ${luku(a.pinta, 1)} °C ≤ 3 °C`;
@@ -1792,7 +1831,8 @@ function kerrosOsa(a, m) {
   const k = a.kerros; if (!k) return '';
   const o = [];
   if (isFinite(k.pt)) o.push(`pohjan lämpö ${luku(k.pt, 1)} °C`);
-  if (isFinite(k.mld)) o.push(isFinite(a.pohjaMalli) && k.mld >= a.pohjaMalli - 0.5 ? 'sekoittunut pohjaan asti' : `sekoittumiskerros ${m(k.mld)} m`);
+  const eri = isFinite(a.pohjaMalli) && isFinite(a.pohja) && Math.abs(a.pohja - a.pohjaMalli) > 2;   // v52
+  if (isFinite(k.mld)) o.push(isFinite(a.pohjaMalli) && k.mld >= a.pohjaMalli - 0.5 ? (eri ? `sekoittunut mallin pohjaan (~${m(a.pohjaMalli)} m) asti` : 'sekoittunut pohjaan asti') : `sekoittumiskerros ${m(k.mld)} m`);
   return o.length ? ` · ${o.join(', ')} (malli)` : '';
 }
 /** v46–v47: pohjan lähde napautustekstiin. */
@@ -1826,7 +1866,8 @@ function silakkaTeksti(lat, lon) {
     : `${kerros(a.kirkas, 'kirkas')}; ${kerros(a.pilvinen, 'täysin pilvinen')} (pilvisyysennustetta ei ole)`;
   return `Silakka, valomalli ${klo(t)} (${a.vaihe}, aurinko ${luku(a.h, 1)}°): ${paa}`
     + vaiheOsa(a, m) + ` · Kd(PAR) ${luku(kd.kd, 2)} m⁻¹ (${lahde})` + pohjaOsa(a, m) + kerrosOsa(a, m)
-    + ' · työoletus: valo 10–1–0,1 lx, vaihe pohjan lämmöstä (tietopohja 3.1), ei happimallia';
+    + ` · työoletus: valo 10–1–0,1 lx, vaihe ${valittuAlue.silakka.malli === 'saannot' ? 'pinnan ja 5 m:n lämmöstä ja päivämäärästä' : 'pohjan lämmöstä'} (tietopohja ${valittuAlue.silakka.kohta || '3.1'})`
+    + (valittuAlue.silakka.paiva === 'valo' ? ', päivän kerros yleissäännöllä (kohta 2)' : '') + ', ei happimallia';
 }
 function vesiTilaTeksti() {
   const osat = Object.values(vesi).map(v => `${v.asema.nimi} (${v.asema.fmisid}): `

@@ -1,4 +1,4 @@
-/* Merilohitutka – alueet.js (v29)
+/* Merilohitutka – alueet.js (v31)
  * Kalastusalueet. Yksi lähde: sovellus lataa tämän skriptinä ja hae_copernicus.py lukee saman tiedoston.
  * Hakasulkeiden [ ] välissä on oltava puhdasta JSONia (ei kommentteja, ei pilkkua viimeisen alkion jälkeen).
  *
@@ -38,6 +38,12 @@
  *   kausi (v28): lohikausi ['KK-PP', 'KK-PP'] (tietopohja 0.1: 1.5.–31.8.); sen ulkopuolella vaihemalli näytetään vain laskentana.
  *   paiva (v29): 'taulukko' = Luodon taulukon päivä-/yösäännöt (tietopohja 3.1), 'valo' = kohdan 2 yleissääntö (3.3 Kaskinen).
  *   vaiheet (v29): pohjan syvyys [min, optMin, optMax, max] vaiheittain (odottava, kutu, syonnos); puuttuu = Luodon arvot.
+ *   kohta (v30): tietopohjan kohta, josta alueen vaiheet ovat (näkyy napautuksen alaviitteessä).
+ *   malli (v31): "saannot" = vaiheet ehtoina (silakka.js vaiheetSaannoista): pinta / t5 (5 m:n lämpö) / pt (pohja) °C-välit ja
+ *   pvm ['KK-PP', 'KK-PP']; ellei = vaihe pois, jos jokin luetelluista on voimassa. Puuttuu = pohjan lämpömalli (Luoto, Kaskinen).
+ *   Vaasa ja Norrskär (v31): tietopohja 3.2 (Ehnholm 1951, aineisto 1938–49 [L1]); Kd 0,31 (Merenkurkun Secchi 5,50 m → 1,7/5,50).
+ *   Päivämäärärajat ovat 1940-luvun aineistosta ja kutu on sen jälkeen aikaistunut (~7,7 vrk/vuosikymmen [L35]) → lämpöehdot
+ *   ensisijaisia; "odottava" kauden alusta (ei 15.5.), korkeakesän kutu "pinta yli 14 °C" heinäkuussa [A].
  *   Kaskinen–Kristiinankaupunki (v29): tietopohja 3.3, Kd 0,32 (Selkämeren Secchi 5,29 m → 1,7/5,29).
  *   Koordinaatit Hannun antamat (asteet, minuutit, sekunnit).
  * v23: Ohtakari toiseksi paluukohteeksi (Hannu 14.11.); merkki satamaan 64,08944 23,40594 (predictwind.com), paluukohteen tyyli.
@@ -47,7 +53,7 @@
     "tunnus": "luoto", "nimi": "Luoto–Tankar", "lyhyt": "Luoto", "polku": "",
     "rajat": { "lat_min": 63.45, "lat_max": 64.13, "lon_min": 22.05, "lon_max": 23.65 },
     "keski": [63.83, 22.62], "zoom": 10.6, "paluuikkuna": true, "tuulipisteetLisaa": true,
-    "silakka": { "kdOletus": 0.36, "kausi": ["05-01", "08-31"], "paiva": "taulukko" },
+    "silakka": { "kdOletus": 0.36, "kausi": ["05-01", "08-31"], "paiva": "taulukko", "kohta": "3.1" },
     "lahtopisteet": [
       {"nimi": "Luoto", "minne": "Luodon pisteeseen", "mista": "Luodon pisteestä", "tyyppi": "turva", "lat": 63.8352, "lon": 22.646742, "jatko": {"nimi": "Köpmanholmen", "minne": "Köpmanholmeniin", "lat": 63.806844, "lon": 22.671069}},
       {"nimi": "Etelä", "minne": "eteläiseen pisteeseen", "mista": "eteläisestä pisteestä", "tyyppi": "turva", "lat": 63.613219, "lon": 22.480039},
@@ -68,6 +74,15 @@
     "tunnus": "vaasa", "nimi": "Vaasa", "lyhyt": "Vaasa", "polku": "vaasa/",
     "rajat": { "lat_min": 62.95, "lat_max": 63.56, "lon_min": 21.15, "lon_max": 22.00 },
     "keski": [63.12, 21.50], "zoom": 10.9, "paluuikkuna": false,
+    "silakka": { "kdOletus": 0.31, "kausi": ["05-01", "08-31"], "paiva": "valo", "kohta": "3.2", "malli": "saannot",
+      "vaiheet": [
+        {"tunnus": "odottava", "nimi": "kutua odottava", "pvm": ["05-01", "07-15"], "ellei": ["kutuSisa", "kutuUlko", "kutuKesa", "kutuAvo"], "pohja": [5, 10, 20, 30]},
+        {"tunnus": "kutuSisa", "nimi": "kutu, sisäsaaristo", "pinta": [11, 15], "pohja": [0, 1, 4, 5]},
+        {"tunnus": "kutuUlko", "nimi": "kutu, ulkosaaristo", "t5": [8, 12], "pohja": [4, 5, 10, 12]},
+        {"tunnus": "kutuKesa", "nimi": "korkeakesän kutu, ulkosaaristo", "pinta": [14, 40], "pvm": ["07-01", "07-31"], "pohja": [4, 5, 10, 12]},
+        {"tunnus": "kutuAvo", "nimi": "kutu, avomerivyöhyke", "pvm": ["06-01", "06-30"], "pohja": [2, 5, 15, 20]},
+        {"tunnus": "nuoret", "nimi": "nuoret syönnöksellä", "pvm": ["06-15", "08-31"], "pohja": [2, 5, 15, 20]}
+      ] },
     "lahtopisteet": [
       {"nimi": "Raippaluodon silta", "minne": "Raippaluodon sillalle", "mista": "Raippaluodon sillalta", "tyyppi": "luiska", "lat": 63.206742, "lon": 21.48695},
       {"nimi": "Åminne", "minne": "Åminneen", "mista": "Åminnestä", "tyyppi": "luiska", "lat": 62.974208, "lon": 21.480453}
@@ -83,6 +98,15 @@
     "tunnus": "norrskar", "nimi": "Norrskär", "lyhyt": "Norrskär", "polku": "norrskar/",
     "rajat": { "lat_min": 63.05, "lat_max": 63.45, "lon_min": 20.30, "lon_max": 21.20 },
     "keski": [63.24, 20.80], "zoom": 10.4, "paluuikkuna": false, "suoraMatala": 10,
+    "silakka": { "kdOletus": 0.31, "kausi": ["05-01", "08-31"], "paiva": "valo", "kohta": "3.2", "malli": "saannot",
+      "vaiheet": [
+        {"tunnus": "odottava", "nimi": "kutua odottava", "pvm": ["05-01", "07-15"], "ellei": ["kutuSisa", "kutuUlko", "kutuKesa", "kutuAvo"], "pohja": [5, 10, 20, 30]},
+        {"tunnus": "kutuSisa", "nimi": "kutu, sisäsaaristo", "pinta": [11, 15], "pohja": [0, 1, 4, 5]},
+        {"tunnus": "kutuUlko", "nimi": "kutu, ulkosaaristo", "t5": [8, 12], "pohja": [4, 5, 10, 12]},
+        {"tunnus": "kutuKesa", "nimi": "korkeakesän kutu, ulkosaaristo", "pinta": [14, 40], "pvm": ["07-01", "07-31"], "pohja": [4, 5, 10, 12]},
+        {"tunnus": "kutuAvo", "nimi": "kutu, avomerivyöhyke", "pvm": ["06-01", "06-30"], "pohja": [2, 5, 15, 20]},
+        {"tunnus": "nuoret", "nimi": "nuoret syönnöksellä", "pvm": ["06-15", "08-31"], "pohja": [2, 5, 15, 20]}
+      ] },
     "lahtopisteet": [
       {"nimi": "Klubbskat", "minne": "Klubbskatiin", "mista": "Klubbskatista", "tyyppi": "luiska", "lat": 63.305153, "lon": 21.093697}
     ],
@@ -100,7 +124,7 @@
     "tunnus": "kaskinen", "nimi": "Kaskinen–Kristiinankaupunki", "lyhyt": "Kaskinen–Kristiinank.", "polku": "kaskinen/",
     "rajat": { "lat_min": 62.12, "lat_max": 62.65, "lon_min": 20.85, "lon_max": 21.65 },
     "keski": [62.36, 21.25], "zoom": 10.3, "paluuikkuna": false,
-    "silakka": { "kdOletus": 0.32, "kausi": ["05-01", "08-31"], "paiva": "valo",
+    "silakka": { "kdOletus": 0.32, "kausi": ["05-01", "08-31"], "paiva": "valo", "kohta": "3.3",
                  "vaiheet": { "odottava": [5, 10, 25, 40], "kutu": [0.5, 3, 10, 15], "syonnos": [10, 20, 40, 60] } },
     "lahtopisteet": [
       {"nimi": "Kaskinen", "minne": "Kaskisten luiskalle", "mista": "Kaskisten luiskalta", "tyyppi": "luiska", "lat": 62.382847, "lon": 21.218158}
