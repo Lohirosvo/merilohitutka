@@ -390,14 +390,14 @@
   <button data-v="v-raportit">⋯<br>RAPORTIT</button>
 </nav>
 
-<script src="alueet.js?v=28"></script>
+<script src="alueet.js?v=29"></script>
 <script src="havainnot.js?v=15"></script>
 <script src="malli.js?v=25"></script>
 <script src="fmi.js?v=14"></script>
 <script src="nopeus.js?v=20"></script>
 <script src="kartta.js?v=34"></script>
 <script src="sillat.js?v=2"></script>
-<script src="silakka.js?v=4"></script>
+<script src="silakka.js?v=5"></script>
 <script src="reitti.js?v=9"></script>
 <script src="ais.js?v=23"></script>
 <script>
@@ -1048,7 +1048,7 @@ function piirraMeriTila() {
   if (vaylat) osat.push(`Väylät: Väylävirasto, vesiväyläaineisto (CC BY 4.0). Ei navigointikäyttöön`);
   if (typeof aisTila === 'function' && aisTila()) osat.push(aisTila());
   if (typeof vesiTilaTeksti === 'function' && vesiTilaTeksti()) osat.push(vesiTilaTeksti());   // v35
-  if (meri.bgc || valittuAlue.silakka) osat.push(`Silakan valomalli (v49, vain ${valittuAlue.silakka ? valittuAlue.nimi : '–'}): valon vaimennus `
+  if (meri.bgc || valittuAlue.silakka) osat.push(`Silakkamalli (v51; alueet: ${silakkaAlueet()}${valittuAlue.silakka && valittuAlue.silakka.paiva === 'valo' ? '; tällä alueella päivän kerros yleissäännöllä, vaihe vain paikan sopivuuteen' : ''}): valon vaimennus `
     + (meri.bgc ? `Copernicus BGC ${meri.bgc.dataset} (${(meri.bgc.muuttujat || []).join(', ')}, ${meri.bgc.aika || 'klo 12 UTC'})` : 'ei vielä haettu (oletus Kd ' + luku(valittuAlue.silakka ? valittuAlue.silakka.kdOletus : NaN, 2) + ')')
     + `, mallin pohja ${meri.pohja ? meri.pohja.dataset : 'puuttuu'}`
     + `, pohjan lämpö ja sekoittumiskerros ${meri.kerros ? meri.kerros.dataset + ' (' + (meri.kerros.muuttujat || []).map(x => x === 'pt' ? 'bottomT' : 'mlotst').join(', ') + ')' : 'ei vielä haettu'}`
@@ -1726,7 +1726,7 @@ function silakkaArvio(lat, lon, t) {
     const ai = lahinIndeksiAjoista(nakyma && nakyma.phy ? nakyma.phy.ajat : [], t.getTime(), 5400000);
     a.pinta = ai >= 0 ? KarttaMalli.lahinArvo(nakyma.phy, 'lampo', ai, lat, lon) : NaN;
     a.vaiheMalli = a.kerros && Silakka.vaiheMalli ? Silakka.vaiheMalli({ pt: a.kerros.pt, pinta: a.pinta, mld: a.kerros.mld, pohja: a.pohja,
-      vrk: a.vaihe, valo: a.ennuste || a.kirkas }) : null;
+      vrk: a.vaihe, valo: a.ennuste || a.kirkas, vaiheet: al.silakka.vaiheet, paiva: al.silakka.paiva }) : null;
     a.kaudella = Silakka.kaudella ? Silakka.kaudella(t, al.silakka.kausi) : true;
   }
   return a;
@@ -1764,9 +1764,10 @@ function silakkaRuudut(aika) {
     const pt = k.pt[ti] && k.pt[ti][i] ? k.pt[ti][i][j] : null, z = silakkaVarasto.pohja[i][j];
     if (pt === null || !isFinite(z)) return 0;
     const pinta = ai >= 0 ? KarttaMalli.lahinArvo(nakyma.phy, 'lampo', ai, la, lo) : NaN, v = Silakka.vaiheLampo(pt, pinta);
-    if (!v || !Silakka.VAIHEET[v].pohja) return 0;
+    const raja = v && Silakka.VAIHEET[v].pohja ? Silakka.vali(v, al.silakka.vaiheet) : null;
+    if (!raja) return 0;
     vaiheet.add(Silakka.VAIHEET[v].nimi);
-    const s = Silakka.sopivuus(z, Silakka.VAIHEET[v].pohja);
+    const s = Silakka.sopivuus(z, raja);
     return s === 'optimi' ? 2 : s === 'sopiva' ? 1 : 0;
   }));
   const r = { lat: k.lat, lon: k.lon, luokka, vaiheet: vaiheet.size === 1 ? [...vaiheet][0] : vaiheet.size ? 'vaihe ruuduittain' : '',
@@ -1806,9 +1807,11 @@ function pohjaOsa(a, m) {
   if (pa.tapa === 'kayraRaja') return alku + `${kayra(pa.A, pa.rA)}, ${luku(pa.B, 0)} m käyrää ei 3 km:n sisällä; ${mal})`;
   return alku + `${pa.syva ? 'syvempi' : 'matalampi'} kuin ${kayra(pa.A, pa.rA)}; ${mal})`;   // yksiKayra
 }
+/** v51: alueet, joilla silakkamalli on. */
+function silakkaAlueet() { return ALUELISTA.filter(a => a.silakka).map(a => a.nimi).join(', '); }
 function silakkaTeksti(lat, lon) {
   if (!kartta || !kartta.tasot.silakka || !window.Silakka) return '';
-  if (!valittuAlue.silakka) return 'silakan valomalli: toistaiseksi vain Luoto–Tankar';
+  if (!valittuAlue.silakka) return 'silakkamalli: ei vielä tällä alueella (' + silakkaAlueet() + ')';
   const ajat = karttaAjat(), t = ajat && ajat[kartta.aika] ? new Date(ajat[kartta.aika]) : new Date();
   if (!nakyma || !nakyma.phy || !isFinite(KarttaMalli.lahinArvo(nakyma.phy, 'lampo', kartta.aika, lat, lon))) return '';   // maa tai mallin ulkopuolella
   const a = silakkaArvio(lat, lon, t); if (!a) return '';

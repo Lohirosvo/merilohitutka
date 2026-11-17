@@ -1,4 +1,4 @@
-/* Merilohitutka – silakka.js (v49, 16.11.2026; v43 ensimmäinen)
+/* Merilohitutka – silakka.js (v51, 17.11.2026; v43 ensimmäinen)
  * Silakan valokerros (tietopohja merilohitutka_silakkakerros_tiedot_v006.md, kohta 1.1), ensin Luoto–Tankar.
  * Hannu 16.11.: "Nyt tehdään ja en heitä noppaa. Luotan claudeen" → valinnat alla, perustelut tilannekuvassa v066.
  *
@@ -23,6 +23,9 @@
  *   "Kutu ohi" -ehtoa ei ole (vaatisi lämpöhistorian) [A]. Päivällä: odottava pohjan tuntumassa; kutu viereisissä 10–20 m:n
  *   syvänteissä; syönnös harppauskerroksen (mlotst) alla tai pohjassa [tietopohja A]. Yöllä valon mukaan, kudulla kutumatalikolla.
  *   Pohjan syvyyden sopivuus vaiheelle (min / opt / max): odottava 5 / 10–20 / 30, kutu 0,5 / 3–10 / 15, syönnös 10 / 15–30 / 40+.
+ *   v51: alue voi antaa omat välit (alueet.js silakka.vaiheet) ja päiväsäännön (silakka.paiva): 'taulukko' = Luodon taulukon
+ *   päivä- ja yösäännöt yllä; 'valo' = tietopohjan kohdan 2 yleissääntö (valokerros tai pohjan tuntuma, kumpi matalampi),
+ *   vaihe vaikuttaa vain pohjan sopivuuteen (Kaskinen–Kristiinankaupunki, tietopohja 3.3).
  * AURINGON KORKEUS: tähtitieteellisen almanakan likiarvo (tarkkuus noin 0,01°), ei taittumista (kuten tietopohjan taulukko).
  */
 (function (root) {
@@ -122,15 +125,19 @@
     if (!r || !isFinite(z) || z === null) return null;
     return z >= r[1] && z <= r[2] ? 'optimi' : z >= r[0] && z <= r[3] ? 'sopiva' : 'ei';
   }
-  /** Vaiheen kerros (v49). o = { pt, pinta, mld, pohja, vrk (vaihe()), valo (valokerros) }.
+  /** Vaiheen pohjaväli alueelle: alueen oma (vaiheet[tunnus]) tai oletus (Luoto). */
+  function vali(tunnus, vaiheet) { return vaiheet && vaiheet[tunnus] ? vaiheet[tunnus] : (VAIHEET[tunnus] || {}).pohja || null; }
+  /** Vaiheen kerros (v49). o = { pt, pinta, mld, pohja, vrk (vaihe()), valo (valokerros), vaiheet, paiva ('taulukko'|'valo') }.
    *  Palauttaa { tunnus, nimi, ohje, kerros (tila/yla/opt/ala tai null = ei tässä), paikka, raja } tai null. */
   function vaiheMalli(o) {
     const tunnus = vaiheLampo(o.pt, o.pinta);
     if (!tunnus) return null;
     const V = VAIHEET[tunnus], P = isFinite(o.pohja) && o.pohja > 0, valo = o.valo || null, vrk = o.vrk;
     const tuntuma = () => P ? { tila: 'pohja', yla: Math.max(0, o.pohja - POHJAN_TUNTUMA), opt: Math.max(0, o.pohja - POHJAN_TUNTUMA / 2), ala: o.pohja } : null;
-    const t = { tunnus, nimi: V.nimi, paikka: P ? sopivuus(o.pohja, V.pohja) : null, raja: V.pohja };
+    const raja = vali(tunnus, o.vaiheet);
+    const t = { tunnus, nimi: V.nimi, paikka: P ? sopivuus(o.pohja, raja) : null, raja };
     if (tunnus === 'talvi') return Object.assign(t, { ohje: 'avomeren syvänteissä, ei rannikon mallia', kerros: null });
+    if (o.paiva === 'valo') return Object.assign(t, { ohje: 'valon mukaan (yleissääntö)', kerros: valo });   // v51
     if (vrk === 'päivä') {
       if (tunnus === 'odottava') return Object.assign(t, { ohje: 'pohjan tuntumassa', kerros: tuntuma() || valo });
       if (tunnus === 'kutu') {
@@ -148,7 +155,7 @@
       return Object.assign(t, { ohje: 'harppauskerroksen alla', kerros: { tila: 'valo', yla, opt: Math.min(Math.max(valo.opt, yla), alaP), ala: alaP } });
     }
     if (vrk === 'yö' && tunnus === 'kutu') {
-      if (P && o.pohja <= V.pohja[3]) return Object.assign(t, { ohje: 'kutumatalikolla', kerros: valo });
+      if (P && o.pohja <= raja[3]) return Object.assign(t, { ohje: 'kutumatalikolla', kerros: valo });
       return Object.assign(t, { ohje: 'kutumatalikoilla (pohja 0,5–15 m)' + (P ? ', ei tässä' : ''), kerros: null });
     }
     return Object.assign(t, { ohje: 'valon mukaan', kerros: valo });
@@ -161,7 +168,7 @@
   }
 
   const Silakka = { RAJAT, VAIHEET, aurinko, haurwitz, pintavalo, pilviKerroin, kdPar, valokerros, vaihe, arvio,
-                    vaiheLampo, sopivuus, vaiheMalli, kaudella };
+                    vaiheLampo, sopivuus, vaiheMalli, kaudella, vali };
   if (typeof module !== 'undefined' && module.exports) module.exports = Silakka;
   else root.Silakka = Silakka;
 })(typeof window !== 'undefined' ? window : this);
