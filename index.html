@@ -152,6 +152,7 @@
   .sirut button.paalla { border-color:#7ed957; color:#7ed957; }
   .lohivali { flex:0 0 auto; display:flex; align-items:center; gap:3px; font-size:15px; color:#7ed957; }
   .lohivali input { width:48px; font-size:16px; padding:4px 2px; text-align:center; }
+  .lohivali select { font-size:16px; padding:4px 2px; }   /* v64 */
   .karttanapit { position:absolute; right:8px; top:150px; display:flex; flex-direction:column; gap:6px; }
   .karttanapit button { width:46px; height:46px; padding:0; font-size:22px; background:rgba(13,27,43,0.85); }
   .karttanapit button.paalla { border-color:#7ed957; background:rgba(40,90,40,0.85); }   /* v24: lohikerros täällä päällä */
@@ -254,6 +255,8 @@
           <span class="lohivali" id="lohiRivi"><input id="lohiMin" inputmode="decimal">–<input id="lohiMax" inputmode="decimal">°C</span>
           <button data-taso="lohet">Lohet</button>
           <button data-taso="silakka">Silakka</button>
+          <button data-taso="poikaset">Poikasalueet</button>
+          <span class="lohivali" id="poikasRivi" style="display:none"><select id="poikasLaji" aria-label="Poikastuotantoalueen laji"></select></span>
           <button data-taso="tuuli">Tuuli</button>
           <button data-taso="vaylat">Väylät</button>
           <button data-taso="turvalaitteet">Viitat</button>
@@ -444,6 +447,7 @@
       Aaltopoijut ja mareografien vedenlämpö: Ilmatieteen laitos, avoin data (CC BY 4.0). Turvalaiteviat: Fintraffic / digitraffic.fi,
       lisenssi CC BY 4.0. Salamat: Ilmatieteen laitos, salamanpaikannus, avoin data (CC BY 4.0). Jokilaskuri: Länsstyrelsen Norrbotten, fiskräkning.
       Sovellus ei korvaa virallisia varoituksia eikä merenkulkuvaroituksia.</p>
+    <p class="pieni" id="poikasLahde">Poikastuotantoalueet: Luke VELMU (CC BY 4.0).</p>
     <p class="pieni" id="vaylaLahde">Väylät: Lähde Väylävirasto, vesiväyläaineisto, CC BY 4.0. Aineisto ei sovellu navigointikäyttöön.</p>
     <p class="pieni" id="syvyysLahde">Syvyyskäyrät: Lähde Liikenne- ja viestintävirasto Traficom, Merikartan syvyystiedot.
       Ei navigointikäyttöön. Ei täytä virallisen merikartan vaatimuksia.
@@ -478,7 +482,7 @@
 <script src="avoindata.js?v=2"></script>
 <script src="fmi.js?v=16"></script>
 <script src="nopeus.js?v=20"></script>
-<script src="kartta.js?v=38"></script>
+<script src="kartta.js?v=39"></script>
 <script src="sillat.js?v=2"></script>
 <script src="silakka.js?v=8"></script>
 <script src="ikaluokat.js?v=5"></script>
@@ -1234,9 +1238,11 @@ async function lataaKiintea(nimi, versio, al) {
 }
 async function lataaSyvyys() {
   const al = valittuAlue;
-  const [js, jv] = await Promise.all([lataaKiintea('syvyys.json', meri && meri.syvyys && meri.syvyys.luotu, al),
-                                      lataaKiintea('vaylat.json', meri && meri.vaylat && meri.vaylat.luotu, al)]);
+  const [js, jv, jl] = await Promise.all([lataaKiintea('syvyys.json', meri && meri.syvyys && meri.syvyys.luotu, al),
+                                      lataaKiintea('vaylat.json', meri && meri.vaylat && meri.vaylat.luotu, al),
+                                      lataaKiintea('lisaantyminen.json', meri && meri.lisaantyminen && meri.lisaantyminen.luotu, al)]);   // v64
   if (al !== valittuAlue) return;
+  lataaPoikaset(jl, al);   // v64: kuvat taustalla
   paivitaOfflineTila();   // v26
   let muuttui = false;
   if (js && (!syvyys || syvyys.luotu !== js.luotu)) {
@@ -1255,6 +1261,47 @@ async function lataaSyvyys() {
   if (kartta) { kartta.syvyys = syvyys; kartta.vaylat = vaylat; paivitaReititKartalle(); kartta.piirra(); }
 }
 
+// v64: VELMU-poikastuotantoalueet (silakka, muikku, ahven): kuvat välimuistiin, kartalle siru "Poikasalueet"
+var poikaset = null;
+async function haeKuva(url, versio) {
+  let r = null;
+  try { const c = await caches.open(VARASTO); r = await c.match(url); } catch (e) {}
+  if (!r || (versio && r.headers.get('X-Versio') !== versio)) {
+    try {
+      const v = await fetch(url + '?l=' + encodeURIComponent(versio || ''), { cache: 'no-cache' });
+      if (!v.ok) throw new Error('HTTP ' + v.status);
+      const b = await v.blob();
+      await tallennaVarastoon(url, new Response(b, { headers: { 'Content-Type': 'image/png', 'X-Versio': versio || '' } }));
+      r = new Response(b);
+    } catch (e) { if (!r) return null; }
+  }
+  const b = await r.blob();
+  if (typeof createImageBitmap === 'function') { try { return await createImageBitmap(b); } catch (e) {} }
+  return await new Promise(ok => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => ok(null); i.src = URL.createObjectURL(b); });
+}
+async function lataaPoikaset(jl, al) {
+  if (!jl || !jl.lajit) { poikaset = null; if (kartta) kartta.poikaset = null; piirraPoikasRivi(); return; }
+  if (poikaset && poikaset.luotu === jl.luotu && poikaset.alue === al.tunnus) return;
+  const lajit = await Promise.all(jl.lajit.map(async L => Object.assign({}, L, { kuva: await haeKuva(dataPolku(al) + L.tiedosto, jl.luotu) })));
+  if (al !== valittuAlue) return;
+  const ok = lajit.filter(L => L.kuva), tallessa = lue('mlt_poikaslaji');
+  poikaset = { luotu: jl.luotu, alue: al.tunnus, lahde: jl.lahde, virheet: jl.virheet || [], lajit: ok,
+    valittu: ok.some(L => L.laji === tallessa) ? tallessa : ok.length ? ok[0].laji : null };
+  if (kartta) { kartta.poikaset = poikaset; kartta.piirra(); }
+  piirraPoikasRivi();
+}
+function piirraPoikasRivi() {
+  const rivi = $('poikasRivi'), sel = $('poikasLaji');
+  if (!rivi) return;
+  const lajit = poikaset ? poikaset.lajit : [];
+  rivi.style.display = kartta && kartta.tasot.poikaset ? 'flex' : 'none';
+  const html = lajit.length ? lajit.map(L => `<option value="${L.laji}">${L.laji[0].toUpperCase() + L.laji.slice(1)}</option>`).join('') : '<option value="">ei dataa</option>';
+  if (sel.innerHTML !== html) sel.innerHTML = html;
+  sel.value = poikaset && poikaset.valittu ? poikaset.valittu : '';
+  $('poikasLahde').textContent = 'Poikastuotantoalueet: Luonnonvarakeskus (Luke), VELMU – toukkahavainnot 2007–2014 ja mallinnetut poikastuotantoalueet (Kallasvuo 2019), CC BY 4.0. '
+    + (lajit.length ? `Tällä alueella: ${lajit.map(L => L.laji).join(', ')} (haettu ${pvm(new Date(poikaset.luotu))} ${new Date(poikaset.luotu).getFullYear()}). ` : 'Ei vielä haettu tälle alueelle. ')
+    + 'Kartat kuvaavat laajuutta, eivät paikallista määrää. Taimenta ei aineistossa ole (kutee joissa).';
+}
 function puraPaiva(p, meri) {   // meri: hakemisto, jonka mukaan päivä haettiin (alue voi vaihtua haun aikana)
   const k = meri.kerroin || 100;
   const jaa = x => Array.isArray(x) ? x.map(jaa) : (x === null ? null : x / k);
@@ -1511,7 +1558,7 @@ function naytaPiste(lat, lon) {
   if (lat === null) { if (kartta && kartta.valittuOma) asetaLohiTaalla(false); suljePiste(); return; }   // profiilin × veneen kohdalla
   if (kartta) kartta.valittuOma = false;
   el.hidden = false;
-  const st = [siltaTeksti(lat, lon), turvalaiteTeksti(lat, lon)].filter(Boolean).join(' · ');   // v35: silta ensin; v61 turvalaite
+  const st = [siltaTeksti(lat, lon), turvalaiteTeksti(lat, lon), poikasTeksti(lat, lon)].filter(Boolean).join(' · ');   // v35: silta ensin; v61 turvalaite; v64 poikasalue
   if (st && siltaTeksti(lat, lon)) naytaVesi(5000);
   if (!nakyma) {   // ei meridataa (esim. Porin edusta): syvyys, väylä ja omat havainnot silti
     const osat = [st, jalkiTeksti(lat, lon), aisTeksti(lat, lon), matalikkoTeksti(lat, lon), syvyysTeksti(lat, lon), vaylaTeksti(lat, lon), havaintoTeksti(lat, lon)].filter(Boolean);
@@ -1635,6 +1682,7 @@ function aaltoRajat() {
 function piirraLohiRivi() {
   $('lohiRivi').style.display = kartta && kartta.tasot.lohi ? 'flex' : 'none';
   piirraLohetRivi();   // v58
+  piirraPoikasRivi();   // v64
   $('lohiMin').value = luku(asetukset.lohiMin);
   $('lohiMax').value = luku(asetukset.lohiMax);
 }
@@ -1663,6 +1711,9 @@ function avaaKarttaNakyma() {
     kartta.silakkaFn = silakkaRuudut;   // v50
     if (avoin.viat) kartta.viat = avoin.viat;   // v62
     if (avoin.salamat) kartta.salamat = avoin.salamat;   // v63
+    if (poikaset) kartta.poikaset = poikaset;   // v64
+    $('poikasLaji').addEventListener('change', () => { if (!poikaset) return; poikaset.valittu = $('poikasLaji').value; tallennaLS('mlt_poikaslaji', poikaset.valittu);
+      kartta.naytaSelite(3000); if (kartta.valittu && !kartta.valittuOma) naytaPiste(kartta.valittu[0], kartta.valittu[1]); });
     paivitaReititKartalle();   // v30
     kartta.lohiTaalla = lohiTaalla; $('lohiTaalla').classList.toggle('paalla', lohiTaalla);
     if (kartta.tasot.lohet === undefined) kartta.tasot.lohet = true;   // v58: lohien viikkoarvio oletuksena näkyvissä
@@ -1961,6 +2012,11 @@ function vesiKayra(v) {
   return svg + (huom ? `<div>ennuste: ${huom}</div>` : '');
 }
 /** v61: napautus turvalaitteen tai vesiliikennemerkin kohdalla (22 px), kun merkit näkyvät kartalla. */
+/** v64: VELMU-poikastuotantoalue napautuskohdassa (kun taso on päällä). */
+function poikasTeksti(lat, lon) {
+  const v = kartta && kartta.poikasArvo ? kartta.poikasArvo(lat, lon) : null;
+  return v ? `🐟 ${v.nimi}${v.luokka ? ': ' + v.luokka : ''} (Luke VELMU-malli, toukkahavainnot 2007–2014; ei paikallinen arvio)` : '';
+}
 function turvalaiteTeksti(lat, lon) {
   const m = kartta && kartta.lahinTurvalaite ? kartta.lahinTurvalaite(lat, lon) : null;
   const vika = m && kartta.viatMerkeille ? kartta.viatMerkeille().merkille.get(m) : null;   // v62

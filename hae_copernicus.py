@@ -21,6 +21,14 @@ pisteisiin (hae_tuuli.py, päivätiedostoihin). Näiden epäonnistuminen ei vaik
 v54 (17.11.2026): alueille, joilla "silakka": {"happi": true} (Eckerö), BGC-hakuun myös pohjan happi o2b (mmol/m3,
 päivätiedoston bgc.o2b); jos se ei onnistu, haetaan kd/zsd kuten ennen.
 
+v64 (21.11.2026, Hannu "7 8 10 myös muikku silakka ahven taimen jos löytyy"): alueittain Luken VELMU-aineiston
+silakan, muikun ja ahvenen mallinnetut poikastuotantoalueet kuvina (hae_lisaantyminen.py, kerran vuodessa).
+
+v63 (21.11.2026, Hannu "2 4 5"): jokilaskurit. Länsstyrelsen Norrbottenin sivu näyttää Kalixälvenin Jockfallin ja
+Linaälvenin laskurin kymmenen viimeisintä päivää HTML-taulukkona [L 21.11.2026] → päivät kerätään talteen
+data/jokilaskurit.json (vanhat päivät säilyvät, uudet korvaavat). Luken Tornion- ja Simojoen laskureille ei löytynyt
+avointa rajapintaa (sivu on JavaScript-sovellus), joten niitä ei haeta.
+
 v62 (21.11.2026, Hannu "1 3 6 tehdään"): IL:n varoitussyöte (CAP/Atom, avoin data) talteen data/varoitukset.xml joka
 ajossa. Sovellus hakee syötteen ensin suoraan ja käyttää tätä varalla (jos selain ei saa sitä suoraan tai verkko katkeaa).
 
@@ -225,7 +233,8 @@ def tiedostonimi(pvm):
     return "p_" + pvm.replace("-", "") + ".json"
 
 
-def rakenna(phy, wav, sst, luotu, virheet, syvyys=None, tuuli=None, vaylat=None, alue=None, bgc=None, pohja=None, kerros=None):
+def rakenna(phy, wav, sst, luotu, virheet, syvyys=None, tuuli=None, vaylat=None, alue=None, bgc=None, pohja=None, kerros=None,
+            lisaantyminen=None):
     """Kokoaa hakemiston ja päivätiedostot.
     phy = dict(ajat, lat, lon, syvyydet, thetao[aika, syvyys, lat, lon], u[aika, lat, lon], v, dataset,
                u3/v3[aika, lat, lon] = virta VIRTA_SYV m:ssä tai None)
@@ -239,6 +248,8 @@ def rakenna(phy, wav, sst, luotu, virheet, syvyys=None, tuuli=None, vaylat=None,
         hakemisto["syvyys"] = syvyys
     if vaylat:
         hakemisto["vaylat"] = vaylat
+    if lisaantyminen:   # v64
+        hakemisto["lisaantyminen"] = lisaantyminen
     t_paivat = {}
     if tuuli and tuuli.get("ajat"):
         hakemisto["tuuli"] = {"pisteet": tuuli["pisteet"], "lahde": tuuli.get("lahde"),
@@ -801,6 +812,118 @@ def paivita_varoitukset(perus, hae=None):
     return data.count(b"<entry")
 
 
+JOKILASKURI_URL = "https://www.lansstyrelsen.se/norrbotten/djur/fiske/fiskeutredning/fiskrakning.html"
+# [L lansstyrelsen.se]: Jockfall noin 100 km Kalixälvenin suulta ylävirtaan; Linaälven on Kalixälvenin sivujoki.
+JOKILASKURIT = {"jockfall": {"nimi": "Jockfall", "joki": "Kalixälven", "km": 100},
+                "linafallet": {"nimi": "Linafallet", "joki": "Linaälven", "km": None}}
+
+
+def _avain(nimi):
+    return "".join(c for c in nimi.lower().replace("ä", "a").replace("å", "a").replace("ö", "o") if c.isalnum())
+
+
+def jasenna_fiskrakning(html):
+    """HTML → {avain: {"vuosi", "paivat": {pvm: lax}, "yhteensa", "asennettu"}}. Taulukon tunnistus edeltävästä
+    otsikosta "De tio senaste dagarnas fiskräkning i <joki>, <paikka>, <vuosi>"; sarakkeet otsikkoriviltä (Datum, Lax)."""
+    import re
+    from html.parser import HTMLParser
+
+    class P(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.taulut, self.teksti, self.syvyys, self.rivi, self.solu = [], [], 0, None, None
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "table":
+                self.syvyys += 1
+                if self.syvyys == 1:
+                    self.taulut.append({"ennen": " ".join(self.teksti)[-400:], "rivit": []})
+                    self.teksti = []
+            elif self.syvyys and tag == "tr":
+                self.rivi = []
+            elif self.syvyys and tag in ("td", "th"):
+                self.solu = []
+
+        def handle_endtag(self, tag):
+            if tag == "table" and self.syvyys:
+                self.syvyys -= 1
+            elif self.syvyys and tag in ("td", "th") and self.solu is not None and self.rivi is not None:
+                self.rivi.append(" ".join("".join(self.solu).split()))
+                self.solu = None
+            elif self.syvyys and tag == "tr" and self.rivi is not None:
+                if self.rivi:
+                    self.taulut[-1]["rivit"].append(self.rivi)
+                self.rivi = None
+
+        def handle_data(self, data):
+            if self.syvyys and self.solu is not None:
+                self.solu.append(data)
+            elif self.syvyys and data.strip():
+                self.taulut[-1]["ennen"] += " " + " ".join(data.split())   # caption tms. taulukon sisällä
+            elif not self.syvyys and data.strip():
+                self.teksti.append(" ".join(data.split()))
+
+    p = P()
+    p.feed(html)
+    luku = lambda x: int(re.sub(r"[^\d]", "", x)) if re.search(r"\d", x or "") else 0
+    tulos = {}
+    for t in p.taulut:
+        m = re.search(r"fiskr\u00e4kning i ([^,]+),\s*([^,]+?),\s*(\d{4})", t["ennen"]) or \
+            re.search(r"fiskr\u00e4kning i ([^,]+),\s*([^,]+?)\s*,?\s*(\d{4})", " ".join(" ".join(r) for r in t["rivit"][:2]))
+        if not m:
+            continue
+        avain = _avain(m.group(2))
+        otsake = next((r for r in t["rivit"] if any(c.lower() == "datum" for c in r)), None)
+        if not otsake or not any(c.lower() == "lax" for c in otsake):
+            continue
+        i_lax = [c.lower() for c in otsake].index("lax")
+        paivat, yhteensa, asennettu = {}, None, None
+        for r in t["rivit"]:
+            eka = r[0] if r else ""
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", eka):
+                paivat[eka] = luku(r[i_lax]) if len(r) > i_lax else 0
+            elif eka.upper().startswith("TOTAL") and len(r) > i_lax:
+                yhteensa = luku(r[i_lax])
+        a = re.search(r"[Ii]nstaller\w*\D{0,20}(\d{4}-\d{2}-\d{2})", t["ennen"] + " " + " ".join(" ".join(r) for r in t["rivit"]))
+        if a:
+            asennettu = a.group(1)
+        tulos[avain] = {"vuosi": int(m.group(3)), "paivat": paivat, "yhteensa": yhteensa, "asennettu": asennettu,
+                        "joki": m.group(1).strip(), "paikka": m.group(2).strip()}
+    return tulos
+
+
+def paivita_jokilaskurit(perus, nyt, hae=None, vanha=None):
+    """Kirjoittaa perus/jokilaskurit.json: aiemmat päivät säilyvät, sivulta luetut lisätään (sama päivä: uusi arvo)."""
+    polku = os.path.join(perus, "jokilaskurit.json")
+    if vanha is None:
+        vanha = lue_vanha(polku) or hae_json_sivulta(sivun_osoite() + "jokilaskurit.json") or {}
+    sis = {"versio": 1, "lahde": "Länsstyrelsen Norrbotten, fiskräkning (De tio senaste dagarnas fiskräkning)",
+           "url": JOKILASKURI_URL, "laskurit": dict(vanha.get("laskurit") or {}), "luotu": vanha.get("luotu")}
+    if sis["laskurit"]:
+        kirjoita_json(polku, sis)   # haun virhe ei hävitä kerättyjä päiviä
+
+    def lataa(url):
+        pyynto = urllib.request.Request(url, headers={"User-Agent": "merilohitutka (github.com/Lohirosvo/merilohitutka)"})
+        with urllib.request.urlopen(pyynto, timeout=30) as r:
+            return r.read().decode("utf-8", "replace")
+    taulut = jasenna_fiskrakning((hae or lataa)(JOKILASKURI_URL))
+    if not taulut:
+        raise ValueError("sivulta ei löytynyt laskuritaulukoita (rakenne muuttunut?)")
+    for avain, t in taulut.items():
+        k = sis["laskurit"].setdefault(avain, dict(JOKILASKURIT.get(avain, {"nimi": t["paikka"], "joki": t["joki"], "km": None}), vuodet={}))
+        v = k["vuodet"].setdefault(str(t["vuosi"]), {"paivat": {}})
+        v["paivat"] = dict(sorted({**v.get("paivat", {}), **t["paivat"]}.items()))
+        if t["yhteensa"] is not None:
+            v["yhteensa"] = t["yhteensa"]
+        if t["asennettu"]:
+            v["asennettu"] = t["asennettu"]
+        v["haettu"] = nyt.strftime("%Y-%m-%dT%H:%MZ")
+        print(f"  jokilaskuri {avain} {t['vuosi']}: {len(t['paivat'])} päivää sivulla, talteen {len(v['paivat'])}, yhteensä {t['yhteensa']}")
+    sis["luotu"] = nyt.strftime("%Y-%m-%dT%H:%MZ")
+    kirjoita_json(polku, sis)
+    return sis
+
+
 def lue_alueet(tiedosto=None):
     """Alueet tiedostosta alueet.js (JSON-taulukko kohdan 'ALUEET = ' jälkeen). Puuttuessa vain Luoto."""
     tiedosto = tiedosto or os.path.join(os.path.dirname(os.path.abspath(__file__)), "alueet.js")
@@ -826,7 +949,7 @@ def hae_alue(alue, perus, nyt, luotu):
     print(f"===== Alue {tunnus}: {alue.get('nimi', tunnus)} {rajat}")
     vanha = lue_vanha(os.path.join(kansio, "meri.json")) if not alue.get("polku") else None
     vanha = vanha or hae_vanha_sivulta(osoite)   # julkaise.yml ottaa talteen vain data/meri.json:n
-    syvyys = vaylat = tuuli = None
+    syvyys = vaylat = tuuli = lisa = None
     try:  # Traficomin syvyyskäyrät (harvoin muuttuvat); virhe ei saa kaataa Copernicus-hakua
         import hae_syvyys
         alku = time.monotonic()
@@ -843,6 +966,14 @@ def hae_alue(alue, perus, nyt, luotu):
     except Exception as e:  # noqa: BLE001
         traceback.print_exc()
         vaylat = {"tila": "virhe", "viesti": f"{e}"[:300]}
+    try:  # v64: VELMU-poikastuotantoalueet (aineisto 2019, haetaan kerran vuodessa)
+        import hae_lisaantyminen
+        alku = time.monotonic()
+        lisa = hae_lisaantyminen.paivita(kansio, osoite, alue=rajat)
+        print(f"lisääntymisalueet: {lisa.get('tila')}, {time.monotonic() - alku:.0f} s")
+    except Exception as e:  # noqa: BLE001
+        traceback.print_exc()
+        lisa = {"tila": "virhe", "viesti": f"{e}"[:300]}
     tulokset, virheet = {}, []
     for nimi, hakija in (("phy", hae_phy), ("wav", hae_wav), ("sst", hae_sst)):
         alku = time.monotonic()
@@ -931,7 +1062,7 @@ def hae_alue(alue, perus, nyt, luotu):
         if vanha_pohja:
             print("pohja: edellisestä ajosta (staattinen)")
     hakemisto, tiedostot = rakenna(tulokset["phy"], tulokset.get("wav"), sst, luotu, virheet, syvyys, tuuli, vaylat, rajat,
-                                   bgc=bgc, pohja=pohja, kerros=kerros)
+                                   bgc=bgc, pohja=pohja, kerros=kerros, lisaantyminen=lisa)
     if alue.get("silakka") and vanha_pohja and "pohja" not in hakemisto:
         hakemisto["pohja"] = vanha_pohja
     hakemisto["tunnus"], hakemisto["nimi"] = tunnus, alue.get("nimi", tunnus)
@@ -948,6 +1079,10 @@ def main(polku):
         paivita_varoitukset(perus)
     except Exception as e:  # noqa: BLE001
         print(f"Varoitukset: VIRHE {e}", file=sys.stderr)
+    try:   # v63: jokilaskurit (pieni sivu, joka ajossa)
+        paivita_jokilaskurit(perus, nyt)
+    except Exception as e:  # noqa: BLE001
+        print(f"Jokilaskurit: VIRHE {e}", file=sys.stderr)
     try:   # v57: ensin (pieni haku, kerran vuodessa); virhe ei estä alueita
         paivita_ikaluokat(perus, nyt)
     except Exception as e:  # noqa: BLE001

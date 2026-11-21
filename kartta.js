@@ -2,6 +2,8 @@
  * Kevyt oma karttanäkymä (ei ulkoisia kirjastoja): OSM-taustakartta valinnaisena,
  * Copernicus-datasta lämpökäyrät, lohikerros (lämpövälin syvyys; v25 pehmeä reuna ja rajaviiva), satelliittilämpö, pintavirtanuolet
  * ja aallonkorkeus. Traficomin merikartan syvyyskäyrät (v8), Väyläviraston väylät ja IL:n tuulinuolet (v9).
+ * v64 (Hannu 21.11.2026 "7 8 10 myös muikku silakka ahven"): Luken VELMU-mallin poikastuotantoalueet (silakka, muikku, ahven)
+ *   kuvana alueen rajoille (EPSG:3857 = kartan projektio), siru "Poikasalueet", laji valitaan sirun vierestä.
  * v63 (Hannu 21.11.2026 "2 4 5"): salamat (IL, viimeinen tunti) salamasymbolina, 0–15 min kirkas, 15–60 min haalea; siru "Salamat".
  * v62 (Hannu 21.11.2026 "1 3 6 tehdään"): turvalaiteviat (Fintraffic Digitraffic, aktiiviset viat) punaisena huutomerkkinä
  *   merkin kulmassa; vika, jota ei saada yhdistettyä merkkiin (numero tai alle 50 m), omana merkkinään. Sama 5,5 km:n raja.
@@ -654,7 +656,7 @@
       this.lohiReuna = isFinite(opts.lohiReuna) ? opts.lohiReuna : 0.4;
       this.jyrkka = opts.jyrkka || [0.3, 0.05];   // v26: [vähintään Hs m, jyrkkyys osuutena]   // v25: pehmeän reunan leveys (°C), 0 = terävä
       this.aaltoRajat = opts.aaltoRajat || [0.35, 0.5];   // merkitsevä aallonkorkeus (m)
-      this.tasot = { lampo: true, lohi: true, syvyys: true, tuuli: true, vaylat: true, havainnot: true, aaltoraja: true, jalki: true, matalikot: true, ais: false, sst: false, virta: true, aalto: false, tausta: true, silakka: false, turvalaitteet: true, salamat: true };   // v43: silakka = valomallin napautusteksti; v61 turvalaitteet
+      this.tasot = { lampo: true, lohi: true, syvyys: true, tuuli: true, vaylat: true, havainnot: true, aaltoraja: true, jalki: true, matalikot: true, ais: false, sst: false, virta: true, aalto: false, tausta: true, silakka: false, turvalaitteet: true, salamat: true, poikaset: false };   // v43: silakka = valomallin napautusteksti; v61 turvalaitteet
       this.syvyys = null;   // puraSyvyys()-tulos
       this.vaylat = null;   // puraVaylat()-tulos
       this.ylaVara = 0; this.alaVara = 0;   // ohjainten peittämä osa ylhäällä ja alhaalla (px)
@@ -667,6 +669,7 @@
       this.matalikot = []; this.matalikkoVali = '10–20';
       this.silakkaFn = null;   // v50: (aikaIndeksi) => { lat, lon, luokka[i][j] (0 ei, 1 sopiva, 2 optimi), vaiheet, kaudella } tai null
       this.lohiTaalla = false; this.valittuOma = false;   // v24: lohikerros omalla kohdalla (profiili seuraa venettä)
+      this.poikaset = null;   // v64: { valittu, lajit: [{ laji, nimi, bbox3857, kuva, leveys, korkeus, selite }] }
       this.salamat = [];   // v63: [{ lat, lon, aika (ms), maa, virta }] (avoindata.js salamat)
       this.viat = [];   // v62: turvalaiteviat [{ lat, lon, u, nimi, vika, tila, aika }] (avoindata.js jasennaViat)
       this.ais = [];   // AIS-kohteet (v23): [{ lat, lon, t, sog, cog, suunta, liikkuu, vari, nimi }]   // matalikot()-tuloksen lista ja selitteen väli (v21)
@@ -799,6 +802,7 @@
         if (this.tasot.sst && d.sst) this._kayrat(d.sst, 'lampo', 0, true);
         if (this.tasot.lohi && d.phy && d.phy.profiili) this._lohiRaja();   // v42: lämpökäyrien päälle, syvyyskäyrien alle
       }
+      if (this.tasot.poikaset && this.poikasLaji()) this._poikaset();   // v64: syvyyskäyrien alle
       if (this.tasot.syvyys && this.syvyys) this._syvyys();   // lämpökäyrien päälle: 20 m ja 6 m erottuvat
       if (this.tasot.matalikot && this.matalikot.length) this._matalikot();
       if (this.tasot.silakka && this.silakkaFn) this._silakka();   // v50: pohjan sopivuus silakan vaiheelle
@@ -931,6 +935,43 @@
       let paras = null, pd = rajaPx;
       for (const v of this.viatMerkeille().irrallaan) { const [x, y] = this.ruutu(v.lat, v.lon), d = Math.hypot(x - x0, y - y0); if (d <= pd) { pd = d; paras = v; } }
       return paras;
+    }
+    /** v64: valitun lajin poikastuotantoaluekuva (ladattu) tai null. */
+    poikasLaji() { const p = this.poikaset; const L = p && p.lajit && p.lajit.find(x => x.laji === p.valittu); return L && L.kuva ? L : null; }
+    _poikasKulmat(L) {
+      const [x0, y0, x1, y1] = L.bbox3857, R = 6378137, ll = (x, y) => [(2 * Math.atan(Math.exp(y / R)) - Math.PI / 2) * 180 / Math.PI, x / R * 180 / Math.PI];
+      const [la0, lo0] = ll(x0, y1), [la1, lo1] = ll(x1, y0);
+      return [this.ruutu(la0, lo0), this.ruutu(la1, lo1)];
+    }
+    _poikaset() {
+      const L = this.poikasLaji(), g = this.ctx, [[x0, y0], [x1, y1]] = this._poikasKulmat(L);
+      g.save(); g.globalAlpha = 0.6; g.imageSmoothingEnabled = false;
+      g.drawImage(L.kuva, x0, y0, x1 - x0, y1 - y0);
+      g.restore();
+    }
+    /** v64: poikastuotantoalue pisteessä: { laji, nimi, luokka } tai null (läpinäkyvä tai alueen ulkopuolella). */
+    poikasArvo(lat, lon) {
+      const L = this.poikasLaji();
+      if (!L || !this.tasot.poikaset) return null;
+      const R = 6378137, mx = lon * Math.PI / 180 * R, my = Math.log(Math.tan((90 + lat) * Math.PI / 360)) * R, [x0, y0, x1, y1] = L.bbox3857;
+      const i = Math.floor((mx - x0) / (x1 - x0) * L.leveys), j = Math.floor((y1 - my) / (y1 - y0) * L.korkeus);
+      if (i < 0 || j < 0 || i >= L.leveys || j >= L.korkeus) return null;
+      if (!L.pikselit) {
+        try {
+          const c = typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(L.leveys, L.korkeus) : Object.assign(document.createElement('canvas'), { width: L.leveys, height: L.korkeus });
+          const cg = c.getContext('2d'); cg.drawImage(L.kuva, 0, 0, L.leveys, L.korkeus); L.pikselit = cg.getImageData(0, 0, L.leveys, L.korkeus).data;
+        } catch (e) { return null; }
+      }
+      const k = (j * L.leveys + i) * 4, d = L.pikselit;
+      if (d[k + 3] < 40) return null;
+      let luokka = null, pd = 70;
+      for (const s of L.selite || []) {
+        const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(s.vari || '');
+        if (!m) continue;
+        const e = Math.hypot(d[k] - parseInt(m[1], 16), d[k + 1] - parseInt(m[2], 16), d[k + 2] - parseInt(m[3], 16));
+        if (e < pd) { pd = e; luokka = s.nimi; }
+      }
+      return { laji: L.laji, nimi: L.nimi, luokka };
     }
     /** v63: salamat viimeiseltä tunnilta: salamasymboli, ikä läpinäkyvyytenä; yli 60 min ei piirretä. */
     _salamat() {
@@ -1669,6 +1710,12 @@
         rivit.push([['', '#e9f1f7'], ['<5', '#e9f1f7', '#e8f4ff'], ['5–8', '#e9f1f7', '#ffe066'], ['8–10', '#e9f1f7', '#ffa94d'], ['≥10 m/s', '#e9f1f7', '#ff5c5c']]);
       }
       if (this.tasot.vaylat && this.vaylat) rivit.push([['Väylä (Väylävirasto), mitoitussyväys m', '#ffd166']]);
+      const PL = this.tasot.poikaset ? this.poikasLaji() : null;   // v64
+      if (PL) {
+        rivit.push([[PL.nimi + ' (Luke VELMU, malli)', '#9fd0ff']]);
+        const sel = (PL.selite || []).filter(s => s.nimi).slice(0, 4).map(s => [s.nimi, '#e9f1f7', s.vari]);
+        if (sel.length) rivit.push([['  ', '#e9f1f7']].concat(sel));
+      }
       if (this.tasot.salamat && this.salamat.length) rivit.push([['Salamat (IL)', '#ffd60a'], ['0–15 min', '#e9f1f7', '#ffd60a'], ['15–60 min', '#e9f1f7', 'rgba(255,214,10,0.45)']]);   // v63
       if (this.tasot.turvalaitteet && this.turvalaitteetNakyvissa()) rivit.push([['Viitat', '#c3cedd'], ['vasen', '#e9f1f7', MP], ['oikea', '#e9f1f7', MV],
         ['kardinaali', '#e9f1f7', MY], ['kummeli', '#e9f1f7', MW]].concat(this.viat.length ? [['vika', '#e9f1f7', '#e63946']] : [], [['napauta: tiedot', '#c3cedd']]));
