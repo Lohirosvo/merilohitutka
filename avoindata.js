@@ -9,6 +9,9 @@
  *    "lat,lon lat,lon …", geocode METAREA esim. B2 = Merenkurkku).
  * 3. Poijut [L, IL:n WFS-ohje]: fmi::observations::wave::* ("Wave and Water temperature observations"), aallonkorkeus WaveHs.
  *    Vedenlämmön parametrin nimeä ohje ei kerro [A] → tunnistetaan nimestä (TWATER, TW…).
+ * v63 (Hannu 21.11.2026 "2 4 5"): 4. salamat [L: IL:n kysely fmi::observations::lightning::simple (fmiopendata, rOpenGov fmi);
+ *    kentät cloud_indicator (0 maa, 1 pilvi), peak_current, multiplicity, ellipse_major]. Sadetutka ei: IL:n WMS:n suora käyttö
+ *    sovelluksessa ei ole sallittu ja S3:n GeoTIFF-muotoa ei ole tarkistettu.
  * 6. Viat [L, Digitraffic]: https://meri.digitraffic.fi/api/aton/v1/faults "Return all active faults in GeoJSON". Kenttien
  *    nimiä ei ole vahvistettu [A] → haetaan avaimen nimen perusteella.
  */
@@ -210,7 +213,52 @@
     return '⚠ Vika: ' + (v.vika || 'tuntematon') + (p ? `, ilmoitettu ${p}` : '') + (v.tila ? `, tila: ${String(v.tila).toLowerCase()}` : '');
   }
 
+  // ------------------------------------------------------------ 4. salamat (v63)
+  /** FMI simple -rivit → salamat [{ lat, lon, aika (ms), maa (true/false/null), virta (kA) }]; rivit ryhmitellään paikan ja ajan mukaan. */
+  function salamat(rivit) {
+    const g = new Map();
+    for (const r of rivit || []) {
+      const t = r.aika instanceof Date ? r.aika.getTime() : Date.parse(r.aika);
+      if (!isFinite(r.lat) || !isFinite(r.lon) || !isFinite(t)) continue;
+      const k = r.lat.toFixed(4) + ',' + r.lon.toFixed(4) + ',' + t;
+      if (!g.has(k)) g.set(k, { lat: r.lat, lon: r.lon, aika: t, maa: null, virta: null });
+      const x = g.get(k), p = String(r.param).toLowerCase();
+      if (p === 'cloud_indicator' && isFinite(r.arvo)) x.maa = r.arvo === 0;
+      if (p === 'peak_current' && isFinite(r.arvo)) x.virta = r.arvo;
+    }
+    return [...g.values()].sort((a, b) => a.aika - b.aika);
+  }
+  const SUUNTA_SSA = { P: 'pohjoisessa', KO: 'koillisessa', I: 'idässä', KA: 'kaakossa', E: 'etelässä', LO: 'lounaassa', L: 'lännessä', LU: 'luoteessa' };
+  /** Tilanne pisteestä: lähin salama (km, suunta, min sitten) sade km ja ikkuna min sisällä, määrä, lähestyy [K: keskietäisyys
+   *  viim. 15 min vs. 15–45 min sitten, molemmissa ≥ 3 salamaa, muutos ≥ 3 km]. null = ei salamoita. */
+  function salamaTila(lista, lat, lon, nyt, sade = 60, ikkuna = 60) {
+    const t0 = nyt instanceof Date ? nyt.getTime() : nyt;
+    const x = (lista || []).map(s => Object.assign({ km: matka(lat, lon, s.lat, s.lon), min: (t0 - s.aika) / 60000 }, s))
+      .filter(s => s.km <= sade && s.min <= ikkuna && s.min >= -5);
+    if (!x.length) return null;
+    const tuore = x.filter(s => s.min <= 30), viim = tuore.length ? tuore : x;
+    const lahin = viim.reduce((a, b) => (b.km < a.km ? b : a));
+    const ka = l => l.reduce((a, b) => a + b.km, 0) / l.length;
+    const u = x.filter(s => s.min <= 15), v = x.filter(s => s.min > 15 && s.min <= 45);
+    let suunta = null;
+    if (u.length >= 3 && v.length >= 3) { const d = ka(u) - ka(v); suunta = d <= -3 ? 'lahestyy' : d >= 3 ? 'loittonee' : 'paikallaan'; }
+    return { n: x.length, n30: tuore.length, maa: x.filter(s => s.maa).length,
+      lahin: { km: lahin.km, suunta: suuntaSana(lat, lon, lahin.lat, lahin.lon), min: Math.max(0, lahin.min) },
+      uusin: Math.max(0, Math.min(...x.map(s => s.min))), liike: suunta };
+  }
+  function salamaTeksti(st) {
+    if (!st) return '';
+    const l = st.lahin;
+    return `⚡ Salamoita: lähin ${Math.round(l.km)} km ${l.suunta}, ${Math.round(l.min)} min sitten · ${st.n30} kpl / 30 min`
+      + (st.liike === 'lahestyy' ? ' · lähestyy' : st.liike === 'loittonee' ? ' · loittonee' : '');
+  }
+  function salamaPuhe(st) {
+    if (!st) return '';
+    const l = st.lahin;
+    return `Salamoita ${Math.round(l.km)} kilometriä ${SUUNTA_SSA[l.suunta] || ''}${st.liike === 'lahestyy' ? ', lähestyy' : st.liike === 'loittonee' ? ', loittonee' : ''}.`.replace(' ,', ',');
+  }
+
   const Avoin = { tagi, jasennaCap, onMerella, pisteMonikulmiossa, koskeeAluetta, valitse, varoitusTeksti, syoteAika, VARI_FI,
-    poijut, jasennaTvp, lahinMeriarvo, matka, suuntaSana, jasennaViat, vikaMerkille, alueenViat, vikaTeksti };
+    salamat, salamaTila, salamaTeksti, salamaPuhe, poijut, jasennaTvp, lahinMeriarvo, matka, suuntaSana, jasennaViat, vikaMerkille, alueenViat, vikaTeksti };
   if (typeof module !== 'undefined' && module.exports) module.exports = Avoin; else root.Avoin = Avoin;
 })(typeof window !== 'undefined' ? window : this);

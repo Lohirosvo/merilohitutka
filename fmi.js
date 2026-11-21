@@ -241,7 +241,15 @@
     return tw(await hae(p));
   }
 
-  const FMI = { haePoijut, haeVedenLampo, haeLahinAsema, jasennaSimple, aikasarjaksi, viimeisimmat, haeHavainnot, haeEnnuste, isoAika, haeVesiHavainto, haeVesiEnnuste };
+  /** v63: salamat pisteen ympäriltä viimeiset minuutit [L: fmi::observations::lightning::simple, bbox, starttime/endtime].
+   *  Laatikko ±0,6° lat (~67 km) ja ±1,3° lon (~63 km 64°:ssa). */
+  async function haeSalamat(lat, lon, nyt, minuutit = 60) {
+    const bbox = [lon - 1.3, lat - 0.6, lon + 1.3, lat + 0.6].map(v => v.toFixed(2)).join(',');
+    return hae({ storedquery_id: 'fmi::observations::lightning::simple', bbox,
+      starttime: isoAika(new Date(nyt.getTime() - minuutit * 60000)), endtime: isoAika(nyt) });
+  }
+
+  const FMI = { haeSalamat, haePoijut, haeVedenLampo, haeLahinAsema, jasennaSimple, aikasarjaksi, viimeisimmat, haeHavainnot, haeEnnuste, isoAika, haeVesiHavainto, haeVesiEnnuste };
   if (typeof module !== 'undefined' && module.exports) module.exports = FMI;
   else root.FMI = FMI;
 })(typeof window !== 'undefined' ? window : this);

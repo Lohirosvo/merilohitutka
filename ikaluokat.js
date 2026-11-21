@@ -31,6 +31,13 @@
  * dMin–dMax km lämpö on tMin–tMax. Tuuli kunnossa, jos klo alku–loppu on vähintään `tunnit` peräkkäistä tuntia
  * keskituuli < `tuuli` m/s [A: "5 h min" tulkittu yhtenäiseksi kalastusjaksoksi; puuttuva tunti katkaisee].
  * Tavoitevuoden viikot (ma–su) saman kalenteripäivän mukaan; arvo × 7 = "hyviä kalapäiviä viikossa" keskimäärin.
+ *
+ * v63 JOKILASKURIKORJAUS (Hannu 21.11.: "2" = jokilaskurit kesken kauden päivittäisivät ennusteen, erityisesti kossit):
+ * Kalixälvenin Jockfall (~100 km jokisuulta, kuten Kattilakoski) päivittäiset lohet [L Länsstyrelsen] sovitetaan mallin
+ * jokitiheyteen (ikäluokkien normaalit, kauden siirto) siirtämällä ±15 vrk 0,5 vrk:n välein; mittakaava vapaa (pienimmät
+ * neliöt). Siirto otetaan käyttöön vasta, kun nousun huippu on ohi (7 vrk:n keskiarvo huipusta ≥ 5 vrk ja ≤ 75 %), kaloja
+ * ≥ 300, päiviä ≥ 10 ja korrelaatio ≥ 0,6 [K]; ennen huippua siirto ja mittakaava eivät erotu toisistaan. Kalixin ja
+ * Tornionjoen välinen ajoitusero oletetaan nollaksi [A]. Korjaus lisätään kauden siirtoon kaikille ikäluokille ja alueille.
  */
 (function (root) {
   'use strict';
@@ -104,14 +111,52 @@
     return Object.assign(pohja, { vrk: -KERROIN * (arvo(kaytto) - ref) });
   }
 
+  // v63: jokilaskurikorjaus { kv, vrk, ... } (asetaJokikorjaus); vaikuttaa vain saman kauden arvioihin
+  let JOKIKORJAUS = null;
+  function asetaJokikorjaus(k) { JOKIKORJAUS = k && k.ok && isFinite(k.vrk) ? k : null; return JOKIKORJAUS; }
+  function jokikorjaus(kv) { return JOKIKORJAUS && JOKIKORJAUS.kv === kv ? JOKIKORJAUS : null; }
   /** Keskipäivät (vpv) alueella vuodelle kv: [{ keski, aik, myoh }] ikäluokittain (3MV, 2MV, kossit). */
   function keskipaivat(kv, huhti, alue) {
-    const s = siirto(huhti, kv), v = viive(alue);
+    const s0 = siirto(huhti, kv), v = viive(alue), kj = jokikorjaus(kv), lisa = kj ? kj.vrk : 0;
+    const s = kj ? Object.assign({}, s0, { jokikorjaus: kj.vrk }) : s0;   // s.vrk = lämpösiirto, korjaus erikseen
     if (!v) return null;
     const m2 = TOTEUMA.msw + MSW_SIIRTO, joki = [m2 - VALI_3MV, m2, TOTEUMA.kossi];
-    return { s, v, mu: joki.map(j => ({ keski: j + s.vrk - v.keski, aik: j + s.vrk - v.max, myoh: j + s.vrk - v.min })) };
+    return { s, v, mu: joki.map(j => ({ keski: j + s.vrk + lisa - v.keski, aik: j + s.vrk + lisa - v.max, myoh: j + s.vrk + lisa - v.min })) };
   }
   const F = (mu, d) => phi((d - mu) / HAJONTA);
+  /** v63: mallin jokitiheys (laskurin kohdalla) kaudelle kv ilman jokikorjausta: ikäluokkien keskipäivät ja tiheys(d). */
+  function jokiMus(kv, huhti) { const s = siirto(huhti, kv), m2 = TOTEUMA.msw + MSW_SIIRTO; return [m2 - VALI_3MV, m2, TOTEUMA.kossi].map(j => j + s.vrk); }
+  function jokiTiheys(mus, d) { return mus.reduce((a, mu, i) => a + IKALUOKAT[i].osuus * Math.exp(-0.5 * ((d - mu) / HAJONTA) ** 2) / (HAJONTA * Math.sqrt(2 * Math.PI)), 0); }
+  /** v63: laskurin päivät { 'YYYY-MM-DD': lohia } → siirto mallin jokitiheyteen. Palauttaa { ok, syy, kv, vrk, a, r, n, paivia, huippu, viimeisin }. */
+  function jokiSovitus(paivat, kv, huhti, e = {}) {
+    const minKalat = e.minKalat || 300, minPaivat = e.minPaivat || 10, maxVrk = e.maxVrk || 15;
+    const pts = Object.keys(paivat || {}).sort().map(k => { const [y, m, d] = k.split('-').map(Number); const n = Number(paivat[k]);
+      return y === kv && isFinite(n) && n >= 0 ? [vpvPaivasta(y, m, d), n] : null; }).filter(Boolean);
+    const n = pts.reduce((a, p) => a + p[1], 0), tulos = { ok: false, kv, n, paivia: pts.length, vrk: NaN };
+    if (pts.length < minPaivat || n < minKalat) return Object.assign(tulos, { syy: 'vähän dataa' });
+    // 7 vrk:n liukuva keskiarvo (vain mitatut päivät): huippu ohi?
+    const ma = pts.map(([d]) => { const l = pts.filter(([x]) => x > d - 7 && x <= d); return [d, l.reduce((a, p) => a + p[1], 0) / l.length]; });
+    const hp = ma.reduce((a, b) => (b[1] > a[1] ? b : a)), viim = pts[pts.length - 1][0];
+    Object.assign(tulos, { huippu: hp[0], viimeisin: viim });
+    const mus = jokiMus(kv, huhti);
+    if (pts[0][0] > mus[1] - 10) return Object.assign(tulos, { syy: 'alku puuttuu' });   // vain loppupää: siirto ja määrä eivät erotu
+    if (!(viim - hp[0] >= 5 && ma[ma.length - 1][1] <= 0.75 * hp[1])) return Object.assign(tulos, { syy: 'huippu ei ohi' });
+    let paras = null;
+    for (let D = -maxVrk; D <= maxVrk + 1e-9; D += 0.5) {
+      const f = pts.map(([d]) => jokiTiheys(mus.map(m => m + D), d)), ff = f.reduce((a, x) => a + x * x, 0);
+      if (!(ff > 0)) continue;
+      const a = pts.reduce((s, p, i) => s + p[1] * f[i], 0) / ff, res = pts.reduce((s, p, i) => s + (p[1] - a * f[i]) ** 2, 0);
+      if (!paras || res < paras.res - 1e-9) paras = { D, a, res, f };
+    }
+    if (!paras) return Object.assign(tulos, { syy: 'ei sovitusta' });
+    const c = pts.map(p => p[1]), m = paras.f.map(x => x * paras.a), ka = l => l.reduce((s, x) => s + x, 0) / l.length;
+    const cc = ka(c), mm = ka(m), sxy = c.reduce((s, x, i) => s + (x - cc) * (m[i] - mm), 0);
+    const r = sxy / Math.sqrt(c.reduce((s, x) => s + (x - cc) ** 2, 0) * m.reduce((s, x) => s + (x - mm) ** 2, 0) || 1);
+    Object.assign(tulos, { vrk: paras.D, a: paras.a, r });
+    if (Math.abs(paras.D) >= maxVrk) return Object.assign(tulos, { syy: 'siirto rajalla' });
+    if (!(r >= 0.6)) return Object.assign(tulos, { syy: 'huono sovitus' });
+    return Object.assign(tulos, { ok: true, syy: '' });
+  }
   /** Ikkunassa [d1, d2] saapuvat (osuus kaikista kaloista) ikäluokittain. */
   function saapuvat(mus, d1, d2) { return mus.map((mu, i) => IKALUOKAT[i].osuus * (F(mu, d2 + 0.5) - F(mu, d1 - 0.5))); }
   /** Viikkotiheys (7 vrk ikkuna keskellä d) suhteessa kauden suurimpaan: 0–1. */
@@ -271,7 +316,7 @@
 
   const Ikaluokat = { IKALUOKAT, HAJONTA, KERROIN, VALI_3MV, KAUSI, TOTEUMA, JOKI_KM, NOPEUS, TORNIO, OSUUDET, MSW_SIIRTO,
     phi, paiva, paivaksi, pvT, vpvPaivasta, kausiVuosi, matka, keskus, viive, siirto, keskipaivat, saapuvat, viikkoTaso,
-    LOMA, LOMA_OLETUS, isoViikko, tasoSarja, lomaVuosi, lomaviikot,
+    LOMA, LOMA_OLETUS, isoViikko, tasoSarja, lomaVuosi, lomaviikot, jokiMus, jokiTiheys, jokiSovitus, asetaJokikorjaus, jokikorjaus,
     paajoukko, koostumus, haarukka, alueArvio, viikkoArvio, seuraavaVaihto, ennakkoTeksti, viikkoTeksti, kayrat };
   if (typeof module !== 'undefined' && module.exports) module.exports = Ikaluokat; else root.Ikaluokat = Ikaluokat;
 })(typeof window !== 'undefined' ? window : this);

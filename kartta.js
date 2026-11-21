@@ -2,6 +2,7 @@
  * Kevyt oma karttanäkymä (ei ulkoisia kirjastoja): OSM-taustakartta valinnaisena,
  * Copernicus-datasta lämpökäyrät, lohikerros (lämpövälin syvyys; v25 pehmeä reuna ja rajaviiva), satelliittilämpö, pintavirtanuolet
  * ja aallonkorkeus. Traficomin merikartan syvyyskäyrät (v8), Väyläviraston väylät ja IL:n tuulinuolet (v9).
+ * v63 (Hannu 21.11.2026 "2 4 5"): salamat (IL, viimeinen tunti) salamasymbolina, 0–15 min kirkas, 15–60 min haalea; siru "Salamat".
  * v62 (Hannu 21.11.2026 "1 3 6 tehdään"): turvalaiteviat (Fintraffic Digitraffic, aktiiviset viat) punaisena huutomerkkinä
  *   merkin kulmassa; vika, jota ei saada yhdistettyä merkkiin (numero tai alle 50 m), omana merkkinään. Sama 5,5 km:n raja.
  * v61: Väyläviraston turvalaitteet (viitat, poijut, kummelit, linjamerkit, loistot) ja vesiliikennemerkit, kun näkyvä alue
@@ -653,7 +654,7 @@
       this.lohiReuna = isFinite(opts.lohiReuna) ? opts.lohiReuna : 0.4;
       this.jyrkka = opts.jyrkka || [0.3, 0.05];   // v26: [vähintään Hs m, jyrkkyys osuutena]   // v25: pehmeän reunan leveys (°C), 0 = terävä
       this.aaltoRajat = opts.aaltoRajat || [0.35, 0.5];   // merkitsevä aallonkorkeus (m)
-      this.tasot = { lampo: true, lohi: true, syvyys: true, tuuli: true, vaylat: true, havainnot: true, aaltoraja: true, jalki: true, matalikot: true, ais: false, sst: false, virta: true, aalto: false, tausta: true, silakka: false, turvalaitteet: true };   // v43: silakka = valomallin napautusteksti; v61 turvalaitteet
+      this.tasot = { lampo: true, lohi: true, syvyys: true, tuuli: true, vaylat: true, havainnot: true, aaltoraja: true, jalki: true, matalikot: true, ais: false, sst: false, virta: true, aalto: false, tausta: true, silakka: false, turvalaitteet: true, salamat: true };   // v43: silakka = valomallin napautusteksti; v61 turvalaitteet
       this.syvyys = null;   // puraSyvyys()-tulos
       this.vaylat = null;   // puraVaylat()-tulos
       this.ylaVara = 0; this.alaVara = 0;   // ohjainten peittämä osa ylhäällä ja alhaalla (px)
@@ -666,6 +667,7 @@
       this.matalikot = []; this.matalikkoVali = '10–20';
       this.silakkaFn = null;   // v50: (aikaIndeksi) => { lat, lon, luokka[i][j] (0 ei, 1 sopiva, 2 optimi), vaiheet, kaudella } tai null
       this.lohiTaalla = false; this.valittuOma = false;   // v24: lohikerros omalla kohdalla (profiili seuraa venettä)
+      this.salamat = [];   // v63: [{ lat, lon, aika (ms), maa, virta }] (avoindata.js salamat)
       this.viat = [];   // v62: turvalaiteviat [{ lat, lon, u, nimi, vika, tila, aika }] (avoindata.js jasennaViat)
       this.ais = [];   // AIS-kohteet (v23): [{ lat, lon, t, sog, cog, suunta, liikkuu, vari, nimi }]   // matalikot()-tuloksen lista ja selitteen väli (v21)
       this.laatat = new Map(); this.onNapautus = opts.onNapautus || (() => {});
@@ -808,6 +810,7 @@
       if (d && this.tasot.tuuli && d.tuuli) this._tuuli();
       if (this.tasot.jalki && this.jalki.length > 1) this._jalki();   // nuolten päälle, merkkien alle
       if (this.tasot.ais && this.ais.length) this._ais();
+      if (this.tasot.salamat && this.salamat.length) this._salamat();   // v63
       if (this.reitit.length || this.kohde) this._reitit();   // v30
       if (this.sillat.length) this._sillat();   // v35
       this._merkit();
@@ -928,6 +931,25 @@
       let paras = null, pd = rajaPx;
       for (const v of this.viatMerkeille().irrallaan) { const [x, y] = this.ruutu(v.lat, v.lon), d = Math.hypot(x - x0, y - y0); if (d <= pd) { pd = d; paras = v; } }
       return paras;
+    }
+    /** v63: salamat viimeiseltä tunnilta: salamasymboli, ikä läpinäkyvyytenä; yli 60 min ei piirretä. */
+    _salamat() {
+      const g = this.ctx, nyt = Date.now(), yla = this.ylaVara - 10, ala = this.h - this.alaVara + 10;
+      g.save(); g.lineJoin = 'round';
+      for (const s of this.salamat) {
+        const min = (nyt - s.aika) / 60000;
+        if (min > 60 || min < -5) continue;
+        const [x, y] = this.ruutu(s.lat, s.lon);
+        if (x < -10 || x > this.w + 10 || y < yla || y > ala) continue;
+        const k = s.maa === false ? 1.05 : 1.45;   // ~23 px korkea; pilvisalama pienempänä
+        g.globalAlpha = min <= 15 ? 1 : 0.45;
+        g.beginPath();
+        g.moveTo(x + 2 * k, y - 8 * k); g.lineTo(x - 4 * k, y + 1 * k); g.lineTo(x, y + 1 * k);
+        g.lineTo(x - 2 * k, y + 8 * k); g.lineTo(x + 4 * k, y - 1 * k); g.lineTo(x, y - 1 * k); g.closePath();
+        g.fillStyle = '#ffd60a'; g.strokeStyle = '#1a1a1a'; g.lineWidth = 1.4; g.fill(); g.stroke();
+        this._varaa(x - 6 * k, y - 8 * k, 12 * k, 16 * k);
+      }
+      g.restore();
     }
     /** v62: vika merkin kulmaan (merkki piirretty) tai omana merkkinä: punainen ympyrä, valkoinen huutomerkki. */
     _viat() {
@@ -1647,6 +1669,7 @@
         rivit.push([['', '#e9f1f7'], ['<5', '#e9f1f7', '#e8f4ff'], ['5–8', '#e9f1f7', '#ffe066'], ['8–10', '#e9f1f7', '#ffa94d'], ['≥10 m/s', '#e9f1f7', '#ff5c5c']]);
       }
       if (this.tasot.vaylat && this.vaylat) rivit.push([['Väylä (Väylävirasto), mitoitussyväys m', '#ffd166']]);
+      if (this.tasot.salamat && this.salamat.length) rivit.push([['Salamat (IL)', '#ffd60a'], ['0–15 min', '#e9f1f7', '#ffd60a'], ['15–60 min', '#e9f1f7', 'rgba(255,214,10,0.45)']]);   // v63
       if (this.tasot.turvalaitteet && this.turvalaitteetNakyvissa()) rivit.push([['Viitat', '#c3cedd'], ['vasen', '#e9f1f7', MP], ['oikea', '#e9f1f7', MV],
         ['kardinaali', '#e9f1f7', MY], ['kummeli', '#e9f1f7', MW]].concat(this.viat.length ? [['vika', '#e9f1f7', '#e63946']] : [], [['napauta: tiedot', '#c3cedd']]));
       if (this.tasot.havainnot && this.havainnot.length) rivit.push([['Omat', 'rgb(' + havaintoVari('muu') + ')'],

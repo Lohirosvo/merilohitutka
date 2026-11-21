@@ -194,6 +194,7 @@
       <ul id="tilaSyyt"></ul>
     </div>
     <div class="varoitus" id="varoitusRivi" role="button" hidden></div>
+    <div class="varoitus" id="salamaRivi" role="button" hidden></div>
     <div class="pieni ikarivi" id="ikaRivi" role="button" hidden></div>
 
     <div class="kortti" id="vPaluu">
@@ -260,6 +261,7 @@
           <button data-taso="jalki">Jälki</button>
           <button data-taso="matalikot">Matalikot</button>
           <button data-taso="ais">AIS</button>
+          <button data-taso="salamat">Salamat</button>
           <button data-taso="lampo">Lämpö</button>
           <button data-taso="virta">Virta</button>
           <button data-taso="aaltoraja">Aaltoraja</button>
@@ -299,6 +301,7 @@
       <h2>Varoitukset</h2>
       <div id="varoitusLista" class="vlista">Haetaan…</div>
       <div class="pieni" id="varoitusLahde"></div>
+      <div id="salamaLista" class="vlista"></div>
       <div id="vikaLista" class="vlista"></div>
       <div class="pieni" id="vikaLahde"></div>
     </div>
@@ -347,6 +350,15 @@
       <div class="pieni" id="ikaLuku">Napauta kuvaajaa: päivän tilanne.</div>
       <table class="ikataulu" id="ikaTaulu"></table>
       <div class="pieni" id="ikaTiedot"></div>
+      <p class="pieni">Kalastusrajoitukset (alueet ja ajat): <a href="https://kalastusrajoitus.fi/#/kalastusrajoitus" target="_blank" rel="noopener" style="color:var(--syaani)">kalastusrajoitus.fi</a>
+        (Ruokavirasto, ELY-keskukset). Sovellus ei näytä niitä: palvelulle ei löytynyt avointa rajapintaa (21.11.2026).</p>
+    </div>
+    <div class="kortti" id="jokiKortti">
+      <h2 id="jokiOtsikko">Jokilaskuri: Kalixälven, Jockfall</h2>
+      <div class="ikaennakko" id="jokiTila">Odottaa dataa…</div>
+      <div class="ikakayra" id="jokiKayra"></div>
+      <div class="pieni" id="jokiLuku"></div>
+      <div class="pieni" id="jokiTiedot"></div>
     </div>
     <div class="kortti" id="lomaKortti">
       <h2 id="lomaOtsikko">Lomaviikko (arvio)</h2>
@@ -430,7 +442,8 @@
     <p class="pieni">Meridata: E.U. Copernicus Marine Service Information. Tuuli kartalla: Ilmatieteen laitos, avoin data (CC BY 4.0).</p>
     <p class="pieni">Varoitukset: Ilmatieteen laitos, varoitukset (CAP), avoin data CC BY 4.0; virallinen tieto on ilmatieteenlaitos.fi.
       Aaltopoijut ja mareografien vedenlämpö: Ilmatieteen laitos, avoin data (CC BY 4.0). Turvalaiteviat: Fintraffic / digitraffic.fi,
-      lisenssi CC BY 4.0. Sovellus ei korvaa virallisia varoituksia eikä merenkulkuvaroituksia.</p>
+      lisenssi CC BY 4.0. Salamat: Ilmatieteen laitos, salamanpaikannus, avoin data (CC BY 4.0). Jokilaskuri: Länsstyrelsen Norrbotten, fiskräkning.
+      Sovellus ei korvaa virallisia varoituksia eikä merenkulkuvaroituksia.</p>
     <p class="pieni" id="vaylaLahde">Väylät: Lähde Väylävirasto, vesiväyläaineisto, CC BY 4.0. Aineisto ei sovellu navigointikäyttöön.</p>
     <p class="pieni" id="syvyysLahde">Syvyyskäyrät: Lähde Liikenne- ja viestintävirasto Traficom, Merikartan syvyystiedot.
       Ei navigointikäyttöön. Ei täytä virallisen merikartan vaatimuksia.
@@ -462,13 +475,13 @@
 <script src="alueet.js?v=33"></script>
 <script src="havainnot.js?v=15"></script>
 <script src="malli.js?v=25"></script>
-<script src="avoindata.js?v=1"></script>
-<script src="fmi.js?v=15"></script>
+<script src="avoindata.js?v=2"></script>
+<script src="fmi.js?v=16"></script>
 <script src="nopeus.js?v=20"></script>
-<script src="kartta.js?v=37"></script>
+<script src="kartta.js?v=38"></script>
 <script src="sillat.js?v=2"></script>
 <script src="silakka.js?v=8"></script>
-<script src="ikaluokat.js?v=4"></script>
+<script src="ikaluokat.js?v=5"></script>
 <script src="reitti.js?v=9"></script>
 <script src="ais.js?v=23"></script>
 <script>
@@ -940,6 +953,7 @@ async function haeKaikki() {
   await lataaMeri();
   lataaIkaluokat();   // v57: koko rannikon yhteinen tiedosto (huhtikuun lämpö), ei odoteta
   lataaAvoin(al, nyt);   // v62: varoitukset, poijut, vedenlämpö, turvalaiteviat (30 min välein), ei odoteta
+  lataaSalamat(al, nyt);   // v63: salamat joka päivityksellä (10 min), ei odoteta
   tallennaLS('mlt_data', { aika: nyt, alue: al.tunnus, havainnot: havaintoData, ennuste: ennusteData });
   paivitaOfflineTila();   // v26
   $('paivitetty').textContent = ' päivitetty klo ' + klo(nyt) + (virheet.length ? ' (osa hauista epäonnistui)' : '');
@@ -961,7 +975,7 @@ function palautaVanhaData() {
 var AVOIN_VALI = 30 * 60000, VAROITUS_URL = 'https://alerts.fmi.fi/cap/feed/atom_fi-FI.xml', VAROITUS_VARA = 'data/varoitukset.xml';
 var VIKA_URL = 'https://meri.digitraffic.fi/api/aton/v1/faults', VIKA_AVAIN = 'data/_viat.json';
 var avoin = { varoitukset: null, varoitusAika: null, varoitusLahde: '', varoitusHaettu: 0, varoitusVirhe: '',
-  poijut: null, vesiT: null, malli: null, mittausAlue: '', mittausHaettu: 0, mittausVirhe: '', viat: null, vikaAika: null, vikaHaettu: 0, vikaVirhe: '' };
+  salamat: null, salamaAika: null, salamaVirhe: '', salamaAlue: '', poijut: null, vesiT: null, malli: null, mittausAlue: '', mittausHaettu: 0, mittausVirhe: '', viat: null, vikaAika: null, vikaHaettu: 0, vikaVirhe: '' };
 async function haeAikaraja(url, opt = {}, ms = 20000) {
   const c = typeof AbortController === 'function' ? new AbortController() : null, ajastin = c ? setTimeout(() => c.abort(), ms) : 0;
   try {
@@ -1034,6 +1048,23 @@ async function lataaMittaukset(al, nyt) {
   avoin.mittausVirhe = virheet.join(', ');
   piirraAvoin();
 }
+// v63: salamat (IL) oman sijainnin (alueella) tai alueen keskikohdan ympäriltä, viimeinen tunti
+function avoinPiste(al) { return sijainti && gpsAlue() === al ? [sijainti.lat, sijainti.lon] : (al.keski || [(al.rajat.lat_min + al.rajat.lat_max) / 2, (al.rajat.lon_min + al.rajat.lon_max) / 2]); }
+async function lataaSalamat(al, nyt) {
+  if (!window.Avoin || !FMI.haeSalamat) return;
+  const [lat, lon] = avoinPiste(al);
+  try {
+    const rivit = await FMI.haeSalamat(lat, lon, nyt);
+    avoin.salamat = Avoin.salamat(rivit); avoin.salamaAika = nyt; avoin.salamaVirhe = ''; avoin.salamaAlue = al.tunnus;
+  } catch (e) { avoin.salamaVirhe = e.message; }
+  if (kartta && avoin.salamat) { kartta.salamat = avoin.salamat; kartta.piirra(); }
+  piirraAvoin();
+}
+function salamaNyt(nyt) {
+  if (!avoin.salamat || !avoin.salamaAika || nyt - avoin.salamaAika > 40 * 60000) return null;   // vanha tieto ei kelpaa
+  const [lat, lon] = avoinPiste(aktiivinenAlue());
+  return Avoin.salamaTila(avoin.salamat, lat, lon, nyt, 60, 60);
+}
 /** Mallin arvo nyt lähimmästä meriruudusta ≤ 5 km: n = tämän päivän data (haePaiva), laji 'hs' (aalto), 'lampo' (pinta), 'sst' (satelliitti).
  *  Tunti: lähin nykyhetkeä, enintään 90 min päässä (sst: päivän arvo). */
 function mallinMeriarvo(n, laji, lat, lon) {
@@ -1067,6 +1098,16 @@ function piirraAvoin() {
     rivi.textContent = '⚠ ' + A.varoitusTeksti(v) + (v.voimassa ? '' : ' (tulossa)') + (lahiaika.length > 1 ? ` · +${lahiaika.length - 1} muuta` : '') + ' ›';
     rivi.onclick = () => { avaa('v-48h'); $('varoitusKortti').scrollIntoView(); };
   }
+  // 4. salamat (v63)
+  const st = salamaNyt(nyt), sr = $('salamaRivi'), lahella = st && st.lahin.km <= 40 && st.lahin.min <= 30;
+  sr.hidden = !lahella;
+  if (lahella) { sr.textContent = A.salamaTeksti(st) + ' ›'; sr.onclick = () => { avaa('v-48h'); $('varoitusKortti').scrollIntoView(); }; }
+  $('salamaLista').innerHTML = `<div class="ots">Salamat (60 km, viimeinen tunti)</div>` + (st
+    ? `<div><b>${A.salamaTeksti(st).replace(/^⚡ Salamoita: /, '⚡ ')}</b><div class="pieni">${st.n} salamaa tunnin aikana, joista maasalamoita ${st.maa}; uusin ${Math.round(st.uusin)} min sitten.`
+      + ` Paikka: ${gpsAlue() === al && sijainti ? 'oma sijainti' : al.nimi + ' (keskikohta)'}.</div></div>`
+    : `<div class="pieni" style="border:0;padding-left:0">${avoin.salamaAika && nyt - avoin.salamaAika <= 40 * 60000 ? 'Ei salamoita 60 km:n säteellä viimeisen tunnin aikana.'
+      : avoin.salamaVirhe ? 'Salamatietoa ei saatu: ' + avoin.salamaVirhe : 'Haetaan…'}</div>`)
+    + (avoin.salamaAika ? `<div class="pieni" style="border:0;padding-left:0">Ilmatieteen laitos, salamanpaikannus, tilanne ${kloPv(avoin.salamaAika)}.</div>` : '');
   const aika = v => (v.voimassa ? 'voimassa nyt' : 'alkaa ' + kloPv(new Date(v.alku))) + (v.loppu ? ', päättyy ' + kloPv(new Date(v.loppu)) : '');
   $('varoitusLista').innerHTML = !avoin.varoitukset ? (avoin.varoitusVirhe ? 'Varoituksia ei saatu.' : 'Haetaan…')
     : kaikki.length ? kaikki.map(v => `<div class="${VARI_LUOKKA[v.vari] || ''}"><b>${A.varoitusTeksti(v)}</b><div class="pieni">${aika(v)}${v.tod !== null ? ' · todennäköisyys ' + v.tod + ' %' : ''}</div>`
@@ -1621,6 +1662,7 @@ function avaaKarttaNakyma() {
     kartta.syvyys = syvyys; kartta.vaylat = vaylat; laskeMatalikot();
     kartta.silakkaFn = silakkaRuudut;   // v50
     if (avoin.viat) kartta.viat = avoin.viat;   // v62
+    if (avoin.salamat) kartta.salamat = avoin.salamat;   // v63
     paivitaReititKartalle();   // v30
     kartta.lohiTaalla = lohiTaalla; $('lohiTaalla').classList.toggle('paalla', lohiTaalla);
     if (kartta.tasot.lohet === undefined) kartta.tasot.lohet = true;   // v58: lohien viikkoarvio oletuksena näkyvissä
@@ -2219,7 +2261,7 @@ let nousuTeksti = '';
 // Malli ikaluokat.js:ssä: toteutunut ajoitus Tornionjoen jokilaskurilla + huhtikuun lämpöero + viive alueelle.
 // data/ikaluokat.json: huhtikuun pintalämmöt (hakuajo täydentää puuttuvat vuodet, käytännössä kerran vuodessa).
 // var eikä let/const: piirra() voi ajaa ennen tätä riviä käynnistyksessä (let antaisi ReferenceErrorin).
-var ikaData = null, ikaHaettu = false, lomaData = null, lomaHaettu = false;
+var ikaData = null, ikaHaettu = false, lomaData = null, lomaHaettu = false, jokiData = null, jokiHaettu = false;   // v63 jokiData
 var IKA_VARIT = ['#3987e5', '#d95926', '#199e70'];   // isot, 2MV, kossit – värisokeustarkistus tummalla pohjalla #122236 läpi
 async function lataaIkaluokat() {
   const url = 'data/ikaluokat.json';
@@ -2240,6 +2282,15 @@ async function lataaIkaluokat() {
   } catch (e) { if (!lomaData) lomaData = await haeVarastosta(url2); }
   lomaHaettu = true;
   piirraLomaviikko();
+  const url3 = 'data/jokilaskurit.json';   // v63: Jockfallin päivät (Länsstyrelsen), kerätty hakuajossa
+  try {
+    const r = await fetch(url3, { cache: 'no-cache' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    await tallennaVarastoon(url3, r.clone());
+    jokiData = await r.json();
+  } catch (e) { if (!jokiData) jokiData = await haeVarastosta(url3); }
+  jokiHaettu = true;
+  piirraIkaluokat();
 }
 /** v59 (Hannu 17.11.): lomaviikko Kallanille – toteutuneet kesät × mallin kala; tavoitevuosi = seuraavan kauden jälkeinen.
  *  v60: rajat säädettävinä (Hannu: "säädettävissä olevilla arvoilla … Jostain on luovuttava"), tallessa mlt_loma. */
@@ -2302,7 +2353,7 @@ function ikaSiirtoTeksti(a) {
 /** Vesillä-rivi: ennakko omalle (GPS) tai valitulle alueelle. */
 function ikaRiviTeksti(t, al) {
   const a = Ikaluokat.alueArvio(t, ikaHuhti(), al);
-  return a ? `${al.nimi}: ${Ikaluokat.ennakkoTeksti(a)}` : '';
+  return a ? `${al.nimi}: ${Ikaluokat.ennakkoTeksti(a)}` + (a.siirto.jokikorjaus !== undefined ? ` · Jockfall-korjaus ${a.siirto.jokikorjaus > 0 ? '+' : '−'}${luku(Math.abs(a.siirto.jokikorjaus))} vrk` : '') : '';
 }
 /** Kartan viikkorivi kartan valitulle päivälle (7 vrk ikkuna). */
 function piirraLohetRivi() {
@@ -2361,8 +2412,11 @@ function ikaKuvaajat(a) {
 function piirraIkaluokat() {
   if (!window.Ikaluokat || !IKA_VARIT) return;
   piirraLomaviikko();
+  piirraJokilaskuri();   // v63
   const rivi = $('ikaRivi'), kortti = $('ikaKortti'), I = Ikaluokat, huhti = ikaHuhti(), nyt = new Date();
   if (!rivi || !kortti) return;
+  const jk = jokiKorjausNyt(nyt, huhti);   // v63: ennen arvioita, vaikuttaa kaikkiin alueisiin
+  I.asetaJokikorjaus(jk);
   const oma = aktiivinenAlue();
   rivi.textContent = ikaRiviTeksti(nyt, oma) + ' ›'; rivi.hidden = !oma;
   rivi.onclick = () => { avaa('v-raportit'); kortti.scrollIntoView(); };
@@ -2396,12 +2450,79 @@ function piirraIkaluokat() {
   $('ikaTiedot').innerHTML = [
     `Pohja: toteutunut nousu – ${T.teksti} (jokilaskuri noin ${I.JOKI_KM} km jokisuusta). Tältä alueelta laskurille ${Math.round(vi.km)} km merta + ${I.JOKI_KM} km jokea, `
       + `${I.NOPEUS[0]}–${I.NOPEUS[1]} km/vrk → ${luku(vi.min, 0)}–${luku(vi.max, 0)} vrk; varjostus = tämä haarukka. Alkaa = viikon kalamäärä yli puolet huipusta.`,
-    ikaSiirtoTeksti(a) + (v && isFinite(v.erotus) ? ` (Satelliittilähteiden ero huhtikuussa ${v.vuosi}: ${v.erotus > 0 ? '+' : ''}${luku(v.erotus, 2)} °C.)` : ''),
+    (a.siirto.jokikorjaus !== undefined ? `Jokilaskurikorjaus: Jockfallin nousu ${luku(Math.abs(a.siirto.jokikorjaus))} vrk mallia ${a.siirto.jokikorjaus >= 0 ? 'myöhemmin' : 'aiemmin'} → kaikki päivät siirretty (ks. Jokilaskuri). ` : '')
+      + ikaSiirtoTeksti(a) + (v && isFinite(v.erotus) ? ` (Satelliittilähteiden ero huhtikuussa ${v.vuosi}: ${v.erotus > 0 ? '+' : ''}${luku(v.erotus, 2)} °C.)` : ''),
     `Koko: 2MV noin 4–8 kg (Luke 2026), lisämerivuosi +4–5 kg → isot yli 8 kg, kossit alle 4 kg. Osuudet ${O.lahde}: kaikuluotaus kossit ${O.kaiku.kossi.toLocaleString('fi-FI')} `
       + `(${Math.round(O.kaiku.kossi / O.kaiku.yht * 100)} %), monimerivuotiset ${O.kaiku.msw.toLocaleString('fi-FI')}; suomunäytteet kossit ${Math.round(O.suomu.kossi * 100)} %, 2MV ${Math.round(O.suomu['2MV'] * 100)} %.`,
     'Ikäluokan sisäinen hajonta 15,5 vrk ja isot 14 vrk ennen 2MV:tä: Karlsson ym. 1994. 2026: nousu kiihtyi juhannuksena 2MV-kalojen myötä (Luke 9.7.2026). '
       + 'Päivittyy: huhtikuun lämpö toukokuun alussa, pohjavuosi helmikuun biologisesta selvityksestä. Ei vielä kalibroitu omilla saaliilla.',
   ].map(t => `<p>${t}</p>`).join('');
+}
+/** v63: Jockfallin päivät tälle kaudelle → sovitus (null, jos ei dataa). */
+function jokiPaivat(vuosi) { const j = jokiData && jokiData.laskurit && jokiData.laskurit.jockfall; return j && j.vuodet && j.vuodet[vuosi] ? j.vuodet[vuosi] : null; }
+function jokiKorjausNyt(nyt, huhti) {
+  const kv = Ikaluokat.kausiVuosi(nyt), v = jokiPaivat(kv);
+  return v ? Ikaluokat.jokiSovitus(v.paivat, kv, huhti) : null;
+}
+var JOKI_SYY = { 'vähän dataa': 'alle 10 päivää tai 300 lohta', 'alku puuttuu': 'kauden alku puuttuu (päivät talteen vasta loppukaudelta)', 'huippu ei ohi': 'nousun huippu ei vielä ohi (siirtoa ei voi erottaa määrästä)',
+  'siirto rajalla': 'siirto yli 15 vrk (epäuskottava)', 'huono sovitus': 'muoto ei vastaa mallia (korrelaatio alle 0,6)', 'ei sovitusta': 'ei sovitusta' };
+function piirraJokilaskuri() {
+  const kortti = $('jokiKortti');
+  if (!kortti || !window.Ikaluokat) return;
+  const I = Ikaluokat, nyt = new Date(), huhti = ikaHuhti(), kv = I.kausiVuosi(nyt);
+  const j = jokiData && jokiData.laskurit && jokiData.laskurit.jockfall;
+  const vuodet = j && j.vuodet ? Object.keys(j.vuodet).sort() : [];
+  if (!vuodet.length) {
+    $('jokiTila').textContent = jokiHaettu ? 'Ei vielä dataa: hakuajo kerää päivät kesä–elokuussa.' : 'Haetaan…';
+    $('jokiKayra').innerHTML = ''; $('jokiLuku').textContent = '';
+  } else {
+    const y = Number(vuodet.includes(String(kv)) ? kv : vuodet[vuodet.length - 1]), v = j.vuodet[y];
+    const pv = Object.keys(v.paivat).sort(), n = k => v.paivat[k], fi = x => Number(x).toLocaleString('fi-FI');
+    const pvmT = k => { const [, m, d] = k.split('-').map(Number); return `${d}.${m}.`; };
+    const sum = l => l.reduce((a, k) => a + n(k), 0), vika = pv[pv.length - 1];
+    const sov = I.jokiSovitus(v.paivat, y, huhti);
+    const osat = [`${y}: ${isFinite(v.yhteensa) ? fi(v.yhteensa) + ' lohta (laskurin kokonaismäärä)' : fi(sum(pv)) + ' lohta talteen kerätyiltä päiviltä'}.`,
+      `Talteen ${pv.length} päivää (${pvmT(pv[0])}–${pvmT(vika)}); viimeisin ${pvmT(vika)}: ${fi(n(vika))}.`];
+    if (y === kv && pv.length >= 14) {
+      const v7 = pv.slice(-7), e7 = pv.slice(-14, -7), a = sum(v7), b = sum(e7);
+      osat.push(`7 vrk ${fi(a)} (edelliset 7 vrk ${fi(b)}) → ${a > b * 1.15 ? 'kiihtyy' : a < b * 0.85 ? 'hiipuu' : 'tasainen'}.`);
+    }
+    osat.push(sov.ok ? `Nousu ${luku(Math.abs(sov.vrk))} vrk mallia ${sov.vrk >= 0 ? 'myöhemmin' : 'aiemmin'} (korrelaatio ${luku(sov.r, 2)})`
+      + (y === kv ? ' → lohiennuste korjattu kaikille alueille.' : ' (edellinen kausi, ei korjaa tämän kauden ennustetta).')
+      : `Ei korjausta: ${JOKI_SYY[sov.syy] || sov.syy}.`);
+    $('jokiTila').textContent = osat.join(' ');
+    // kuvaaja: päivät pylväinä; malli laskurin kohdalla katkoviivana: sovitus ok → korjattu ja sovituksen mittakaava,
+    // muuten päättyneelle kaudelle kauden kokonaismäärällä (ilman korjausta), kesken kauden ei mallia (mittakaava tuntematon)
+    const alku = I.vpvPaivasta(y, 5, 1), loppu = I.vpvPaivasta(y, 9, 15), W = 320, H = 130, x0 = 30, x1 = W - 6, y0 = 10, y1 = H - 30;
+    const X = d => x0 + (d - alku) / (loppu - alku) * (x1 - x0), vpv = k => { const [a, m, d] = k.split('-').map(Number); return I.vpvPaivasta(a, m, d); };
+    const mus = I.jokiMus(y, huhti).map(m => m + (sov.ok ? sov.vrk : 0)), f = d => I.jokiTiheys(mus, d);
+    const paattynyt = nyt > new Date(y, 8, 1);
+    const al = sov.ok ? sov.a : paattynyt && isFinite(v.yhteensa) ? v.yhteensa : 0;
+    const malliNimi = sov.ok ? `malli (korjattu ${sov.vrk >= 0 ? '+' : '−'}${luku(Math.abs(sov.vrk))} vrk)` : 'malli × kauden määrä';
+    const mx = Math.max(1, ...pv.map(n), ...(al ? Array.from({ length: loppu - alku + 1 }, (_, i) => al * f(alku + i)) : [])), Y = x => y1 - x / mx * (y1 - y0);
+    const lev = Math.max(1, (x1 - x0) / (loppu - alku) - 1);
+    let g = `<line x1="${x0}" x2="${x1}" y1="${y1}" y2="${y1}" stroke="#1f3550"/>`
+      + [0.5, 1].map(o => `<line x1="${x0}" x2="${x1}" y1="${Y(mx * o)}" y2="${Y(mx * o)}" stroke="#1f3550" stroke-dasharray="2 3"/><text x="${x0 - 3}" y="${Y(mx * o) + 3.5}" font-size="10" fill="#8fa6ba" text-anchor="end">${Math.round(mx * o)}</text>`).join('')
+      + [[5, 1], [6, 1], [7, 1], [8, 1], [9, 1]].map(([m, d]) => { const x = X(I.vpvPaivasta(y, m, d));
+        return `<line x1="${x}" x2="${x}" y1="${y1}" y2="${y1 + 3}" stroke="#5d7690"/><text x="${x}" y="${y1 + 14}" font-size="10" fill="#8fa6ba" text-anchor="${m === 5 ? 'start' : 'middle'}">${d}.${m}.</text>`; }).join('');
+    g += pv.map(k => { const d = vpv(k), h = y1 - Y(n(k)); return h > 0 ? `<rect x="${(X(d) - lev / 2).toFixed(1)}" y="${Y(n(k)).toFixed(1)}" width="${lev.toFixed(1)}" height="${h.toFixed(1)}" fill="#3987e5"/>` : ''; }).join('');
+    if (al) g += `<polyline points="${Array.from({ length: loppu - alku + 1 }, (_, i) => `${X(alku + i).toFixed(1)},${Y(al * f(alku + i)).toFixed(1)}`).join(' ')}" fill="none" stroke="#e9f1f7" stroke-width="1.5" stroke-dasharray="4 3"/>`;
+    g += `<rect x="${x0 + 4}" y="${y1 + 18}" width="10" height="8" fill="#3987e5"/><text x="${x0 + 18}" y="${y1 + 26}" font-size="10" fill="#c3cedd">lohia/vrk (laskuri)</text>`
+      + (al ? `<line x1="${x0 + 130}" x2="${x0 + 150}" y1="${y1 + 22}" y2="${y1 + 22}" stroke="#e9f1f7" stroke-width="1.5" stroke-dasharray="4 3"/><text x="${x0 + 154}" y="${y1 + 26}" font-size="10" fill="#c3cedd">${malliNimi}</text>` : '')
+      + `<line id="jokiKursori" x1="0" x2="0" y1="${y0}" y2="${y1}" stroke="#ffd54a" visibility="hidden"/>`;
+    $('jokiKayra').innerHTML = `<svg viewBox="0 0 ${W} ${H + 2}" aria-label="Jockfall lohia päivittäin ${y}">${g}</svg>`;
+    const svg = $('jokiKayra').firstChild;
+    $('jokiLuku').textContent = 'Napauta kuvaajaa: päivän määrä.';
+    svg.addEventListener('pointerdown', ev => {
+      const r = ev.currentTarget.getBoundingClientRect(), xv = (ev.clientX - r.left) / r.width * W;
+      const d = Math.max(alku, Math.min(loppu, Math.round(alku + (xv - x0) / (x1 - x0) * (loppu - alku)))), k = I.paivaksi(y, d).toISOString().slice(0, 10);
+      const c = svg.querySelector('#jokiKursori'); c.setAttribute('x1', X(d)); c.setAttribute('x2', X(d)); c.setAttribute('visibility', 'visible');
+      $('jokiLuku').textContent = `${I.pvT(y, d)}: ` + (k in v.paivat ? `${fi(n(k))} lohta` : 'ei tietoa') + (al ? ` · malli ${fi(Math.round(al * f(d)))}` : '');
+    });
+  }
+  $('jokiTiedot').innerHTML = `<p>Lähde: Länsstyrelsen Norrbotten, fiskräkning (laskuri Jockfallin kalatiessä noin 100 km Kalixälvenin suulta, kuten Kattilakoski Tornionjoella). `
+    + `Sivu näyttää vain 10 viimeisintä päivää: hakuajo kerää ne talteen 3 h välein. Malli = sovelluksen Tornionjoen-pohjainen nousu laskurin kohdalla; `
+    + `Kalixin ja Tornionjoen ajoitusero oletettu nollaksi. Korjaus vasta huipun jälkeen. Luken Tornion- ja Simojoen laskureille ei ole avointa rajapintaa.</p>`;
 }
 function piirraNousu() {
   const el = $('nousuTila'), lisa = $('nousuLisa'), raja = asetukset.nousuLampo, nimi = valittuAlue.nimi;
@@ -2755,7 +2876,9 @@ function merisaaTiedot(tyyppi, kohdePiste) {
 function merisaaTekstiksi(d) {
   let t = Reitti.merisaaTeksti(d);
   const vp = varoitusPuhe(new Date());   // v62: IL:n merivaroitus ensin (voimassa tai alkaa 12 h sisällä)
-  if (vp) t = vp + ' ' + t;
+  const st = window.Avoin ? salamaNyt(new Date()) : null;   // v63: salamat 30 km / 30 min
+  const sp = st && st.lahin.km <= 30 && st.lahin.min <= 30 ? Avoin.salamaPuhe(st) : '';
+  if (vp || sp) t = [vp, sp, t].filter(Boolean).join(' ');
   if (d.havainto) t = t.replace(/(metriä sekunnissa\.)( |$)/, `$1 Havainto ${d.havainto.nimi} ${Math.round(d.havainto.ws)}${isFinite(d.havainto.wg) ? ', puuskissa ' + Math.round(d.havainto.wg) : ''}.$2`);
   if (d.eiReittia) t = t.replace(/Paluureittiä ei voitu laskea: [^.]*\./, `Paluureittiä ei laskettu: ${d.eiReittia}.`);
   if (d.eiReittia && d.tyyppi === 'meno') t = t.replace('Menoreittiä ei voitu laskea.', `Menoreittiä ei laskettu: ${d.eiReittia}.`);
