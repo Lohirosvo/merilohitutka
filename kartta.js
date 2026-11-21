@@ -2,6 +2,8 @@
  * Kevyt oma karttanäkymä (ei ulkoisia kirjastoja): OSM-taustakartta valinnaisena,
  * Copernicus-datasta lämpökäyrät, lohikerros (lämpövälin syvyys; v25 pehmeä reuna ja rajaviiva), satelliittilämpö, pintavirtanuolet
  * ja aallonkorkeus. Traficomin merikartan syvyyskäyrät (v8), Väyläviraston väylät ja IL:n tuulinuolet (v9).
+ * v62 (Hannu 21.11.2026 "1 3 6 tehdään"): turvalaiteviat (Fintraffic Digitraffic, aktiiviset viat) punaisena huutomerkkinä
+ *   merkin kulmassa; vika, jota ei saada yhdistettyä merkkiin (numero tai alle 50 m), omana merkkinään. Sama 5,5 km:n raja.
  * v61: Väyläviraston turvalaitteet (viitat, poijut, kummelit, linjamerkit, loistot) ja vesiliikennemerkit, kun näkyvä alue
  * on enintään noin 5 km leveä (Hannu 21.11.2026 "Kaikki ja 5 km ok"); yksinkertaistetut merkit, ei merikartan symboleja.
  * Syvyys ja väylät: ei navigointikäyttöön.
@@ -664,6 +666,7 @@
       this.matalikot = []; this.matalikkoVali = '10–20';
       this.silakkaFn = null;   // v50: (aikaIndeksi) => { lat, lon, luokka[i][j] (0 ei, 1 sopiva, 2 optimi), vaiheet, kaudella } tai null
       this.lohiTaalla = false; this.valittuOma = false;   // v24: lohikerros omalla kohdalla (profiili seuraa venettä)
+      this.viat = [];   // v62: turvalaiteviat [{ lat, lon, u, nimi, vika, tila, aika }] (avoindata.js jasennaViat)
       this.ais = [];   // AIS-kohteet (v23): [{ lat, lon, t, sog, cog, suunta, liikkuu, vari, nimi }]   // matalikot()-tuloksen lista ja selitteen väli (v21)
       this.laatat = new Map(); this.onNapautus = opts.onNapautus || (() => {});
       this.osoittimet = new Map(); this.raahattu = false;
@@ -799,6 +802,7 @@
       if (this.tasot.silakka && this.silakkaFn) this._silakka();   // v50: pohjan sopivuus silakan vaiheelle
       if (this.tasot.vaylat && this.vaylat) this._vaylat();
       if (this.tasot.turvalaitteet && this.turvalaitteetNakyvissa()) this._turvalaitteet();   // v61
+      if (this.tasot.turvalaitteet && this.viat.length && this.leveysKm() <= 5.5) this._viat();   // v62
       if (this.tasot.havainnot && this.havainnot.length) this._havainnot();   // virta- ja tuulinuolten alle
       if (d && this.tasot.virta && d.phy) this._virta();
       if (d && this.tasot.tuuli && d.tuuli) this._tuuli();
@@ -896,6 +900,58 @@
       let paras = null, pd = rajaPx;
       for (const m of this.vaylat.merkit) { const [x, y] = this.ruutu(m.p[0], m.p[1]), d = Math.hypot(x - x0, y - y0); if (d <= pd) { pd = d; paras = m; } }
       return paras;
+    }
+    /** v62: viat merkeille (numero, muuten alle 50 m) ja irralliset viat; välimuisti viat- ja väylätaulukon mukaan. */
+    viatMerkeille() {
+      const merkit = (this.vaylat && this.vaylat.merkit) || [];
+      if (this._vikaIx && this._vikaIx.viat === this.viat && this._vikaIx.merkit === merkit) return this._vikaIx;
+      const merkille = new Map(), irrallaan = [], numerolla = new Map();
+      for (const m of merkit) if (m.u !== undefined && m.u !== null && !numerolla.has(m.u)) numerolla.set(m.u, m);
+      for (const v of this.viat) {
+        let m = v.u !== null && v.u !== undefined ? numerolla.get(v.u) : null;
+        if (!m) {
+          let pd = 0.05;
+          for (const x of merkit) {
+            if (Math.abs(x.p[0] - v.lat) > 0.001) continue;
+            const d = 111.32 * Math.hypot(x.p[0] - v.lat, (x.p[1] - v.lon) * Math.cos(v.lat * Math.PI / 180));
+            if (d < pd) { pd = d; m = x; }
+          }
+        }
+        if (m && !merkille.has(m)) merkille.set(m, v); else irrallaan.push(v);
+      }
+      return (this._vikaIx = { viat: this.viat, merkit, merkille, irrallaan });
+    }
+    /** v62: lähin irrallinen vika näytöllä (≤ rajaPx), vain kun piirretty. */
+    lahinVika(lat, lon, rajaPx = 22) {
+      if (!this.tasot.turvalaitteet || !this.viat.length || this.leveysKm() > 5.5) return null;
+      const [x0, y0] = this.ruutu(lat, lon);
+      let paras = null, pd = rajaPx;
+      for (const v of this.viatMerkeille().irrallaan) { const [x, y] = this.ruutu(v.lat, v.lon), d = Math.hypot(x - x0, y - y0); if (d <= pd) { pd = d; paras = v; } }
+      return paras;
+    }
+    /** v62: vika merkin kulmaan (merkki piirretty) tai omana merkkinä: punainen ympyrä, valkoinen huutomerkki. */
+    _viat() {
+      const g = this.ctx, ylaR = this.ylaVara - 10, alaR = this.h - this.alaVara + 10, ix = this.viatMerkeille();
+      const merkitNakyy = this.turvalaitteetNakyvissa();
+      const pallo = (x, y, r) => {
+        g.fillStyle = '#e63946'; g.strokeStyle = '#ffffff'; g.lineWidth = 1.5;
+        g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill(); g.stroke();
+        g.fillStyle = '#ffffff'; g.font = `bold ${Math.round(r * 1.6)}px sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.fillText('!', x, y + 0.5);
+      };
+      g.save();
+      if (merkitNakyy) for (const [m] of ix.merkille) {
+        const [x, y] = this.ruutu(m.p[0], m.p[1]);
+        if (x < -20 || x > this.w + 20 || y < ylaR || y > alaR) continue;
+        pallo(x + 8, y - 15, 5.5); this._varaa(x + 2, y - 21, 12, 12);
+      }
+      const irralliset = merkitNakyy ? ix.irrallaan : this.viat;
+      for (const v of irralliset) {
+        const [x, y] = this.ruutu(v.lat, v.lon);
+        if (x < -20 || x > this.w + 20 || y < ylaR || y > alaR) continue;
+        pallo(x, y, 7); this._varaa(x - 8, y - 8, 16, 16);
+      }
+      g.restore();
     }
     /** v61: yksinkertaistetut turvalaitteet. Runko väriraidoin, kardinaalin huippumerkki (kaksi kolmiota), lateraali
      *  vasen = punainen lieriö, oikea = vihreä kartio, kummeli valkoinen kolmio, linjamerkki pystysuorakaide, loisto tähti,
@@ -1592,7 +1648,7 @@
       }
       if (this.tasot.vaylat && this.vaylat) rivit.push([['Väylä (Väylävirasto), mitoitussyväys m', '#ffd166']]);
       if (this.tasot.turvalaitteet && this.turvalaitteetNakyvissa()) rivit.push([['Viitat', '#c3cedd'], ['vasen', '#e9f1f7', MP], ['oikea', '#e9f1f7', MV],
-        ['kardinaali', '#e9f1f7', MY], ['kummeli', '#e9f1f7', MW], ['napauta: tiedot', '#c3cedd']]);
+        ['kardinaali', '#e9f1f7', MY], ['kummeli', '#e9f1f7', MW]].concat(this.viat.length ? [['vika', '#e9f1f7', '#e63946']] : [], [['napauta: tiedot', '#c3cedd']]));
       if (this.tasot.havainnot && this.havainnot.length) rivit.push([['Omat', 'rgb(' + havaintoVari('muu') + ')'],
         ['lämpöraja', '#e9f1f7', 'rgba(' + havaintoVari('muu') + ',0.8)'], ['lämmin', '#e9f1f7', 'rgb(' + havaintoVari('lammin') + ')'],
         ['kylmä', '#e9f1f7', 'rgb(' + havaintoVari('kylma') + ')'], ['saalis', '#e9f1f7', 'rgb(' + havaintoVari('saalis') + ')']]);

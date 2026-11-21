@@ -210,7 +210,38 @@
     throw new Error('Vedenkorkeusennustetta ei saatu. ' + virheet.join(' | '));
   }
 
-  const FMI = { haeLahinAsema, jasennaSimple, aikasarjaksi, viimeisimmat, haeHavainnot, haeEnnuste, isoAika, haeVesiHavainto, haeVesiEnnuste };
+  /** v62: aaltopoijut (aallonkorkeus WaveHs, vedenlämpö) alueen ympäriltä viimeiset tunnit. Kysely "fmi::observations::wave::*"
+   *  [L: IL:n kyselylista, timevaluepair]; simple-muoto ensin [A], tyhjä tai virhe → timevaluepair (Avoin.jasennaTvp).
+   *  Talvella poijut nostetaan jäiden takia → tyhjä tulos on normaali. */
+  async function haePoijut(rajat, nyt, tunnit = 6, laajennus = [1.5, 3]) {
+    const bbox = [rajat.lon_min - laajennus[1], rajat.lat_min - laajennus[0], rajat.lon_max + laajennus[1], rajat.lat_max + laajennus[0]].map(v => v.toFixed(2)).join(',');
+    const p = { bbox, starttime: isoAika(new Date(nyt.getTime() - tunnit * 3600e3)), endtime: isoAika(nyt) };
+    let rivit = [], simpleVirhe = '';
+    try { rivit = await hae(Object.assign({ storedquery_id: 'fmi::observations::wave::simple' }, p)); }
+    catch (e) { if (!/^FMI/.test(e.message)) throw e; simpleVirhe = e.message; }
+    if (rivit.some(r => isFinite(r.arvo)) || typeof root.Avoin === 'undefined' && typeof require === 'undefined') return rivit;
+    const A = typeof root.Avoin !== 'undefined' ? root.Avoin : require('./avoindata.js');
+    const url = WFS + '?' + new URLSearchParams(Object.assign({ service: 'WFS', version: '2.0.0', request: 'getFeature', storedquery_id: 'fmi::observations::wave::timevaluepair' }, p)).toString();
+    const v = await fetch(url);
+    const teksti = await v.text();
+    if (!v.ok && !/ExceptionReport/.test(teksti)) throw new Error('FMI HTTP ' + v.status);
+    if (/ExceptionReport/.test(teksti)) {   // molemmat kyselyt hylätty → virhe näkyviin (ei "ei poijuja")
+      const viesti = (tagi(teksti, 'ExceptionText') || 'tuntematon virhe').replace(/\s+/g, ' ').slice(0, 160);
+      throw new Error(simpleVirhe ? simpleVirhe + ' / tvp: ' + viesti : 'FMI: ' + viesti);
+    }
+    return A.jasennaTvp(teksti);
+  }
+
+  /** v62: mareografin vedenlämpö TW [L: vastauksen observedProperty, v35] viimeiset tunnit; nimetty parametri ensin, sitten oletukset. */
+  async function haeVedenLampo(fmisid, nyt, tunnit = 3) {
+    const p = { storedquery_id: MAREO, fmisid: String(fmisid), starttime: isoAika(new Date(nyt.getTime() - tunnit * 3600e3)), endtime: isoAika(nyt) };
+    const tw = rivit => rivit.filter(r => /^TW/i.test(r.param) && isFinite(r.arvo));
+    try { const r = tw(await hae(Object.assign({ parameters: 'TW' }, p))); if (r.length) return r; }
+    catch (e) { if (!/^FMI/.test(e.message)) throw e; }
+    return tw(await hae(p));
+  }
+
+  const FMI = { haePoijut, haeVedenLampo, haeLahinAsema, jasennaSimple, aikasarjaksi, viimeisimmat, haeHavainnot, haeEnnuste, isoAika, haeVesiHavainto, haeVesiEnnuste };
   if (typeof module !== 'undefined' && module.exports) module.exports = FMI;
   else root.FMI = FMI;
 })(typeof window !== 'undefined' ? window : this);

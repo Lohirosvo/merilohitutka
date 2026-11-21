@@ -21,6 +21,9 @@ pisteisiin (hae_tuuli.py, päivätiedostoihin). Näiden epäonnistuminen ei vaik
 v54 (17.11.2026): alueille, joilla "silakka": {"happi": true} (Eckerö), BGC-hakuun myös pohjan happi o2b (mmol/m3,
 päivätiedoston bgc.o2b); jos se ei onnistu, haetaan kd/zsd kuten ennen.
 
+v62 (21.11.2026, Hannu "1 3 6 tehdään"): IL:n varoitussyöte (CAP/Atom, avoin data) talteen data/varoitukset.xml joka
+ajossa. Sovellus hakee syötteen ensin suoraan ja käyttää tätä varalla (jos selain ei saa sitä suoraan tai verkko katkeaa).
+
 v60 (17.11.2026, Hannu: "säädettävissä olevilla arvoilla … Vedenlämpö ja etäisyys 2-12 km. Vajaapäivä käy jos 5 h min
 24-03 ei huomioida"): lomadata versio 2 = pintalämpö 11 pisteessä 2–12 km rannasta (1 km välein, länteen Kallanin
 eteläpuolen rantapisteestä) ja tuntituulet (Suomen ajan tunnit 0–23, m/s × 10). Sovellus valitsee rajat. Versio 1 haetaan
@@ -780,6 +783,24 @@ def paivita_lomadata(perus, nyt, osoite=None, hae_sst=loma_sst, hae_tuuli_fn=lom
     return {"vuodet": vuodet, "yritetty": yritetty, "virheet": virheet, "asema": asema}
 
 
+VAROITUS_URL = "https://alerts.fmi.fi/cap/feed/atom_fi-FI.xml"
+
+
+def paivita_varoitukset(perus, hae=None):
+    """v62: IL:n voimassa olevat varoitukset (0–5 vrk) sellaisenaan tiedostoon varoitukset.xml (sovellus jäsentää)."""
+    def lataa(url):
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "merilohitutka (github.com/Lohirosvo/merilohitutka)"}), timeout=30) as r:
+            return r.read()
+    data = (hae or lataa)(VAROITUS_URL)
+    if b"<feed" not in data[:3000]:
+        raise ValueError("vastaus ei ole Atom-syöte: " + data[:120].decode("utf-8", "replace"))
+    os.makedirs(perus or ".", exist_ok=True)
+    with open(os.path.join(perus, "varoitukset.xml"), "wb") as f:
+        f.write(data)
+    print(f"  varoitukset: {data.count(b'<entry')} kpl, {len(data) // 1024} kt")
+    return data.count(b"<entry")
+
+
 def lue_alueet(tiedosto=None):
     """Alueet tiedostosta alueet.js (JSON-taulukko kohdan 'ALUEET = ' jälkeen). Puuttuessa vain Luoto."""
     tiedosto = tiedosto or os.path.join(os.path.dirname(os.path.abspath(__file__)), "alueet.js")
@@ -923,6 +944,10 @@ def main(polku):
     nyt = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
     luotu = iso(datetime.now(timezone.utc))  # todellinen hakuhetki (näytetään käyttäjälle)
     onnistui = []
+    try:   # v62: IL:n varoitukset (pieni, joka ajossa)
+        paivita_varoitukset(perus)
+    except Exception as e:  # noqa: BLE001
+        print(f"Varoitukset: VIRHE {e}", file=sys.stderr)
     try:   # v57: ensin (pieni haku, kerran vuodessa); virhe ei estä alueita
         paivita_ikaluokat(perus, nyt)
     except Exception as e:  # noqa: BLE001

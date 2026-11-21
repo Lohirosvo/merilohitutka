@@ -44,6 +44,13 @@
   .yli { color:#ff8a7a; }
   .pieni { font-size:14px; color:var(--himmea); }
   .ikarivi { margin:-4px 2px 10px; }   /* v57 */
+  .varoitus { margin:-4px 0 10px; padding:7px 10px; border-left:4px solid #ffd166; background:rgba(255,209,102,0.10); border-radius:6px; font-size:15px; }   /* v62 */
+  .varoitus.oranssi { border-color:#ff9f43; background:rgba(255,159,67,0.13); }
+  .varoitus.punainen { border-color:#ff5c5c; background:rgba(255,92,92,0.15); }
+  .vlista > div { padding:4px 0 6px 10px; border-left:4px solid #ffd166; margin:4px 0; }
+  .vlista > div.oranssi { border-color:#ff9f43; } .vlista > div.punainen { border-color:#ff5c5c; } .vlista > div.vika { border-color:#e63946; }
+  .vlista > div.mitta { border-color:#4f7396; } .vlista > div.ots { border:0; padding:8px 0 0; font-size:13px; color:var(--himmea); text-transform:uppercase; letter-spacing:1px; }
+  .vlista b { font-weight:600; color:var(--teksti, #e9f1f7); }
   .ikaselite { display:flex; flex-wrap:wrap; gap:4px 14px; font-size:14px; margin:2px 0 4px; }
   .ikaselite i { display:inline-block; width:18px; height:0; border-top:2px solid; vertical-align:middle; margin-right:5px; }
   .ikakayra svg { width:100%; height:auto; display:block; touch-action:pan-y; }
@@ -186,6 +193,7 @@
       <div class="lahto" id="tilaLahto"></div>
       <ul id="tilaSyyt"></ul>
     </div>
+    <div class="varoitus" id="varoitusRivi" role="button" hidden></div>
     <div class="pieni ikarivi" id="ikaRivi" role="button" hidden></div>
 
     <div class="kortti" id="vPaluu">
@@ -285,6 +293,20 @@
       <div class="pieni" id="aikajanaTila"></div>
       <table id="ennusteTaulu"><thead><tr><th>Klo</th><th>Keski</th><th>Puuska</th><th>Suunta</th><th>Aalto</th><th>Lohi m</th></tr></thead><tbody></tbody></table>
       <div class="pieni" id="aikajanaSelite"></div>
+    </div>
+
+    <div class="kortti" id="varoitusKortti">
+      <h2>Varoitukset</h2>
+      <div id="varoitusLista" class="vlista">Haetaan…</div>
+      <div class="pieni" id="varoitusLahde"></div>
+      <div id="vikaLista" class="vlista"></div>
+      <div class="pieni" id="vikaLahde"></div>
+    </div>
+
+    <div class="kortti" id="mittausKortti">
+      <h2>Mitattu vs malli</h2>
+      <div id="mittausLista" class="vlista">Haetaan…</div>
+      <div class="pieni" id="mittausLahde"></div>
     </div>
 
     <div class="kortti">
@@ -406,6 +428,9 @@
       Matka on suora viiva × reittikerroin, ei todellinen reitti. Iso nopeusluku on maan suhteen (GPS); "vesi" on veden suhteen
       (GPS miinus Copernicuksen pintavirta). Nopeushälytys käyttää veden suhteen laskettua nopeutta, kun virtatieto on saatavilla.</p>
     <p class="pieni">Meridata: E.U. Copernicus Marine Service Information. Tuuli kartalla: Ilmatieteen laitos, avoin data (CC BY 4.0).</p>
+    <p class="pieni">Varoitukset: Ilmatieteen laitos, varoitukset (CAP), avoin data CC BY 4.0; virallinen tieto on ilmatieteenlaitos.fi.
+      Aaltopoijut ja mareografien vedenlämpö: Ilmatieteen laitos, avoin data (CC BY 4.0). Turvalaiteviat: Fintraffic / digitraffic.fi,
+      lisenssi CC BY 4.0. Sovellus ei korvaa virallisia varoituksia eikä merenkulkuvaroituksia.</p>
     <p class="pieni" id="vaylaLahde">Väylät: Lähde Väylävirasto, vesiväyläaineisto, CC BY 4.0. Aineisto ei sovellu navigointikäyttöön.</p>
     <p class="pieni" id="syvyysLahde">Syvyyskäyrät: Lähde Liikenne- ja viestintävirasto Traficom, Merikartan syvyystiedot.
       Ei navigointikäyttöön. Ei täytä virallisen merikartan vaatimuksia.
@@ -437,9 +462,10 @@
 <script src="alueet.js?v=33"></script>
 <script src="havainnot.js?v=15"></script>
 <script src="malli.js?v=25"></script>
-<script src="fmi.js?v=14"></script>
+<script src="avoindata.js?v=1"></script>
+<script src="fmi.js?v=15"></script>
 <script src="nopeus.js?v=20"></script>
-<script src="kartta.js?v=36"></script>
+<script src="kartta.js?v=37"></script>
 <script src="sillat.js?v=2"></script>
 <script src="silakka.js?v=8"></script>
 <script src="ikaluokat.js?v=4"></script>
@@ -778,6 +804,7 @@ function kaynnistaGps() {
 function piirra() {
   const nyt = new Date(), al = aktiivinenAlue();
   piirraIkaluokat();   // v57
+  piirraAvoin();   // v62
   const oma = dataAlue === al.tunnus, havainnot = oma ? havaintoData : [], ennuste = oma ? ennusteData : [];
   let t, otsikot, lahto;
   if (al.paluuikkuna) {
@@ -912,6 +939,7 @@ async function haeKaikki() {
   }
   await lataaMeri();
   lataaIkaluokat();   // v57: koko rannikon yhteinen tiedosto (huhtikuun lämpö), ei odoteta
+  lataaAvoin(al, nyt);   // v62: varoitukset, poijut, vedenlämpö, turvalaiteviat (30 min välein), ei odoteta
   tallennaLS('mlt_data', { aika: nyt, alue: al.tunnus, havainnot: havaintoData, ennuste: ennusteData });
   paivitaOfflineTila();   // v26
   $('paivitetty').textContent = ' päivitetty klo ' + klo(nyt) + (virheet.length ? ' (osa hauista epäonnistui)' : '');
@@ -927,6 +955,171 @@ function palautaVanhaData() {
   ennusteLahde = 'Tallennettu data klo ' + klo(new Date(d.aika));
 }
 
+// ---------- v62: avoin data (Hannu 21.11.2026 "1 3 6 tehdään") ----------
+// 1 IL:n merivaroitukset (CAP), 3 aaltopoijut ja mareografin vedenlämpö mallin tarkistukseen, 6 turvalaiteviat (Digitraffic).
+// Haku 30 min välein (ei joka 10 min päivityksellä), viimeisin tallessa välimuistissa merellä ilman verkkoa. Vain näyttö: ei muuta hälytyksiä.
+var AVOIN_VALI = 30 * 60000, VAROITUS_URL = 'https://alerts.fmi.fi/cap/feed/atom_fi-FI.xml', VAROITUS_VARA = 'data/varoitukset.xml';
+var VIKA_URL = 'https://meri.digitraffic.fi/api/aton/v1/faults', VIKA_AVAIN = 'data/_viat.json';
+var avoin = { varoitukset: null, varoitusAika: null, varoitusLahde: '', varoitusHaettu: 0, varoitusVirhe: '',
+  poijut: null, vesiT: null, malli: null, mittausAlue: '', mittausHaettu: 0, mittausVirhe: '', viat: null, vikaAika: null, vikaHaettu: 0, vikaVirhe: '' };
+async function haeAikaraja(url, opt = {}, ms = 20000) {
+  const c = typeof AbortController === 'function' ? new AbortController() : null, ajastin = c ? setTimeout(() => c.abort(), ms) : 0;
+  try {
+    const r = await fetch(url, Object.assign({ cache: 'no-cache' }, opt, c ? { signal: c.signal } : {}));
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r;
+  } catch (e) { throw new Error(e && e.name === 'AbortError' ? 'aikakatkaisu' : (e && e.message) || String(e)); }
+  finally { clearTimeout(ajastin); }
+}
+async function varastoTeksti(url) { try { const c = await caches.open(VARASTO); const r = await c.match(url); return r ? await r.text() : null; } catch (e) { return null; } }
+function lataaAvoin(al, nyt) {
+  if (!window.Avoin) return;
+  const tehtavat = [];
+  if (Date.now() - avoin.varoitusHaettu >= AVOIN_VALI) tehtavat.push(lataaVaroitukset());
+  if (Date.now() - avoin.vikaHaettu >= AVOIN_VALI) tehtavat.push(lataaViat());
+  if (Date.now() - avoin.mittausHaettu >= AVOIN_VALI || avoin.mittausAlue !== al.tunnus) tehtavat.push(lataaMittaukset(al, nyt));
+  if (meri && meri.paivat) tehtavat.push(haePaiva(tamaPaiva()).then(n => { avoin.malli = n; piirraAvoin(); }).catch(() => {}));   // mallivertailu: tämä päivä
+  return Promise.all(tehtavat).catch(e => console.warn('avoin data:', e));
+}
+async function lataaVaroitukset() {
+  avoin.varoitusHaettu = Date.now();
+  let xml = null, lahde = '', virheet = [];
+  for (const [url, nimi] of [[VAROITUS_URL, 'haettu suoraan'], [VAROITUS_VARA + '?t=' + Math.floor(Date.now() / 600000), 'sovelluksen kopio']]) {
+    try {
+      const t = await (await haeAikaraja(url)).text();
+      if (!/<(?:\w+:)?feed\b/.test(t.slice(0, 3000))) throw new Error('ei varoitussyöte');
+      xml = t; lahde = nimi;
+      await tallennaVarastoon(VAROITUS_VARA, new Response(t, { headers: { 'Content-Type': 'application/xml' } }));
+      break;
+    } catch (e) { virheet.push((nimi === 'haettu suoraan' ? 'IL' : 'kopio') + ': ' + e.message); }
+  }
+  if (!xml) { xml = await varastoTeksti(VAROITUS_VARA); lahde = xml ? 'tallennettu, ei verkkoa' : ''; }
+  avoin.varoitusVirhe = xml ? '' : virheet.join(', ');
+  if (xml) { avoin.varoitukset = Avoin.jasennaCap(xml); avoin.varoitusAika = Avoin.syoteAika(xml); avoin.varoitusLahde = lahde; }
+  piirraAvoin();
+}
+async function lataaViat() {
+  avoin.vikaHaettu = Date.now();
+  let geo = null;
+  try {
+    let r;
+    try { r = await haeAikaraja(VIKA_URL, { headers: { 'Digitraffic-User': (window.AIS && AIS.KAYTTAJA) || 'Merilohitutka/Lohirosvo' } }); }
+    catch (e) { if (/^HTTP|aikakatkaisu/.test(e.message)) throw e; r = await haeAikaraja(VIKA_URL); }   // selain esti otsakkeen (CORS): kuten AIS, ilman
+    const t = await r.text(); geo = JSON.parse(t);
+    await tallennaVarastoon(VIKA_AVAIN, new Response(JSON.stringify({ aika: new Date().toISOString(), geo }), { headers: { 'Content-Type': 'application/json' } }));
+    avoin.vikaAika = new Date(); avoin.vikaVirhe = '';
+  } catch (e) {
+    avoin.vikaVirhe = e.message;
+    const v = await haeVarastosta(VIKA_AVAIN);
+    if (v && v.geo) { geo = v.geo; avoin.vikaAika = new Date(v.aika); }
+  }
+  if (geo) avoin.viat = Avoin.jasennaViat(geo);
+  if (kartta && avoin.viat) { kartta.viat = avoin.viat; kartta.piirra(); }
+  piirraAvoin();
+}
+async function lataaMittaukset(al, nyt) {
+  if (avoin.mittausAlue !== al.tunnus) { avoin.poijut = null; avoin.vesiT = null; }   // toisen alueen mittaukset pois
+  avoin.mittausHaettu = Date.now(); avoin.mittausAlue = al.tunnus;
+  const virheet = [], keski = al.keski || [(al.rajat.lat_min + al.rajat.lat_max) / 2, (al.rajat.lon_min + al.rajat.lon_max) / 2];
+  const mareo = window.Sillat && Sillat.lahinMareografi ? Sillat.lahinMareografi(keski[0], keski[1]) : null;
+  const [rivit, tw] = await Promise.all([
+    FMI.haePoijut(al.rajat, nyt).catch(e => { virheet.push('poijut: ' + e.message); return null; }),
+    mareo ? FMI.haeVedenLampo(mareo.fmisid, nyt).catch(e => { virheet.push(mareo.nimi + ': ' + e.message); return null; }) : null]);
+  if (avoin.mittausAlue !== al.tunnus) return;   // alue vaihtui
+  if (rivit) avoin.poijut = Avoin.poijut(rivit, keski[0], keski[1], 3).filter(p => p.km <= 300);
+  if (tw) {
+    const v = tw.slice().sort((a, b) => a.aika - b.aika).pop();
+    avoin.vesiT = v ? { asema: mareo, aika: v.aika, arvo: v.arvo } : { asema: mareo, aika: null, arvo: NaN };
+  }
+  avoin.mittausVirhe = virheet.join(', ');
+  piirraAvoin();
+}
+/** Mallin arvo nyt lähimmästä meriruudusta ≤ 5 km: n = tämän päivän data (haePaiva), laji 'hs' (aalto), 'lampo' (pinta), 'sst' (satelliitti).
+ *  Tunti: lähin nykyhetkeä, enintään 90 min päässä (sst: päivän arvo). */
+function mallinMeriarvo(n, laji, lat, lon) {
+  const lahde = !n ? null : laji === 'hs' ? n.wav : laji === 'sst' ? n.sst : n.phy, kentta = laji === 'hs' ? 'hs' : 'lampo';
+  if (!lahde || !lahde[kentta]) return null;
+  if (laji === 'sst') return Avoin.lahinMeriarvo(lahde, kentta, 0, lat, lon, 5);
+  const ajat = lahde.ajat || n.ajat || [], nyt = Date.now();
+  if (!ajat.length) return null;
+  const t = KarttaMalli.lahinAika(ajat, nyt);
+  if (Math.abs(Date.parse(ajat[t]) - nyt) > 90 * 60000) return null;
+  return Avoin.lahinMeriarvo(lahde, kentta, t, lat, lon, 5);
+}
+function eroTeksti(mitattu, malli, yks, d = 1) {
+  if (!malli || !isFinite(mitattu)) return '';
+  const e = malli.arvo - mitattu;
+  return ` · malli ${luku(malli.arvo, d)} ${yks} (${e >= 0 ? '+' : '−'}${luku(Math.abs(e), d)})`;
+}
+function kloPv(d) { return d ? (d.toDateString() === new Date().toDateString() ? 'klo ' + klo(d) : pvm(d) + ' klo ' + klo(d)) : '–'; }
+var VARI_LUOKKA = { yellow: '', orange: 'oranssi', red: 'punainen' };
+function piirraAvoin() {
+  if (!window.Avoin || !$('varoitusRivi') || !avoin) return;
+  const al = aktiivinenAlue(), nyt = new Date(), A = Avoin;
+  // 1. varoitukset
+  const kaikki = avoin.varoitukset ? A.valitse(avoin.varoitukset, al.rajat, nyt, 48) : [];
+  const lahiaika = kaikki.filter(v => v.voimassa || Date.parse(v.alku) - nyt <= 24 * 3600e3);
+  const rivi = $('varoitusRivi');
+  rivi.hidden = !lahiaika.length;
+  if (lahiaika.length) {
+    const v = lahiaika[0];
+    rivi.className = 'varoitus ' + (VARI_LUOKKA[v.vari] || '');
+    rivi.textContent = '⚠ ' + A.varoitusTeksti(v) + (v.voimassa ? '' : ' (tulossa)') + (lahiaika.length > 1 ? ` · +${lahiaika.length - 1} muuta` : '') + ' ›';
+    rivi.onclick = () => { avaa('v-48h'); $('varoitusKortti').scrollIntoView(); };
+  }
+  const aika = v => (v.voimassa ? 'voimassa nyt' : 'alkaa ' + kloPv(new Date(v.alku))) + (v.loppu ? ', päättyy ' + kloPv(new Date(v.loppu)) : '');
+  $('varoitusLista').innerHTML = !avoin.varoitukset ? (avoin.varoitusVirhe ? 'Varoituksia ei saatu.' : 'Haetaan…')
+    : kaikki.length ? kaikki.map(v => `<div class="${VARI_LUOKKA[v.vari] || ''}"><b>${A.varoitusTeksti(v)}</b><div class="pieni">${aika(v)}${v.tod !== null ? ' · todennäköisyys ' + v.tod + ' %' : ''}</div>`
+      + (v.vaikutus ? `<div class="pieni">${v.vaikutus}</div>` : '') + `<div class="pieni">Alue: ${v.alueet.map(a => a.nimi).filter(Boolean).join(', ')}</div></div>`).join('')
+    : `<div class="pieni" style="border:0;padding-left:0">Ei merivaroituksia alueelle ${al.nimi} seuraavan 48 h aikana.</div>`;
+  const vanha = avoin.varoitusAika && nyt - avoin.varoitusAika > 6 * 3600e3;
+  $('varoitusLahde').textContent = avoin.varoitukset ? `Ilmatieteen laitos (CAP), tilanne ${kloPv(avoin.varoitusAika)}${vanha ? ' – VANHA, tarkista ilmatieteenlaitos.fi' : ''} · ${avoin.varoitusLahde}`
+    + (avoin.varoitusVirhe ? ` · ${avoin.varoitusVirhe}` : '') : avoin.varoitusVirhe ? 'Ilmatieteen laitos: ' + avoin.varoitusVirhe : '';
+  // 6. turvalaiteviat alueella
+  const viat = avoin.viat ? A.alueenViat(avoin.viat, al.rajat) : null;
+  $('vikaLista').innerHTML = !viat ? '' : `<div class="ots">Turvalaiteviat alueella${viat.length ? ' (' + viat.length + ')' : ''}</div>` + (viat.length ? viat.slice(0, 8).map(v => `<div class="vika"><b>${v.nimi || 'Turvalaite'}${v.u !== null ? ' (nro ' + v.u + ')' : ''}</b>`
+      + `<div class="pieni">${A.vikaTeksti(v).replace(/^⚠ /, '')}${v.vayla ? ' · ' + v.vayla : ''}</div></div>`).join('') + (viat.length > 8 ? `<div class="pieni" style="border:0">+${viat.length - 8} muuta (kartalla)</div>` : '')
+    : `<div class="pieni" style="border:0;padding-left:0">Ei ilmoitettuja vikoja.</div>`);
+  $('vikaLahde').textContent = avoin.viat ? `Turvalaiteviat: Fintraffic / digitraffic.fi, tilanne ${kloPv(avoin.vikaAika)}${avoin.vikaVirhe ? ' (tallennettu: ' + avoin.vikaVirhe + ')' : ''}. Kartalla punainen ! merkin kulmassa.`
+    : avoin.vikaVirhe ? 'Turvalaitevikoja ei saatu: ' + avoin.vikaVirhe : '';
+  // 3. mitattu vs malli
+  const n = avoin.malli, osat = [];
+  for (const p of avoin.poijut || []) {
+    const mHs = isFinite(p.hs) ? mallinMeriarvo(n, 'hs', p.lat, p.lon) : null;
+    const mT = isFinite(p.vesi) ? mallinMeriarvo(n, 'lampo', p.lat, p.lon) : null;
+    osat.push(`<div class="mitta"><b>${p.nimi || 'Aaltopoiju'}</b> <span class="pieni">${Math.round(p.km)} km ${p.suunta} · ${kloPv(p.aika)}</span>`
+      + (isFinite(p.hs) ? `<div class="pieni">aalto Hs ${luku(p.hs)} m${eroTeksti(p.hs, mHs, 'm')}</div>` : '')
+      + (isFinite(p.vesi) ? `<div class="pieni">vesi ${luku(p.vesi)} °C${eroTeksti(p.vesi, mT, '°C')}</div>` : '')
+      + (!mHs && !mT ? '<div class="pieni">malli: poiju alueen mallidatan ulkopuolella</div>' : '') + '</div>');
+  }
+  const w = avoin.vesiT;
+  if (w && w.asema && isFinite(w.arvo)) {
+    const mT = mallinMeriarvo(n, 'lampo', w.asema.lat, w.asema.lon), mS = mallinMeriarvo(n, 'sst', w.asema.lat, w.asema.lon);
+    osat.push(`<div class="mitta"><b>${w.asema.nimi} mareografi</b> <span class="pieni">${kloPv(w.aika)}</span><div class="pieni">vesi ${luku(w.arvo)} °C${eroTeksti(w.arvo, mT, '°C')}`
+      + (mT ? ` · lähin meriruutu ${luku(mT.km)} km` : n ? ' · malli: ei meriruutua 5 km sisällä' : ' · malli: tämän päivän meridataa ei ole')
+      + (mS ? ` · satelliitti-SST ${luku(mS.arvo)} °C` : '') + '</div></div>');
+  }
+  const haettu = avoin.mittausAlue === al.tunnus && avoin.mittausHaettu;
+  $('mittausLista').innerHTML = osat.length ? osat.join('') : `<div class="pieni" style="border:0;padding-left:0">${!haettu ? 'Haetaan…'
+    : 'Ei poiju- eikä vedenlämpömittauksia lähistöltä (poijut nostetaan talveksi jäiden takia).'}</div>`;
+  $('mittausLahde').textContent = 'Ilmatieteen laitos: aaltopoijut ja mareografi, avoin data. Malli = Copernicus, nykyhetken tunti, lähin meriruutu ≤ 5 km; '
+    + 'suluissa malli miinus mitattu. Mareografi on satamassa: vesi voi poiketa avomerestä.' + (avoin.mittausVirhe ? ' Epäonnistui: ' + avoin.mittausVirhe : '');
+}
+/** Puheeseen: vakavin voimassa oleva tai 12 h sisällä alkava merivaroitus, tai tyhjä. */
+function varoitusPuhe(nyt) {
+  if (!window.Avoin || !avoin.varoitukset) return '';
+  const v = Avoin.valitse(avoin.varoitukset, aktiivinenAlue().rajat, nyt, 12)[0];
+  if (!v) return '';
+  const tunti = d => d.getMinutes() ? klo(d) : String(d.getHours());
+  const paiva = d => d.toDateString() === nyt.toDateString() ? '' : d.toDateString() === new Date(nyt.getTime() + 86400e3).toDateString() ? 'huomenna '
+    : d.toLocaleDateString('fi-FI', { weekday: 'long' }) + 'na ';
+  const nimi = ((Avoin.VARI_FI[v.vari] ? Avoin.VARI_FI[v.vari] + ' ' : '') + v.tapahtuma.toLowerCase()).trim();
+  const loppu = v.loppu ? new Date(v.loppu) : null, alku = v.alku ? new Date(v.alku) : null;
+  const yo = d => !d.getHours() && !d.getMinutes(), ed = d => new Date(d.getTime() - 60000);   // klo 0.00 → "keskiyö" edellisen päivän mukaan
+  return `Ilmatieteen laitoksen varoitus: ${nimi}${v.tuuli !== null ? ', ' + String(v.tuuli).replace('.', ',') + ' metriä sekunnissa' : ''}, `
+    + (v.voimassa ? (!loppu ? 'voimassa nyt.' : yo(loppu) ? `voimassa ${paiva(ed(loppu))}keskiyöhön asti.` : `voimassa ${paiva(loppu)}kello ${tunti(loppu)} asti.`)
+      : `alkaa ${!alku ? 'pian' : yo(alku) ? paiva(ed(alku)) + 'keskiyöllä' : paiva(alku) + 'kello ' + tunti(alku)}.`);
+}
 
 // ---------- Meridata ja kartta ----------
 // meri = valitun alueen hakemisto (data/<polku>meri.json), nakyma = valitun päivän purettu data (p_VVVVKKPP.json)
@@ -1427,6 +1620,7 @@ function avaaKarttaNakyma() {
     kartta.tasot.tausta = true; kartta.tasot.syvyys = true;   // Hannu 10.11.: aina päällä, ei nappia
     kartta.syvyys = syvyys; kartta.vaylat = vaylat; laskeMatalikot();
     kartta.silakkaFn = silakkaRuudut;   // v50
+    if (avoin.viat) kartta.viat = avoin.viat;   // v62
     paivitaReititKartalle();   // v30
     kartta.lohiTaalla = lohiTaalla; $('lohiTaalla').classList.toggle('paalla', lohiTaalla);
     if (kartta.tasot.lohet === undefined) kartta.tasot.lohet = true;   // v58: lohien viikkoarvio oletuksena näkyvissä
@@ -1727,7 +1921,10 @@ function vesiKayra(v) {
 /** v61: napautus turvalaitteen tai vesiliikennemerkin kohdalla (22 px), kun merkit näkyvät kartalla. */
 function turvalaiteTeksti(lat, lon) {
   const m = kartta && kartta.lahinTurvalaite ? kartta.lahinTurvalaite(lat, lon) : null;
-  return m ? '⚓ ' + KarttaMalli.merkkiKuvaus(m) + ' (Väylävirasto, ei navigointiin)' : '';
+  const vika = m && kartta.viatMerkeille ? kartta.viatMerkeille().merkille.get(m) : null;   // v62
+  if (m) return '⚓ ' + KarttaMalli.merkkiKuvaus(m) + ' (Väylävirasto, ei navigointiin)' + (vika ? ' · ' + Avoin.vikaTeksti(vika) + ' (Fintraffic)' : '');
+  const v = kartta && kartta.lahinVika ? kartta.lahinVika(lat, lon) : null;
+  return v ? `⚠ ${v.nimi || 'Turvalaite'}${v.u !== null ? ' (nro ' + v.u + ')' : ''}: ${Avoin.vikaTeksti(v).replace(/^⚠ /, '')} (Fintraffic, ei navigointiin)` : '';
 }
 /** Napautus sillan kohdalla (26 px): merkitty ja todellinen alikulku, veneen mahtuminen nyt ja 12 h ennusteella. */
 function siltaTeksti(lat, lon) {
@@ -2557,6 +2754,8 @@ function merisaaTiedot(tyyppi, kohdePiste) {
 }
 function merisaaTekstiksi(d) {
   let t = Reitti.merisaaTeksti(d);
+  const vp = varoitusPuhe(new Date());   // v62: IL:n merivaroitus ensin (voimassa tai alkaa 12 h sisällä)
+  if (vp) t = vp + ' ' + t;
   if (d.havainto) t = t.replace(/(metriä sekunnissa\.)( |$)/, `$1 Havainto ${d.havainto.nimi} ${Math.round(d.havainto.ws)}${isFinite(d.havainto.wg) ? ', puuskissa ' + Math.round(d.havainto.wg) : ''}.$2`);
   if (d.eiReittia) t = t.replace(/Paluureittiä ei voitu laskea: [^.]*\./, `Paluureittiä ei laskettu: ${d.eiReittia}.`);
   if (d.eiReittia && d.tyyppi === 'meno') t = t.replace('Menoreittiä ei voitu laskea.', `Menoreittiä ei laskettu: ${d.eiReittia}.`);
