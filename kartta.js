@@ -2,6 +2,8 @@
  * Kevyt oma karttanäkymä (ei ulkoisia kirjastoja): OSM-taustakartta valinnaisena,
  * Copernicus-datasta lämpökäyrät, lohikerros (lämpövälin syvyys; v25 pehmeä reuna ja rajaviiva), satelliittilämpö, pintavirtanuolet
  * ja aallonkorkeus. Traficomin merikartan syvyyskäyrät (v8), Väyläviraston väylät ja IL:n tuulinuolet (v9).
+ * v61: Väyläviraston turvalaitteet (viitat, poijut, kummelit, linjamerkit, loistot) ja vesiliikennemerkit, kun näkyvä alue
+ * on enintään noin 5 km leveä (Hannu 21.11.2026 "Kaikki ja 5 km ok"); yksinkertaistetut merkit, ei merikartan symboleja.
  * Syvyys ja väylät: ei navigointikäyttöön.
  * Puhtaat laskentafunktiot (käyrät, projektio, lähin arvo) testattavissa Nodessa.
  */
@@ -220,7 +222,37 @@
       return Object.assign(puraViiva(koodi, olat, olon, k), {
         syvyys: Array.isArray(a) || a.s === undefined ? null : a.s, haraus: Array.isArray(a) || a.h === undefined ? null : a.h });
     };
-    return { luotu: j.luotu, lahde: j.lahde, linjat: (j.linjat || []).map(pura).filter(Boolean), alueet: (j.alueet || []).map(pura).filter(Boolean) };
+    return { luotu: j.luotu, lahde: j.lahde, linjat: (j.linjat || []).map(pura).filter(Boolean), alueet: (j.alueet || []).map(pura).filter(Boolean),
+      merkit: (j.merkit || []).filter(m => m && Array.isArray(m.p) && m.p.length === 2 && isFinite(m.p[0]) && isFinite(m.p[1])),
+      merkitLahde: j.merkitLahde || null, merkitVirhe: j.merkitVirhe || null };
+  }
+  // v61: turvalaitteet. Navigointilajikoodi 1–6 päätelty rajapinnan esimerkkiriveistä 21.11.2026 [K]: 1 vasen (punainen),
+  // 2 oikea (vihreä), 3 pohjois (musta/keltainen), 4 etelä (keltainen/musta), 5 länsi (keltainen/musta/keltainen),
+  // 6 itä (musta/keltainen/musta); 99 = ei navigointilajia (kiinteät). Muut koodit: väri symbolikirjaimesta, jos tunnettu.
+  const MERKKI_LAJI = { 1: 'vasen', 2: 'oikea', 3: 'pohjois', 4: 'etelä', 5: 'länsi', 6: 'itä' };
+  const MK = '#111', MY = '#ffd400', MP = '#e53935', MV = '#2e9d4f', MW = '#f4f4f4';
+  const MERKKI_SYMBOLI = { b: [MP], d: [MV], w: [MW], s: [MP, MW, MP], h: [MY, MK], j: [MY, MK, MY], f: [MK, MY], l: [MK, MY, MK] };
+  const MERKKI_VARIT = { 1: [MP], 2: [MV], 3: [MK, MY], 4: [MY, MK], 5: [MY, MK, MY], 6: [MK, MY, MK] };
+  /** Merkin piirtotyyli: { muoto: lateraali|kardinaali|kummeli|linja|loisto|vlm|muu, varit, huippu: N|S|E|W|null, valo }. */
+  function merkkiTyyli(m) {
+    if (m.k === 'vlm') return { muoto: 'vlm', varit: [MW, MP], huippu: null, valo: false };
+    const t = String(m.t || '').toLowerCase(), valo = m.v === 'K';
+    const varit = MERKKI_VARIT[m.l] || MERKKI_SYMBOLI[m.s] || null;
+    if (m.l >= 3 && m.l <= 6) return { muoto: 'kardinaali', varit, huippu: { 3: 'N', 4: 'S', 5: 'W', 6: 'E' }[m.l], valo };
+    if (m.l === 1 || m.l === 2) return { muoto: 'lateraali', varit, huippu: m.l === 1 ? 'vasen' : 'oikea', valo };
+    if (t.includes('kummeli')) return { muoto: 'kummeli', varit: [MW], huippu: null, valo };
+    if (t.includes('linjamerkki')) return { muoto: 'linja', varit: varit || [MP, MW, MP], huippu: null, valo };
+    if (t.includes('loisto') || t.includes('majakka')) return { muoto: 'loisto', varit: [MY], huippu: null, valo: true };
+    return { muoto: 'muu', varit: varit || ['#9aa7b4'], huippu: null, valo };
+  }
+  /** Napautusteksti: "Pohjoisviitta, kelluva · Ahmasaari (nro 10641) · sijainti". */
+  function merkkiKuvaus(m) {
+    if (m.k === 'vlm') return 'Vesiliikennemerkki: ' + (m.t || '–');
+    const t = String(m.t || 'turvalaite').toLowerCase(), laji = MERKKI_LAJI[m.l];
+    let nimi = laji ? (m.l <= 2 ? `${laji} ${t}` : `${laji}${t}`) : t;
+    nimi = nimi.charAt(0).toUpperCase() + nimi.slice(1);
+    const lisa = [m.a === 'KELLUVA' ? 'kelluva' : m.a === 'KIINTEÄ' ? 'kiinteä' : '', m.v === 'K' ? 'valaistu' : ''].filter(Boolean).join(', ');
+    return nimi + (lisa ? ', ' + lisa : '') + (m.n ? ' · ' + m.n : '') + (m.u ? ` (nro ${m.u})` : '') + (m.x ? ' · ' + m.x : '');
   }
   /** Lähin viiva listasta: { v, m } tai null. */
   function lahinViivoista(viivat, lat, lon, rajaM) {
@@ -619,7 +651,7 @@
       this.lohiReuna = isFinite(opts.lohiReuna) ? opts.lohiReuna : 0.4;
       this.jyrkka = opts.jyrkka || [0.3, 0.05];   // v26: [vähintään Hs m, jyrkkyys osuutena]   // v25: pehmeän reunan leveys (°C), 0 = terävä
       this.aaltoRajat = opts.aaltoRajat || [0.35, 0.5];   // merkitsevä aallonkorkeus (m)
-      this.tasot = { lampo: true, lohi: true, syvyys: true, tuuli: true, vaylat: true, havainnot: true, aaltoraja: true, jalki: true, matalikot: true, ais: false, sst: false, virta: true, aalto: false, tausta: true, silakka: false };   // v43: silakka = valomallin napautusteksti
+      this.tasot = { lampo: true, lohi: true, syvyys: true, tuuli: true, vaylat: true, havainnot: true, aaltoraja: true, jalki: true, matalikot: true, ais: false, sst: false, virta: true, aalto: false, tausta: true, silakka: false, turvalaitteet: true };   // v43: silakka = valomallin napautusteksti; v61 turvalaitteet
       this.syvyys = null;   // puraSyvyys()-tulos
       this.vaylat = null;   // puraVaylat()-tulos
       this.ylaVara = 0; this.alaVara = 0;   // ohjainten peittämä osa ylhäällä ja alhaalla (px)
@@ -766,6 +798,7 @@
       if (this.tasot.matalikot && this.matalikot.length) this._matalikot();
       if (this.tasot.silakka && this.silakkaFn) this._silakka();   // v50: pohjan sopivuus silakan vaiheelle
       if (this.tasot.vaylat && this.vaylat) this._vaylat();
+      if (this.tasot.turvalaitteet && this.turvalaitteetNakyvissa()) this._turvalaitteet();   // v61
       if (this.tasot.havainnot && this.havainnot.length) this._havainnot();   // virta- ja tuulinuolten alle
       if (d && this.tasot.virta && d.phy) this._virta();
       if (d && this.tasot.tuuli && d.tuuli) this._tuuli();
@@ -841,6 +874,7 @@
       const osat = ['© OpenStreetMap'];
       if (this.tasot.syvyys && this.syvyys) osat.push('syvyys Traficom');
       if (this.tasot.vaylat && this.vaylat) osat.push('väylät Väylävirasto');
+      else if (this.tasot.turvalaitteet && this.turvalaitteetNakyvissa()) osat.push('turvalaitteet Väylävirasto');
       if (this.tasot.ais && this.ais.length) osat.push('AIS Fintraffic');
       if (this.syvyys || this.vaylat) osat.push('ei navigointiin');
       const g = this.ctx, txt = osat.join(' · ');
@@ -848,6 +882,65 @@
       const y = this.h - this.alaVara - 5, lev = g.measureText(txt).width;
       g.fillStyle = 'rgba(5,15,28,0.6)'; g.fillRect(this.w - lev - 10, y - 11, lev + 8, 15);
       g.fillStyle = 'rgba(255,255,255,0.85)'; g.fillText(txt, this.w - 6, y);
+      g.restore();
+    }
+
+    /** v61: näkyvän alueen leveys km (kartan keskeltä). */
+    leveysKm() { return this.w * 360 / (TILE * Math.pow(2, this.z)) * 111.32 * Math.cos(this.lat * Math.PI / 180); }
+    /** v61: turvalaitteet piirretään, kun data on ja näkyvä alue on enintään 5,5 km leveä. */
+    turvalaitteetNakyvissa() { return !!(this.vaylat && this.vaylat.merkit && this.vaylat.merkit.length) && this.leveysKm() <= 5.5; }
+    /** v61: lähin turvalaite tai vesiliikennemerkki näytöllä (≤ rajaPx), vain kun piirretty. */
+    lahinTurvalaite(lat, lon, rajaPx = 22) {
+      if (!this.tasot.turvalaitteet || !this.turvalaitteetNakyvissa()) return null;
+      const [x0, y0] = this.ruutu(lat, lon);
+      let paras = null, pd = rajaPx;
+      for (const m of this.vaylat.merkit) { const [x, y] = this.ruutu(m.p[0], m.p[1]), d = Math.hypot(x - x0, y - y0); if (d <= pd) { pd = d; paras = m; } }
+      return paras;
+    }
+    /** v61: yksinkertaistetut turvalaitteet. Runko väriraidoin, kardinaalin huippumerkki (kaksi kolmiota), lateraali
+     *  vasen = punainen lieriö, oikea = vihreä kartio, kummeli valkoinen kolmio, linjamerkki pystysuorakaide, loisto tähti,
+     *  vesiliikennemerkki valkoinen neliö punareunuksella; valaistu = keltainen hehku. */
+    _turvalaitteet() {
+      const g = this.ctx, ylaR = this.ylaVara - 10, alaR = this.h - this.alaVara + 10;
+      g.save(); g.lineJoin = 'round';
+      // vaalea reunus: mustat osat erottuvat tummalta pohjalta (kuva 21.11.: huippumerkit hukkuivat)
+      const raidat = (x, y, w, h, varit) => { g.strokeStyle = 'rgba(233,241,247,0.9)'; g.lineWidth = 2; g.strokeRect(x, y, w, h);
+        const n = varit.length; varit.forEach((c, i) => { g.fillStyle = c; g.fillRect(x, y + i * h / n, w, h / n + 0.5); }); };
+      const kolmio = (x, y, ylos, k = 4) => { g.beginPath(); if (ylos) { g.moveTo(x, y - k); g.lineTo(x + k, y + k * 0.6); g.lineTo(x - k, y + k * 0.6); } else { g.moveTo(x, y + k); g.lineTo(x + k, y - k * 0.6); g.lineTo(x - k, y - k * 0.6); } g.closePath();
+        g.strokeStyle = 'rgba(233,241,247,0.9)'; g.lineWidth = 1.6; g.stroke(); g.fillStyle = '#111'; g.fill(); };
+      for (const m of this.vaylat.merkit) {
+        const [x, y] = this.ruutu(m.p[0], m.p[1]);
+        if (x < -20 || x > this.w + 20 || y < ylaR || y > alaR) continue;
+        const ty = merkkiTyyli(m);
+        if (ty.valo) { g.fillStyle = 'rgba(255,214,0,0.35)'; g.beginPath(); g.arc(x, y, 9, 0, Math.PI * 2); g.fill(); }
+        if (ty.muoto === 'kardinaali') {
+          raidat(x - 3.5, y - 6, 7, 12, ty.varit || [MK, MY]);
+          const yt = y - 12;   // huippumerkki: N ▲▲, S ▼▼, E ▲▼ (kannat vastakkain), W ▼▲ (kärjet vastakkain)
+          if (ty.huippu === 'N') { kolmio(x, yt - 5, true); kolmio(x, yt + 2, true); }
+          else if (ty.huippu === 'S') { kolmio(x, yt - 5, false); kolmio(x, yt + 2, false); }
+          else if (ty.huippu === 'E') { kolmio(x, yt - 5, true); kolmio(x, yt + 3, false); }
+          else { kolmio(x, yt - 4, false); kolmio(x, yt + 3, true); }
+        } else if (ty.muoto === 'lateraali') {
+          g.fillStyle = ty.varit[0]; g.strokeStyle = '#000'; g.lineWidth = 1;
+          g.beginPath();
+          if (ty.huippu === 'vasen') g.rect(x - 4, y - 7, 8, 13); else { g.moveTo(x, y - 9); g.lineTo(x + 5, y + 6); g.lineTo(x - 5, y + 6); g.closePath(); }
+          g.fill(); g.stroke();
+        } else if (ty.muoto === 'kummeli') {
+          g.fillStyle = MW; g.strokeStyle = '#000'; g.lineWidth = 1.2;
+          g.beginPath(); g.moveTo(x, y - 8); g.lineTo(x + 6, y + 5); g.lineTo(x - 6, y + 5); g.closePath(); g.fill(); g.stroke();
+        } else if (ty.muoto === 'linja') {
+          raidat(x - 3, y - 8, 6, 14, ty.varit);
+        } else if (ty.muoto === 'loisto') {
+          g.fillStyle = MY; g.strokeStyle = '#000'; g.lineWidth = 1;
+          g.beginPath(); for (let i = 0; i < 10; i++) { const r = i % 2 ? 3 : 7.5, k = -Math.PI / 2 + i * Math.PI / 5; g.lineTo(x + r * Math.cos(k), y + r * Math.sin(k)); }
+          g.closePath(); g.fill(); g.stroke();
+        } else if (ty.muoto === 'vlm') {
+          g.fillStyle = MW; g.strokeStyle = MP; g.lineWidth = 2; g.fillRect(x - 4, y - 4, 8, 8); g.strokeRect(x - 4, y - 4, 8, 8);
+        } else {
+          raidat(x - 3, y - 5, 6, 10, ty.varit);
+        }
+        this._varaa(x - 6, y - 20, 12, 27);
+      }
       g.restore();
     }
 
@@ -1498,6 +1591,8 @@
         rivit.push([['', '#e9f1f7'], ['<5', '#e9f1f7', '#e8f4ff'], ['5–8', '#e9f1f7', '#ffe066'], ['8–10', '#e9f1f7', '#ffa94d'], ['≥10 m/s', '#e9f1f7', '#ff5c5c']]);
       }
       if (this.tasot.vaylat && this.vaylat) rivit.push([['Väylä (Väylävirasto), mitoitussyväys m', '#ffd166']]);
+      if (this.tasot.turvalaitteet && this.turvalaitteetNakyvissa()) rivit.push([['Viitat', '#c3cedd'], ['vasen', '#e9f1f7', MP], ['oikea', '#e9f1f7', MV],
+        ['kardinaali', '#e9f1f7', MY], ['kummeli', '#e9f1f7', MW], ['napauta: tiedot', '#c3cedd']]);
       if (this.tasot.havainnot && this.havainnot.length) rivit.push([['Omat', 'rgb(' + havaintoVari('muu') + ')'],
         ['lämpöraja', '#e9f1f7', 'rgba(' + havaintoVari('muu') + ',0.8)'], ['lämmin', '#e9f1f7', 'rgb(' + havaintoVari('lammin') + ')'],
         ['kylmä', '#e9f1f7', 'rgb(' + havaintoVari('kylma') + ')'], ['saalis', '#e9f1f7', 'rgb(' + havaintoVari('saalis') + ')']]);
@@ -1551,7 +1646,7 @@
   }
 
   const KarttaMalli = { lonX, latY, xLon, yLat, kayra, tasot, arvovali, lahinIndeksi, lahinArvo, lahinAika, virta, akseliArvo,
-                        kerros, lohiLuokka, lohiMarginaali, lohiPehmeys, profiiliPisteessa, puraSyvyys, lahinKayra, puraVaylat, lahinVayla, tuuliVari,
+                        kerros, lohiLuokka, lohiMarginaali, lohiPehmeys, profiiliPisteessa, puraSyvyys, lahinKayra, puraVaylat, lahinVayla, tuuliVari, merkkiTyyli, merkkiKuvaus, MERKKI_LAJI,
                         havainnotPisteessa, havaintoTiedot, havaintoVari, etaisyysViivaan, jasennaSaaliit, aaltoLuokka, aallonPituus, aaltoJyrkkyys, onJyrkka,
                         jalkiOsat, jalkiAlfa, lahinJalki, ketjuta, matalikot, matalikkoPisteessa, renkaanSisalla, pohjaKayrista, kayratTasoittain, pohjaArvio };
   if (typeof module !== 'undefined' && module.exports) module.exports = KarttaMalli;

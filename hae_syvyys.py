@@ -249,6 +249,10 @@ def jasenna_geojson(data, kentat=None):
             osat = c
         elif t == "MultiPolygon":
             osat = [rengas for monikulmio in c for rengas in monikulmio]
+        elif t == "Point":            # v61: turvalaitteet ja vesiliikennemerkit
+            osat = [[c]]
+        elif t == "MultiPoint":
+            osat = [[q] for q in c]
         else:
             continue
         osat = [[(float(p[0]), float(p[1])) for p in o if len(p) >= 2] for o in osat]
@@ -271,6 +275,12 @@ def jasenna_gml(xml_teksti, kentat=None):
                     ominaisuudet[_paikallinen(c.tag)] = c.text.strip()
             for el in kohde.iter():
                 n = _paikallinen(el.tag)
+                if n == "Point":          # v61: pisteen gml:pos (vain Pointin lapsi, ei renkaiden pos-jonoja)
+                    for c in el:
+                        if _paikallinen(c.tag) == "pos" and c.text:
+                            v = [float(x) for x in c.text.split()]
+                            if len(v) >= 2:
+                                osat.append([(v[0], v[1])])
                 if n == "posList" and el.text:
                     v = [float(x) for x in el.text.split()]
                     osat.append(list(zip(v[0::2], v[1::2])))

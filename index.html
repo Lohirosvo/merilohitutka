@@ -247,6 +247,7 @@
           <button data-taso="silakka">Silakka</button>
           <button data-taso="tuuli">Tuuli</button>
           <button data-taso="vaylat">Väylät</button>
+          <button data-taso="turvalaitteet">Viitat</button>
           <button data-taso="havainnot">Havainnot</button>
           <button data-taso="jalki">Jälki</button>
           <button data-taso="matalikot">Matalikot</button>
@@ -438,7 +439,7 @@
 <script src="malli.js?v=25"></script>
 <script src="fmi.js?v=14"></script>
 <script src="nopeus.js?v=20"></script>
-<script src="kartta.js?v=35"></script>
+<script src="kartta.js?v=36"></script>
 <script src="sillat.js?v=2"></script>
 <script src="silakka.js?v=8"></script>
 <script src="ikaluokat.js?v=4"></script>
@@ -1010,7 +1011,9 @@ async function lataaSyvyys() {
   }
   if (jv && (!vaylat || vaylat.luotu !== jv.luotu)) {
     vaylat = KarttaMalli.puraVaylat(jv); muuttui = true;
-    $('vaylaLahde').textContent = `Väylät: Lähde Väylävirasto, vesiväyläaineisto (haettu ${pvm(new Date(jv.luotu))} ${new Date(jv.luotu).getFullYear()}), CC BY 4.0. Aineisto ei sovellu navigointikäyttöön.`;
+    $('vaylaLahde').textContent = `Väylät: Lähde Väylävirasto, vesiväyläaineisto (haettu ${pvm(new Date(jv.luotu))} ${new Date(jv.luotu).getFullYear()}), CC BY 4.0. Aineisto ei sovellu navigointikäyttöön.`
+      + (vaylat.merkit.length ? ` Turvalaitteet ja vesiliikennemerkit: ${vaylat.merkit.length} kpl (näkyvät, kun kartalla on alle 5,5 km leveä alue; kelluva merkki voi olla siirtynyt tai poistettu talveksi).`
+        : vaylat.merkitVirhe ? ` Turvalaitteita ei saatu: ${vaylat.merkitVirhe.slice(0, 120)}.` : ' Turvalaitteet tulevat seuraavassa väylähaussa.');   // v61
   }
   if (!muuttui) return;
   laskeMatalikot();
@@ -1274,8 +1277,8 @@ function naytaPiste(lat, lon) {
   if (lat === null) { if (kartta && kartta.valittuOma) asetaLohiTaalla(false); suljePiste(); return; }   // profiilin × veneen kohdalla
   if (kartta) kartta.valittuOma = false;
   el.hidden = false;
-  const st = siltaTeksti(lat, lon);   // v35: silta ensin
-  if (st) naytaVesi(5000);
+  const st = [siltaTeksti(lat, lon), turvalaiteTeksti(lat, lon)].filter(Boolean).join(' · ');   // v35: silta ensin; v61 turvalaite
+  if (st && siltaTeksti(lat, lon)) naytaVesi(5000);
   if (!nakyma) {   // ei meridataa (esim. Porin edusta): syvyys, väylä ja omat havainnot silti
     const osat = [st, jalkiTeksti(lat, lon), aisTeksti(lat, lon), matalikkoTeksti(lat, lon), syvyysTeksti(lat, lon), vaylaTeksti(lat, lon), havaintoTeksti(lat, lon)].filter(Boolean);
     el.textContent = (st ? osat.join(' · ') : 'Ei meridataa tässä' + (osat.length ? ' · ' + osat.join(' · ') : '.')) + '  ✕'; mitoitaKartta(); return;
@@ -1720,6 +1723,11 @@ function vesiKayra(v) {
     + `<text x="${x1}" y="${H - 2}" font-size="9" fill="#8fa6ba" text-anchor="end">+12 h</text></svg>`;
   const huom = [e.arvattu ? 'yksikkö oletettu' : '', e.muunnettu ? 'keskivedestä muunnettu' : ''].filter(Boolean).join(', ');
   return svg + (huom ? `<div>ennuste: ${huom}</div>` : '');
+}
+/** v61: napautus turvalaitteen tai vesiliikennemerkin kohdalla (22 px), kun merkit näkyvät kartalla. */
+function turvalaiteTeksti(lat, lon) {
+  const m = kartta && kartta.lahinTurvalaite ? kartta.lahinTurvalaite(lat, lon) : null;
+  return m ? '⚓ ' + KarttaMalli.merkkiKuvaus(m) + ' (Väylävirasto, ei navigointiin)' : '';
 }
 /** Napautus sillan kohdalla (26 px): merkitty ja todellinen alikulku, veneen mahtuminen nyt ja 12 h ennusteella. */
 function siltaTeksti(lat, lon) {
