@@ -1,4 +1,4 @@
-"""Merilohitutka – hae_vesialueet.py (v71, 22.11.2026)
+"""Merilohitutka – hae_vesialueet.py (v73, 22.11.2026)
 
 Valtion yleinen vesialue kartalle (Hannu 22.11.2026: "A" = hakuajo GitHubin salaisuudella, "tuleehan selkeä viiva missä raja menee").
 
@@ -24,6 +24,11 @@ v72 (22.11.2026, Hannun kuva 18.02): Luodon alueen pohjoisreuna Ohtakarin kohdal
 Kalajoen (071) yleistä vesialuetta ei löytynyt muodoilla 894-1-1/1-0/2-1/1-2. Lisätty muotoja (MUODOT) ja KOEPISTEET: palstat
 pisteen kohdalta (bbox ±50 m); löytynyt 894-tunnus haetaan mukaan, ja pisteiden tunnukset tallentuvat tiedoston kohtaan "haku"
 (luettavissa julkaistusta tiedostosta). Virheet eriteltyinä samaan kohtaan. VERSIO 2 → uusi haku heti (muuten 30 vrk).
+
+v73 (22.11.2026): v72:n ajon tulos [L julkaistu vesialueet.json, luotu 16.27 UTC]: Ohtakarin pohjoispuolella on Kokkolan
+272-894-1-1; Kalajoen edustan koepisteistä löytyi 208-894-1-1 (lisätty koepisteen kautta). Syy: Kalajoen kuntanumero on 208,
+ei 071 [L stat.fi kuntaluokitus]. Tiedostossa kunta näkyi muodossa "kunta 208" (napautus ja Omakala). Korjattu KUNNAT,
+lisätty Kruunupyy (288), VERSIO 3 → uusi haku heti.
 """
 import json
 import math
@@ -38,7 +43,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hae_syvyys as HS  # noqa: E402
 
-VERSIO = 2
+VERSIO = 3   # v73: uusi haku heti (Kalajoen kuntanimi; 2 = v72)
 OSOITE = "https://avoin-paikkatieto.maanmittauslaitos.fi/kiinteisto-avoin/simple-features/v3"
 KOKOELMA = "PalstanSijaintitiedot"
 YMPARISTO = "MML_API_KEY"
@@ -46,12 +51,15 @@ UUSINTA_VRK = 30
 REUNA_KM = 10            # alueen ympäriltä mukaan otettavat monikulmiot
 TAUKO_S = 0.3
 SIVUJA_MAX = 20
-OTSAKE = {"User-Agent": "merilohitutka/72 (github.com/Lohirosvo/merilohitutka; kerran kuussa)",
+OTSAKE = {"User-Agent": "merilohitutka/73 (github.com/Lohirosvo/merilohitutka; kerran kuussa)",
           "Accept": "application/geo+json, application/json"}
 LAHDE = "Maanmittauslaitos, Kiinteistötietojen kyselypalvelu (OGC API Features), avoimet tuotteet, CC BY 4.0"
 HUOM = "Yleinen vesialue = kiinteistötunnus kunta-894-…; kiinteistörekisterin raja, ei virallinen rajanäyttö, ei navigointiin."
 # Rannikkokunnat Kalajoelta Raumalle [A: kuntanumerot muistista; puuttuva kunta näkyy lokissa, ylimääräinen palauttaa tyhjän].
-KUNNAT = {"071": "Kalajoki", "272": "Kokkola", "440": "Luoto", "598": "Pietarsaari", "599": "Pedersöre", "893": "Uusikaarlepyy",
+# v73: kuntanumerot tarkistettu Tilastokeskuksen kuntaluokituksesta [L stat.fi]: Kalajoki on 208 (v71–v72 virheellisesti 071,
+# muistista), Kruunupyy 288 lisätty (rannikolla Kokkolan ja Luodon välissä [A]; puuttuva vesialue palauttaa tyhjän).
+KUNNAT = {"208": "Kalajoki", "272": "Kokkola", "288": "Kruunupyy", "440": "Luoto", "598": "Pietarsaari", "599": "Pedersöre",
+          "893": "Uusikaarlepyy",
           "946": "Vöyri", "499": "Mustasaari", "905": "Vaasa", "475": "Maalahti", "280": "Korsnäs", "545": "Närpiö",
           "231": "Kaskinen", "287": "Kristiinankaupunki", "484": "Merikarvia", "609": "Pori", "051": "Eurajoki", "684": "Rauma"}
 MUODOT = [(1, 1), (1, 0), (2, 1), (1, 2), (1, 3), (2, 0), (2, 2), (3, 1)]   # (ryhmä, yksikkö) kylänumeron 894 perässä (v72: +4)
