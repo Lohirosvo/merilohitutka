@@ -2,6 +2,8 @@
  * Kevyt oma karttanäkymä (ei ulkoisia kirjastoja): OSM-taustakartta valinnaisena,
  * Copernicus-datasta lämpökäyrät, lohikerros (lämpövälin syvyys; v25 pehmeä reuna ja rajaviiva), satelliittilämpö, pintavirtanuolet
  * ja aallonkorkeus. Traficomin merikartan syvyyskäyrät (v8), Väyläviraston väylät ja IL:n tuulinuolet (v9).
+ * v71 (Hannu 22.11.2026 "A … tuleehan selkeä viiva missä raja menee?"): valtion yleinen vesialue (MML:n kiinteistörekisteri,
+ *   hae_vesialueet.py → vesialueet.json): haalea violetti täyttö ja selkeä rajaviiva; siru "Yleinen vesi". Ei virallinen rajanäyttö.
  * v67 (Hannu 22.11.2026 "Saako kartalle sen lohen kalastusviivan missä raja kulkee … Tehdään, ei viivaa ahvenanmaalle"):
  *   lohen 4 mpk:n raja (laskettu Traficomin perusviivasta, hae_rajat.py → rajat.json) ja 63°30′N:n alamittaraja; siru "Lohirajat".
  *   Ei virallinen raja, ei navigointiin.
@@ -278,6 +280,30 @@
     if (sisalla === null) return null;
     const m = etaisyysViivoihin(R.raja4, lat, lon);
     return { sisalla, m, rajalla: m < RAJALLA_M };
+  }
+  // v71: valtion yleinen vesialue (vesialueet.json, hae_vesialueet.py): MML:n kiinteistörekisterin palstat, tunnus kunta-894-… [L].
+  // Monikulmiot (ulkorengas + reiät) napautukseen ja täyttöön; viivat = reunat ilman kuntien välisiä rajoja.
+  const VESIVARI = '#c59bff', VESITAYTTO = 'rgba(197,155,255,0.12)', VESIRAJALLA_M = 100;
+  /** vesialueet.json -> { luotu, lahde, huom, alue, tunnukset, monikulmiot: [{ t, renkaat: [puraViiva…] }], viivat: [puraViiva…] } tai null. */
+  function puraVesialueet(j) {
+    if (!j || !Array.isArray(j.monikulmiot) || !Array.isArray(j.viivat) || !j.origo) return null;
+    const [olat, olon] = j.origo, k = j.kerroin || 100000;
+    const pura = a => (Array.isArray(a) && a.length >= 4 ? puraViiva(a, olat, olon, k) : null);
+    const monikulmiot = j.monikulmiot.map(m => ({ t: m.t, renkaat: (m.r || []).map(pura).filter(Boolean) })).filter(m => m.renkaat.length);
+    return { luotu: j.luotu, lahde: j.lahde, huom: j.huom, alue: j.alue, tunnukset: j.tunnukset || {}, tilasto: j.tilasto || null,
+      monikulmiot, viivat: j.viivat.map(pura).filter(Boolean) };
+  }
+  /** Yleinen vesialue pisteessä: { sisalla, tunnus, m (etäisyys rajaviivaan), rajalla } tai null ilman dataa. */
+  function vesialueTila(V, lat, lon) {
+    if (!V) return null;
+    let tunnus = null;
+    for (const M of V.monikulmiot) {
+      const u = M.renkaat[0];
+      if (lat < u.la0 || lat > u.la1 || lon < u.lo0 || lon > u.lo1) continue;
+      if (renkaanSisalla(u.ll, lat, lon) && !M.renkaat.slice(1).some(r => renkaanSisalla(r.ll, lat, lon))) { tunnus = M.t; break; }
+    }
+    const m = V.viivat.length ? etaisyysViivoihin(V.viivat, lat, lon, 100000) : Infinity;
+    return { sisalla: !!tunnus, tunnus, m, rajalla: m < VESIRAJALLA_M };
   }
   /** 63°30′:n alamittaraja niille alueille, joilla lohirajat ja joiden rajojen läpi leveyspiiri kulkee: [{ lat, lon0, lon1 }]. */
   function alamittaViivat(alueet) {
@@ -720,7 +746,7 @@
       this.lohiReuna = isFinite(opts.lohiReuna) ? opts.lohiReuna : 0.4;
       this.jyrkka = opts.jyrkka || [0.3, 0.05];   // v26: [vähintään Hs m, jyrkkyys osuutena]   // v25: pehmeän reunan leveys (°C), 0 = terävä
       this.aaltoRajat = opts.aaltoRajat || [0.35, 0.5];   // merkitsevä aallonkorkeus (m)
-      this.tasot = { lampo: true, lohi: true, syvyys: true, tuuli: true, vaylat: true, havainnot: true, aaltoraja: true, jalki: true, matalikot: true, ais: false, sst: false, virta: true, aalto: false, tausta: true, silakka: false, turvalaitteet: true, salamat: true, poikaset: false, rajat: true };   // v43: silakka = valomallin napautusteksti; v61 turvalaitteet
+      this.tasot = { lampo: true, lohi: true, syvyys: true, tuuli: true, vaylat: true, havainnot: true, aaltoraja: true, jalki: true, matalikot: true, ais: false, sst: false, virta: true, aalto: false, tausta: true, silakka: false, turvalaitteet: true, salamat: true, poikaset: false, rajat: true, vesialue: true };   // v71 vesialue   // v43: silakka = valomallin napautusteksti; v61 turvalaitteet
       this.syvyys = null;   // puraSyvyys()-tulos
       this.vaylat = null;   // puraVaylat()-tulos
       this.ylaVara = 0; this.alaVara = 0;   // ohjainten peittämä osa ylhäällä ja alhaalla (px)
@@ -735,6 +761,7 @@
       this.lohiTaalla = false; this.valittuOma = false;   // v24: lohikerros omalla kohdalla (profiili seuraa venettä)
       this.poikaset = null;   // v64: { valittu, lajit: [{ laji, nimi, bbox3857, kuva, leveys, korkeus, selite }] }
       this.lohirajat = null; this.alamitta = [];   // v67: puraRajat()-tulos ja 63°30′:n janat (alamittaViivat)
+      this.vesialueet = null;   // v71: puraVesialueet()-tulos
       this.salamat = [];   // v63: [{ lat, lon, aika (ms), maa, virta }] (avoindata.js salamat)
       this.viat = [];   // v62: turvalaiteviat [{ lat, lon, u, nimi, vika, tila, aika }] (avoindata.js jasennaViat)
       this.ais = [];   // AIS-kohteet (v23): [{ lat, lon, t, sog, cog, suunta, liikkuu, vari, nimi }]   // matalikot()-tuloksen lista ja selitteen väli (v21)
@@ -872,6 +899,7 @@
       if (this.tasot.matalikot && this.matalikot.length) this._matalikot();
       if (this.tasot.silakka && this.silakkaFn) this._silakka();   // v50: pohjan sopivuus silakan vaiheelle
       if (this.tasot.vaylat && this.vaylat) this._vaylat();
+      if (this.tasot.vesialue && this.vesialueet) this._vesialueet();   // v71: lohirajojen alle
       if (this.tasot.rajat && (this.lohirajat || this.alamitta.length)) this._lohirajat();   // v67
       if (this.tasot.turvalaitteet && this.turvalaitteetNakyvissa()) this._turvalaitteet();   // v61
       if (this.tasot.turvalaitteet && this.viat.length && this.leveysKm() <= 5.5) this._viat();   // v62
@@ -953,6 +981,7 @@
       if (this.tasot.vaylat && this.vaylat) osat.push('väylät Väylävirasto');
       else if (this.tasot.turvalaitteet && this.turvalaitteetNakyvissa()) osat.push('turvalaitteet Väylävirasto');
       if (this.tasot.rajat && this.lohirajat) osat.push('4 mpk laskettu (Traficom)');   // v67
+      if (this.tasot.vesialue && this.vesialueet && this.vesialueet.monikulmiot.length) osat.push('yleinen vesialue MML');   // v71
       if (this.tasot.ais && this.ais.length) osat.push('AIS Fintraffic');
       if (this.syvyys || this.vaylat) osat.push('ei navigointiin');
       const g = this.ctx, txt = osat.join(' · ');
@@ -1051,6 +1080,41 @@
       }
       g.restore();
     }
+    /** v71: yleinen vesialue haalealla täytöllä ja selkeällä rajaviivalla (tumma reunus alle). */
+    _vesialueet() {
+      const g = this.ctx, V = this.vesialueet, yla = this.ylaVara + 4, ala = this.h - this.alaVara - 4;
+      const [nla0, nlo0] = this.paikka(0, this.h), [nla1, nlo1] = this.paikka(this.w, 0);
+      const nakyy = v => !(v.la1 < nla0 || v.la0 > nla1 || v.lo1 < nlo0 || v.lo0 > nlo1);
+      const lisaa = (p, v, sulje) => { const ll = v.ll; for (let i = 0; i < ll.length; i += 2) { const [x, y] = this.ruutu(ll[i], ll[i + 1]); if (i) p.lineTo(x, y); else p.moveTo(x, y); } if (sulje) p.closePath(); };
+      g.save(); g.lineJoin = 'round'; g.lineCap = 'round';
+      const tayte = new Path2D();
+      let tayttoa = false;
+      for (const M of V.monikulmiot) { if (!nakyy(M.renkaat[0])) continue; for (const r of M.renkaat) lisaa(tayte, r, true); tayttoa = true; }
+      if (tayttoa) { g.fillStyle = VESITAYTTO; g.fill(tayte, 'evenodd'); }
+      const ehd = [];
+      for (const v of V.viivat) {
+        if (!nakyy(v)) continue;
+        const p = new Path2D(); lisaa(p, v, false);
+        g.setLineDash([]); g.lineWidth = 4.6; g.strokeStyle = 'rgba(0,0,0,0.6)'; g.stroke(p);
+        g.lineWidth = 2.2; g.strokeStyle = VESIVARI; g.stroke(p);
+        let edel = null;   // nimen paikat myös pitkien suorien janojen varrelta (merellä kärkipisteitä on harvassa)
+        for (let i = 0; i < v.ll.length; i += 2) {
+          const q = this.ruutu(v.ll[i], v.ll[i + 1]), osia = edel ? Math.min(40, Math.floor(Math.hypot(q[0] - edel[0], q[1] - edel[1]) / 70)) : 0;
+          for (let k = 0; k <= osia; k++) {
+            const f = osia ? k / osia : 1, x = edel ? edel[0] + (q[0] - edel[0]) * f : q[0], y = edel ? edel[1] + (q[1] - edel[1]) * f : q[1];
+            if (x > 30 && x < this.w - 130 && y > yla + 14 && y < ala - 10) ehd.push([x + 6, y + 14]);
+          }
+          edel = q;
+        }
+      }
+      if (ehd.length) {
+        ehd.sort((a, b) => Math.hypot(a[0] - this.w / 2, a[1] - this.h / 2) - Math.hypot(b[0] - this.w / 2, b[1] - this.h / 2));
+        this._nimi('yleinen vesialue', ehd.filter((_, k) => k % 5 === 0).slice(0, 12), VESIVARI, 2);
+      }
+      g.restore();
+    }
+    /** v71: yleinen vesialue pisteessä (vesialueTila) tai null. */
+    vesialuePisteessa(lat, lon) { return this.vesialueet ? vesialueTila(this.vesialueet, lat, lon) : null; }
     /** v67: 4 mpk:n tilanne pisteessä (rajaTila) tai null. */
     rajaPisteessa(lat, lon) { return this.lohirajat ? rajaTila(this.lohirajat, lat, lon) : null; }
     /** v64: poikastuotantoalue pisteessä: { laji, nimi, luokka } tai null (läpinäkyvä tai alueen ulkopuolella). */
@@ -1817,6 +1881,8 @@
       if (this.tasot.rajat && (this.lohirajat || this.alamitta.some(a => { const y = this.ruutu(a.lat, a.lon0)[1]; return y > 0 && y < this.h; })))
         rivit.push([['Lohiraja (laskettu)', RAJAVARI]].concat(this.lohirajat ? [['4 mpk', '#e9f1f7', RAJAVARI], ['perusviiva', '#e9f1f7', 'rgba(212,255,58,0.5)']] : [],
           this.alamitta.length ? [['63°30′ alamitta', '#e9f1f7', RAJAVARI]] : []));   // v67
+      if (this.tasot.vesialue && this.vesialueet && this.vesialueet.monikulmiot.length)
+        rivit.push([['Yleinen vesialue (MML)', VESIVARI], ['raja', '#e9f1f7', VESIVARI], ['alue', '#e9f1f7', 'rgba(197,155,255,0.45)']]);   // v71
       const PL = this.tasot.poikaset ? this.poikasLaji() : null;   // v64
       if (PL) {
         rivit.push([[PL.nimi + ' (Luke VELMU, malli)', '#9fd0ff']]);
@@ -1882,7 +1948,8 @@
                         kerros, lohiLuokka, lohiMarginaali, lohiPehmeys, profiiliPisteessa, puraSyvyys, lahinKayra, puraVaylat, lahinVayla, tuuliVari, merkkiTyyli, merkkiKuvaus, MERKKI_LAJI,
                         havainnotPisteessa, havaintoTiedot, havaintoVari, etaisyysViivaan, jasennaSaaliit, aaltoLuokka, aallonPituus, aaltoJyrkkyys, onJyrkka,
                         jalkiOsat, jalkiAlfa, lahinJalki, ketjuta, matalikot, matalikkoPisteessa, renkaanSisalla, pohjaKayrista, kayratTasoittain, pohjaArvio,
-                        ALAMITTA, puraRajat, rajaRuutu, etaisyysViivoihin, rajaTila, alamittaViivat, alamitta, lohisaanto, LOHISAANNOT_VUOSI };
+                        ALAMITTA, puraRajat, rajaRuutu, etaisyysViivoihin, rajaTila, alamittaViivat, alamitta, lohisaanto, LOHISAANNOT_VUOSI,
+                        VESIVARI, puraVesialueet, vesialueTila };
   if (typeof module !== 'undefined' && module.exports) module.exports = KarttaMalli;
   else { root.KarttaMalli = KarttaMalli; root.Kartta = Kartta; }
 })(typeof window !== 'undefined' ? window : this);

@@ -255,6 +255,7 @@
           <span class="lohivali" id="lohiRivi"><input id="lohiMin" inputmode="decimal">–<input id="lohiMax" inputmode="decimal">°C</span>
           <button data-taso="lohet">Lohet</button>
           <button data-taso="rajat">Lohirajat</button>
+          <button data-taso="vesialue">Yleinen vesi</button>
           <button data-taso="silakka">Silakka</button>
           <button data-taso="poikaset">Poikasalueet</button>
           <span class="lohivali" id="poikasRivi" style="display:none"><select id="poikasLaji" aria-label="Poikastuotantoalueen laji"></select></span>
@@ -451,6 +452,12 @@
           <button id="vaKopioi" hidden>Kopioi tulos</button>
         </div>
         <div class="pieni" id="vaTila"></div>
+        <div id="vaSalaisuus" hidden style="margin-top:10px">
+          <p class="pieni">Hakuajo (GitHub) tarvitsee saman avaimen salaisuutena: 1) Kopioi avain, 2) avaa
+            <a href="https://github.com/Lohirosvo/merilohitutka/settings/secrets/actions/new" target="_blank" rel="noopener" style="color:var(--syaani)">GitHubin uusi salaisuus</a>,
+            3) Name: <code>MML_API_KEY</code>, Secret: liitä, 4) Add secret. Älä liitä avainta keskusteluun.</p>
+          <div class="napit"><button id="vaKopioiAvain">Kopioi avain</button></div>
+        </div>
         <textarea id="vaTulos" rows="8" readonly hidden style="width:100%;box-sizing:border-box;font-size:12px;background:#0d1b2b;color:var(--teksti);border:1px solid var(--reuna);border-radius:8px;margin-top:6px"></textarea>
       </details>
     </div>
@@ -468,6 +475,7 @@
       lisenssi CC BY 4.0. Salamat: Ilmatieteen laitos, salamanpaikannus, avoin data (CC BY 4.0). Jokilaskuri: Länsstyrelsen Norrbotten, fiskräkning.
       Sovellus ei korvaa virallisia varoituksia eikä merenkulkuvaroituksia.</p>
     <p class="pieni" id="rajaLahde">Lohirajat: 4 mpk:n raja laskettu Traficomin perusviivasta (Aluevesien rajat, CC BY 4.0), ei virallinen raja; alamitta 63°30′N (pohjoispuolella 50 cm, eteläpuolella 60 cm). Ahvenanmaalla omat säännöt, ei viivaa.</p>
+    <p class="pieni" id="vesiLahde">Yleinen vesialue: Maanmittauslaitos, Kiinteistötietojen kyselypalvelu (avoimet tuotteet), CC BY 4.0. Kiinteistörekisterin raja, ei virallinen rajanäyttö. Ahvenanmaalla ei.</p>
     <p class="pieni" id="poikasLahde">Poikastuotantoalueet: Luke VELMU (CC BY 4.0).</p>
     <p class="pieni" id="vaylaLahde">Väylät: Lähde Väylävirasto, vesiväyläaineisto, CC BY 4.0. Aineisto ei sovellu navigointikäyttöön.</p>
     <p class="pieni" id="syvyysLahde">Syvyyskäyrät: Lähde Liikenne- ja viestintävirasto Traficom, Merikartan syvyystiedot.
@@ -503,7 +511,7 @@
 <script src="avoindata.js?v=2"></script>
 <script src="fmi.js?v=16"></script>
 <script src="nopeus.js?v=20"></script>
-<script src="kartta.js?v=40"></script>
+<script src="kartta.js?v=41"></script>
 <script src="sillat.js?v=2"></script>
 <script src="silakka.js?v=8"></script>
 <script src="ikaluokat.js?v=5"></script>
@@ -1260,13 +1268,15 @@ async function lataaKiintea(nimi, versio, al) {
 }
 async function lataaSyvyys() {
   const al = valittuAlue;
-  const [js, jv, jl, jr] = await Promise.all([lataaKiintea('syvyys.json', meri && meri.syvyys && meri.syvyys.luotu, al),
+  const [js, jv, jl, jr, jva] = await Promise.all([lataaKiintea('syvyys.json', meri && meri.syvyys && meri.syvyys.luotu, al),
                                       lataaKiintea('vaylat.json', meri && meri.vaylat && meri.vaylat.luotu, al),
                                       lataaKiintea('lisaantyminen.json', meri && meri.lisaantyminen && meri.lisaantyminen.luotu, al),   // v64
-                                      al.lohirajat && meri && meri.rajat && meri.rajat.luotu ? lataaKiintea('rajat.json', meri.rajat.luotu, al) : null]);   // v67
+                                      al.lohirajat && meri && meri.rajat && meri.rajat.luotu ? lataaKiintea('rajat.json', meri.rajat.luotu, al) : null,   // v67
+                                      al.lohirajat && meri && meri.vesialueet && meri.vesialueet.luotu ? lataaKiintea('vesialueet.json', meri.vesialueet.luotu, al) : null]);   // v71
   if (al !== valittuAlue) return;
   lataaPoikaset(jl, al);   // v64: kuvat taustalla
   asetaLohirajat(jr, al);   // v67
+  asetaVesialueet(jva, al);   // v71
   paivitaOfflineTila();   // v26
   let muuttui = false;
   if (js && (!syvyys || syvyys.luotu !== js.luotu)) {
@@ -1300,6 +1310,33 @@ function asetaLohirajat(jr, al) {
     + `Säännöt ${KarttaMalli.LOHISAANNOT_VUOSI} (SVK): 4 mpk:n sisäpuolella 1.5.–31.8. 2 lohta/vrk, muulloin ja ulkopuolella 1 rasvaeväleikattu/vrk. `
     + 'Ahvenanmaalla omat säännöt, ei viivaa. Virallinen tieto: kalastusrajoitus.fi.';
 }
+// v71: valtion yleinen vesialue (vesialueet.json, MML:n kiinteistörekisteri, tunnus kunta-894-…); vain alueille, joilla lohirajat.
+var vesialueet = null;
+function asetaVesialueet(j, al) {
+  const V = al.lohirajat && j ? KarttaMalli.puraVesialueet(j) : null;
+  const sama = (a, b) => !!a && !!b && ['lat_min', 'lat_max', 'lon_min', 'lon_max'].every(k => Math.abs(a[k] - b[k]) < 1e-9);
+  const ennen = vesialueet && vesialueet.luotu;
+  vesialueet = V && V.alue && !sama(V.alue, al.rajat) ? null : V;
+  if (kartta) { kartta.vesialueet = vesialueet; kartta.piirra(); }
+  if ((vesialueet && vesialueet.luotu) !== ennen && meri) piirraMeriTila();   // ⓘ-rivi ajan tasalle
+  const L = $('vesiLahde');
+  if (L) L.textContent = 'Yleinen vesialue: Maanmittauslaitos, Kiinteistötietojen kyselypalvelu (avoimet tuotteet), CC BY 4.0'
+    + (vesialueet ? `, haettu ${pvm(new Date(vesialueet.luotu))} ${new Date(vesialueet.luotu).getFullYear()}`
+      + (Object.keys(vesialueet.tunnukset).length ? ` (${Object.keys(vesialueet.tunnukset).join(', ')})` : ', alueella ei yleistä vesialuetta') : '')
+    + '. Kiinteistötunnus kunta-894-… = valtion yleinen vesialue; siellä kalastonhoitomaksulla viehekalastus ilman vapamäärän rajaa (eräluvat.fi). '
+    + 'Kiinteistörekisterin raja, ei virallinen rajanäyttö eikä navigointiin; kuntien väliset rajat yleisellä vesialueella eivät piirry. Ahvenanmaalla ei.';
+}
+/** v71: yleinen vesialue napautuskohdassa (kun taso "Yleinen vesi" on päällä). */
+function vesialueTeksti(lat, lon) {
+  if (!kartta || !kartta.tasot.vesialue || !valittuAlue.lohirajat) return '';
+  const T = kartta.vesialuePisteessa(lat, lon), mt = meri && meri.vesialueet;
+  if (!T) return mt && mt.tila === 'ei avainta' ? '🌊 Yleinen vesialue: hakuajolta puuttuu MML-avain (GitHubin salaisuus MML_API_KEY)'
+    : mt && mt.tila === 'virhe' ? '🌊 Yleistä vesialuetta ei saatu haettua (ⓘ)' : '';
+  if (T.rajalla) return `🌊 Yleisen vesialueen rajalla (alle ${etaisyys(VESIRAJA_M)}; kiinteistörekisterin raja)`;
+  if (T.sisalla) return `🌊 Yleinen vesialue ${T.tunnus}: kalastonhoitomaksulla, vapamäärää ei rajoiteta` + (isFinite(T.m) ? `, rajalle ${etaisyys(T.m)}` : '');
+  return '🌊 Ei yleistä vesialuetta (kylän tai osakaskunnan vesi)' + (isFinite(T.m) ? `, yleiselle vesialueelle ${etaisyys(T.m)}` : ', alueella ei yleistä vesialuetta');
+}
+const VESIRAJA_M = 100;
 /** v67: lohen rajat napautuskohdassa (kun Lohirajat-taso on päällä): 4 mpk:n puoli, etäisyys rajaan, säännöt ja alamitta. */
 function rajaTeksti(lat, lon) {
   if (!kartta || !kartta.tasot.rajat || !valittuAlue.lohirajat) return '';
@@ -1436,6 +1473,10 @@ function piirraMeriTila() {
     osat.push('Lohirajat: 4 mpk laskettu Traficomin perusviivasta' + (lohirajat ? ` (haettu ${pvm(new Date(lohirajat.luotu))}; raja ${ti ? luku(ti.raja_km, 0) + ' km' : '?'}, perusviiva ${ti ? luku(ti.perus_km, 0) + ' km' : '?'}`
       + `${ti ? ', erottaa maan ja meren ' + ti.janoja_erottaa + '/' + ti.janoja_arvioitu + ' janalla' : ''})` : rt ? ` – ${rt.tila}${rt.viesti ? ': ' + rt.viesti : ''}` : ' – ei vielä haettu')
       + ', ei virallinen raja; alamitta 63°30′N');
+    const vt = meri.vesialueet;   // v71
+    osat.push('Yleinen vesialue (MML): ' + (vesialueet ? `haettu ${pvm(new Date(vesialueet.luotu))}, ${Object.keys(vesialueet.tunnukset).length} kiinteistöä`
+      + (vt && vt.tila === 'vanha' ? ` (uusinta epäonnistui: ${vt.viesti || '?'})` : '')
+      : vt ? (vt.tila === 'ei avainta' ? 'avain puuttuu (GitHubin salaisuus MML_API_KEY)' : `${vt.tila}${vt.viesti ? ': ' + vt.viesti : ''}`) : 'ei vielä haettu'));
   }
   if (typeof aisTila === 'function' && aisTila()) osat.push(aisTila());
   if (typeof vesiTilaTeksti === 'function' && vesiTilaTeksti()) osat.push(vesiTilaTeksti());   // v35
@@ -1618,7 +1659,7 @@ function naytaPiste(lat, lon) {
   if (lat === null) { if (kartta && kartta.valittuOma) asetaLohiTaalla(false); suljePiste(); return; }   // profiilin × veneen kohdalla
   if (kartta) kartta.valittuOma = false;
   el.hidden = false;
-  const st = [siltaTeksti(lat, lon), turvalaiteTeksti(lat, lon), rajaTeksti(lat, lon), poikasTeksti(lat, lon)].filter(Boolean).join(' · ');   // v35: silta ensin; v61 turvalaite; v67 lohiraja; v64 poikasalue
+  const st = [siltaTeksti(lat, lon), turvalaiteTeksti(lat, lon), rajaTeksti(lat, lon), vesialueTeksti(lat, lon), poikasTeksti(lat, lon)].filter(Boolean).join(' · ');   // v71 vesialue   // v35: silta ensin; v61 turvalaite; v67 lohiraja; v64 poikasalue
   if (st && siltaTeksti(lat, lon)) naytaVesi(5000);
   if (!nakyma) {   // ei meridataa (esim. Porin edusta): syvyys, väylä ja omat havainnot silti
     const osat = [st, jalkiTeksti(lat, lon), aisTeksti(lat, lon), matalikkoTeksti(lat, lon), syvyysTeksti(lat, lon), vaylaTeksti(lat, lon), havaintoTeksti(lat, lon)].filter(Boolean);
@@ -1773,6 +1814,7 @@ function avaaKarttaNakyma() {
     if (avoin.salamat) kartta.salamat = avoin.salamat;   // v63
     if (poikaset) kartta.poikaset = poikaset;   // v64
     kartta.lohirajat = lohirajat; kartta.alamitta = KarttaMalli.alamittaViivat(window.ALUEET);   // v67
+    kartta.vesialueet = vesialueet;   // v71
     $('poikasLaji').addEventListener('change', () => { if (!poikaset) return; poikaset.valittu = $('poikasLaji').value; tallennaLS('mlt_poikaslaji', poikaset.valittu);
       kartta.naytaSelite(3000); if (kartta.valittu && !kartta.valittuOma) naytaPiste(kartta.valittu[0], kartta.valittu[1]); });
     paivitaReititKartalle();   // v30
@@ -2806,7 +2848,17 @@ function vaNaytaAvain() {
   $('vaAvainTila').textContent = a.avain ? `Avain löytyi: ${a.lahde} (…${a.avain.slice(-4)}).`
     : 'Avainta ei löytynyt tästä selaimesta. Avaa uistelututka samassa selaimessa tai liitä avain alle '
       + '(uistelututkan varmuuskopiotiedostossa kohta uistelututka_mml_avain, tai MML:n Oma tili -palvelu).';
+  $('vaSalaisuus').hidden = !a.avain;   // v70
 }
+// v70 (Hannu 22.11.2026 "A mutta ei ole juuri tiedossa"): avain leikepöydälle GitHubin salaisuutta varten (ei näytetä ruudulla).
+$('vaKopioiAvain').addEventListener('click', () => {
+  const a = Vesialue.lueAvain(localStorage), nappi = $('vaKopioiAvain');
+  if (!a.avain) { vaNaytaAvain(); return; }
+  const ok = () => { nappi.textContent = `Kopioitu (…${a.avain.slice(-4)}) ✓`; };
+  const ei = () => { nappi.textContent = 'Kopiointi ei onnistunut'; };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(a.avain).then(ok, ei); else ei();
+  setTimeout(() => { nappi.textContent = 'Kopioi avain'; }, 6000);
+});
 function vaNaytaTulos(teksti) {
   $('vaTulos').value = teksti; $('vaTulos').hidden = !teksti; $('vaKopioi').hidden = !teksti;
 }

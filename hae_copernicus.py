@@ -21,6 +21,11 @@ pisteisiin (hae_tuuli.py, päivätiedostoihin). Näiden epäonnistuminen ei vaik
 v54 (17.11.2026): alueille, joilla "silakka": {"happi": true} (Eckerö), BGC-hakuun myös pohjan happi o2b (mmol/m3,
 päivätiedoston bgc.o2b); jos se ei onnistu, haetaan kd/zsd kuten ennen.
 
+v71 (22.11.2026, Hannu "A … tuleehan selkeä viiva missä raja menee?"): alueille, joilla "lohirajat": true, haetaan valtion
+yleinen vesialue (kiinteistötunnus kunta-894-…) MML:n Kiinteistötietojen kyselypalvelusta (hae_vesialueet.py, vesialueet.json
+alueen kansioon, uusinta 30 vrk). Avain GitHubin salaisuudesta MML_API_KEY (julkaise.yml välittää); ilman avainta käytetään
+julkaistua tiedostoa. v68:n koeajo (koe_vesialueet.py) poistettu ajosta: tulos selvä (INSPIRE-tuotteessa ei vesialueita).
+
 v68 (22.11.2026, Hannu "Tehdään koeajo"): koe_vesialueet.py ajetaan lopuksi kerran vuorokaudessa: tunnistuuko valtion yleinen
 vesialue Maanmittauslaitoksen avoimesta INSPIRE-kiinteistöaineistosta. Vain loki ja data/vesialue_koe.json, ei karttaa.
 
@@ -1083,6 +1088,16 @@ def hae_alue(alue, perus, nyt, luotu):
         except Exception as e:  # noqa: BLE001
             traceback.print_exc()
             rajat_tila = {"tila": "virhe", "viesti": f"{e}"[:300]}
+    vesi_tila = None
+    if alue.get("lohirajat"):   # v71: valtion yleinen vesialue (MML, avain MML_API_KEY); ei Ahvenanmaalle (kuten lohirajat)
+        try:
+            import hae_vesialueet
+            alku = time.monotonic()
+            vesi_tila = hae_vesialueet.paivita(kansio, osoite, alue=rajat)
+            print(f"vesialueet: {vesi_tila.get('tila')}, {time.monotonic() - alku:.0f} s")
+        except Exception as e:  # noqa: BLE001
+            traceback.print_exc()
+            vesi_tila = {"tila": "virhe", "viesti": f"{e}"[:300]}
     tulokset, virheet = {}, []
     for nimi, hakija in (("phy", hae_phy), ("wav", hae_wav), ("sst", hae_sst)):
         alku = time.monotonic()
@@ -1176,6 +1191,8 @@ def hae_alue(alue, perus, nyt, luotu):
         hakemisto["pohja"] = vanha_pohja
     if rajat_tila:   # v67
         hakemisto["rajat"] = rajat_tila
+    if vesi_tila:   # v71
+        hakemisto["vesialueet"] = vesi_tila
     hakemisto["tunnus"], hakemisto["nimi"] = tunnus, alue.get("nimi", tunnus)
     kirjoita(kansio, hakemisto, tiedostot)
     return True
@@ -1215,12 +1232,7 @@ def main(polku):
     except Exception as e:  # noqa: BLE001
         traceback.print_exc()
         print(f"Lomadata: VIRHE {e}", file=sys.stderr)
-    try:   # v68: KOEAJO – yleinen vesialue MML:n kiinteistöaineistosta (kerran vuorokaudessa, ≤ 4 min); ei vaikuta muuhun
-        import koe_vesialueet
-        koe_vesialueet.aja(perus, alueet, sivun_osoite(), hae_vanha=hae_json_sivulta)
-    except Exception as e:  # noqa: BLE001
-        traceback.print_exc()
-        print(f"Vesialuekoe: VIRHE {e}", file=sys.stderr)
+    # v71: v68:n vesialuekoe (koe_vesialueet.py) poistettu ajosta – tulos selvä, varsinainen haku hae_vesialueet.py:ssä.
     if not all(onnistui):
         sys.exit(1)   # lokiin punainen merkki; julkaisu tehdään silti (continue-on-error)
 
