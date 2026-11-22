@@ -392,7 +392,8 @@
     <div class="kortti">
       <details>
         <summary>Venepuhelin: klooni tästä puhelimesta</summary>
-        <p class="pieni">Tekee tiedoston, jossa ovat asetukset, omat saalispisteet, karttatasot, alue ja reissut. 24 h jälki ja
+        <p class="pieni">Tekee tiedoston, jossa ovat asetukset, omat saalispisteet, karttatasot, alue ja reissut (ja MML-avain, jos se on
+          tallennettu Merilohitutkaan; uistelututkan avain ei tule mukaan). 24 h jälki ja
           viimeisin sijainti jäävät pois (kummallakin puhelimella omansa). Lähetä tiedosto venepuhelimeen (Quick Share tai Bluetooth),
           avaa siellä lohirosvo.github.io/merilohitutka ja valitse Raportit → Lue klooni. Tiedostossa ovat yksityiset saalispisteet:
           älä laita sitä GitHubiin.</p>
@@ -433,6 +434,24 @@
           <button class="sininen" id="tallenna">Tallenna</button>
           <button id="palauta">Oletukset</button>
         </div>
+      </details>
+    </div>
+    <div class="kortti">
+      <details id="vaKortti">
+        <summary>Koeajo: yleinen vesialue (MML, tässä puhelimessa)</summary>
+        <p class="pieni">Kysyy Maanmittauslaitoksen kiinteistörajapinnasta (avoimet tuotteet, maksuton), mikä kiinteistö on kussakin
+          49 koepisteessä Luodolta Poriin. Kartalle ei vielä piirry mitään. Avain luetaan tästä puhelimesta: Merilohitutkan oma tai
+          uistelututkan avain (sama selain). Avain ei mene GitHubiin eikä tulokseen. Kesto 1–3 min; vastaukset voivat olla isoja,
+          aja mieluiten Wi-Fissä ja pidä näyttö päällä. Lopuksi Kopioi tulos ja liitä se keskusteluun.</p>
+        <div class="pieni" id="vaAvainTila"></div>
+        <input type="text" id="vaAvain" placeholder="MML API-avain (vain jos avainta ei löytynyt)" autocomplete="off" autocapitalize="off" spellcheck="false" style="width:100%;box-sizing:border-box;margin-top:6px">
+        <div class="napit" style="margin-top:8px">
+          <button id="vaTallenna">Tallenna avain</button>
+          <button class="sininen" id="vaAja">Aja koe</button>
+          <button id="vaKopioi" hidden>Kopioi tulos</button>
+        </div>
+        <div class="pieni" id="vaTila"></div>
+        <textarea id="vaTulos" rows="8" readonly hidden style="width:100%;box-sizing:border-box;font-size:12px;background:#0d1b2b;color:var(--teksti);border:1px solid var(--reuna);border-radius:8px;margin-top:6px"></textarea>
       </details>
     </div>
     <p class="pieni">Alueet: Luoto–Tankar (paluuikkuna ja tuulihälytys), Vaasa, Norrskär, Kaskinen–Kristiinankaupunki, Pori ja Ahvenanmaa–Eckerö
@@ -490,6 +509,7 @@
 <script src="ikaluokat.js?v=5"></script>
 <script src="reitti.js?v=9"></script>
 <script src="ais.js?v=23"></script>
+<script src="vesialue.js?v=1"></script>
 <script>
 'use strict';
 // ---------- Apufunktiot ----------
@@ -2313,7 +2333,7 @@ setInterval(() => { if (karttaAuki() && document.visibilityState === 'visible') 
 
 // ---------- Klooni venepuhelimeen (v23, Hannu 14.11.2026) ----------
 // Asetukset, omat saalispisteet, karttatasot, alue ja reissut tiedostoon; venepuhelin lukee sen. Laitekohtaiset jäävät pois.
-const KLOONI_POIS = ['mlt_jalki', 'mlt_sijainti', 'mlt_uistelu', 'mlt_valilehti', 'mlt_data', 'mlt_meri', 'mlt_ais_meta'];
+const KLOONI_POIS = ['mlt_jalki', 'mlt_sijainti', 'mlt_uistelu', 'mlt_valilehti', 'mlt_data', 'mlt_meri', 'mlt_ais_meta', 'mlt_vesialuekoe'];   // v69: koetulos ei kloonaannu (MML-avain kloonautuu)
 function teeKlooni() {
   const tiedot = {};
   for (let i = 0; i < localStorage.length; i++) {
@@ -2776,6 +2796,56 @@ $('lueKlooni').addEventListener('click', () => $('klooniTiedosto').click());
 $('klooniTiedosto').addEventListener('change', async e => {
   const f = e.target.files && e.target.files[0]; if (!f) return;
   $('klooniTila').textContent = lueKlooni(await f.text()); e.target.value = '';
+});
+// v69: yleisen vesialueen koeajo puhelimessa (vesialue.js; Hannu 22.11.2026 "Avain pitäisi olla uistelututkan puolella").
+// Avain: oma mlt_mml_avain tai uistelututkan (sama osoite → sama tallennus). Tulos vain tähän puhelimeen ja leikepöydälle.
+let vaKaynnissa = false, vaSeis = false;
+function vaNaytaAvain() {
+  if (!window.Vesialue) { $('vaAvainTila').textContent = 'vesialue.js ei latautunut.'; return; }
+  const a = Vesialue.lueAvain(localStorage);
+  $('vaAvainTila').textContent = a.avain ? `Avain löytyi: ${a.lahde} (…${a.avain.slice(-4)}).`
+    : 'Avainta ei löytynyt tästä selaimesta. Avaa uistelututka samassa selaimessa tai liitä avain alle '
+      + '(uistelututkan varmuuskopiotiedostossa kohta uistelututka_mml_avain, tai MML:n Oma tili -palvelu).';
+}
+function vaNaytaTulos(teksti) {
+  $('vaTulos').value = teksti; $('vaTulos').hidden = !teksti; $('vaKopioi').hidden = !teksti;
+}
+$('vaKortti').addEventListener('toggle', () => {
+  if (!$('vaKortti').open) return;
+  vaNaytaAvain(); if (!window.Vesialue) return;
+  if (!vaKaynnissa && !$('vaTulos').value) { const vanha = lue(Vesialue.LS_TULOS); if (vanha && vanha.teksti) { vaNaytaTulos(vanha.teksti); $('vaTila').textContent = 'Edellinen tulos ' + new Date(vanha.aika).toLocaleString('fi-FI') + '.'; } }
+});
+$('vaTallenna').addEventListener('click', () => {
+  const v = Vesialue.tallennaAvain(localStorage, $('vaAvain').value);
+  $('vaTila').textContent = v || 'Avain tallennettu tähän puhelimeen (Merilohitutkan oma).';
+  if (!v) $('vaAvain').value = '';
+  vaNaytaAvain();
+});
+$('vaAja').addEventListener('click', async () => {
+  if (vaKaynnissa) { vaSeis = true; $('vaTila').textContent = 'Keskeytetään…'; return; }
+  const a = Vesialue.lueAvain(localStorage);
+  if (!a.avain) { vaNaytaAvain(); $('vaTila').textContent = 'Ei avainta: koetta ei ajettu.'; return; }
+  vaKaynnissa = true; vaSeis = false; $('vaAja').textContent = 'Keskeytä'; vaNaytaTulos('');
+  let teksti;
+  try {
+    const T = await Vesialue.aja({ alueet: window.ALUEET || ALUELISTA, avain: a.avain, avainLahde: a.lahde,
+      tila: s => { $('vaTila').textContent = s; }, seis: () => vaSeis });
+    teksti = Vesialue.peita(Vesialue.tulosTeksti(T), a.avain);
+    $('vaTila').textContent = T.pysahtyi ? 'Koe pysähtyi: ' + Vesialue.peita(T.pysahtyi, a.avain)
+      : T.keskeytetty ? 'Keskeytetty. Osatulos alla.' : `Valmis: ${T.pisteet.length} pistettä, ${T.kesto_s} s. Kopioi tulos ja liitä keskusteluun.`;
+  } catch (e) {
+    teksti = 'Vesialuekoe: odottamaton virhe ' + Vesialue.peita((e && e.message) || String(e), a.avain);
+    $('vaTila').textContent = teksti;
+  }
+  vaKaynnissa = false; $('vaAja').textContent = 'Aja koe';
+  vaNaytaTulos(teksti); tallennaLS(Vesialue.LS_TULOS, { aika: Date.now(), teksti });
+});
+$('vaKopioi').addEventListener('click', () => {
+  const t = $('vaTulos').value;
+  const kasin = () => { $('vaTulos').focus(); $('vaTulos').select(); $('vaKopioi').textContent = 'Valitse teksti ja kopioi'; };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(() => { $('vaKopioi').textContent = 'Kopioitu ✓'; }, kasin);
+  else kasin();
+  setTimeout(() => { $('vaKopioi').textContent = 'Kopioi tulos'; }, 4000);
 });
 $('jalkiPoista').addEventListener('click', () => {
   jalki = []; jalkiMuuttui = true; tallennaJalki(true);
