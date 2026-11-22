@@ -19,8 +19,14 @@ Jäljelle jää raja kylien/osakaskuntien vesiin ja saariin sekä ulkoreuna (alu
 raja sellaisenaan (ei laskettu kuten 4 mpk), mutta ei virallinen rajanäyttö eikä navigointiin.
 
 AVAIN ei tulostu lokiin (peita(); GitHub peittää salaisuudet lisäksi itse).
+
+v72 (22.11.2026, Hannun kuva 18.02): Luodon alueen pohjoisreuna Ohtakarin kohdalla näyttää kuntarajalta (Kokkola–Kalajoki), mutta
+Kalajoen (071) yleistä vesialuetta ei löytynyt muodoilla 894-1-1/1-0/2-1/1-2. Lisätty muotoja (MUODOT) ja KOEPISTEET: palstat
+pisteen kohdalta (bbox ±50 m); löytynyt 894-tunnus haetaan mukaan, ja pisteiden tunnukset tallentuvat tiedoston kohtaan "haku"
+(luettavissa julkaistusta tiedostosta). Virheet eriteltyinä samaan kohtaan. VERSIO 2 → uusi haku heti (muuten 30 vrk).
 """
 import json
+import math
 import os
 import sys
 import time
@@ -32,7 +38,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hae_syvyys as HS  # noqa: E402
 
-VERSIO = 1
+VERSIO = 2
 OSOITE = "https://avoin-paikkatieto.maanmittauslaitos.fi/kiinteisto-avoin/simple-features/v3"
 KOKOELMA = "PalstanSijaintitiedot"
 YMPARISTO = "MML_API_KEY"
@@ -40,7 +46,7 @@ UUSINTA_VRK = 30
 REUNA_KM = 10            # alueen ympäriltä mukaan otettavat monikulmiot
 TAUKO_S = 0.3
 SIVUJA_MAX = 20
-OTSAKE = {"User-Agent": "merilohitutka/71 (github.com/Lohirosvo/merilohitutka; kerran kuussa)",
+OTSAKE = {"User-Agent": "merilohitutka/72 (github.com/Lohirosvo/merilohitutka; kerran kuussa)",
           "Accept": "application/geo+json, application/json"}
 LAHDE = "Maanmittauslaitos, Kiinteistötietojen kyselypalvelu (OGC API Features), avoimet tuotteet, CC BY 4.0"
 HUOM = "Yleinen vesialue = kiinteistötunnus kunta-894-…; kiinteistörekisterin raja, ei virallinen rajanäyttö, ei navigointiin."
@@ -48,7 +54,9 @@ HUOM = "Yleinen vesialue = kiinteistötunnus kunta-894-…; kiinteistörekisteri
 KUNNAT = {"071": "Kalajoki", "272": "Kokkola", "440": "Luoto", "598": "Pietarsaari", "599": "Pedersöre", "893": "Uusikaarlepyy",
           "946": "Vöyri", "499": "Mustasaari", "905": "Vaasa", "475": "Maalahti", "280": "Korsnäs", "545": "Närpiö",
           "231": "Kaskinen", "287": "Kristiinankaupunki", "484": "Merikarvia", "609": "Pori", "051": "Eurajoki", "684": "Rauma"}
-MUODOT = [(1, 1), (1, 0), (2, 1), (1, 2)]   # (ryhmä, yksikkö) kylänumeron 894 perässä
+MUODOT = [(1, 1), (1, 0), (2, 1), (1, 2), (1, 3), (2, 0), (2, 2), (3, 1)]   # (ryhmä, yksikkö) kylänumeron 894 perässä (v72: +4)
+# v72: koepisteet epävarmojen reunojen takaa (lat, lon, nimi): mikä kiinteistö siellä on?
+KOEPISTEET = [(64.12, 23.25, "Ohtakarin pohjoispuoli"), (64.17, 22.95, "Kalajoen edusta ulompana"), (64.22, 23.55, "Kalajoen edusta rannempana")]
 
 _VALIMUISTI = {}
 
@@ -140,6 +148,29 @@ def hae_kaikki(avain, loki=print, hae=_hae, tauko=TAUKO_S):
                 if not seuraava or not (j.get("features") or []):
                     break
                 url = ilman_avainta(seuraava)
+    tilasto["koepisteet"] = []
+    for lat, lon, nimi in KOEPISTEET:   # v72
+        dla, dlo = 50 / 111320, 50 / (111320 * math.cos(math.radians(lat)))
+        url = f"{OSOITE}/collections/{KOKOELMA}/items?bbox={lon - dlo:.6f},{lat - dla:.6f},{lon + dlo:.6f},{lat + dla:.6f}&limit=10"
+        time.sleep(tauko)
+        tilasto["kutsuja"] += 1
+        k = {"nimi": nimi, "lat": lat, "lon": lon, "tunnukset": []}
+        try:
+            j, n = hae(url, avain)
+            tilasto["tavuja"] += n
+            for f in j.get("features") or []:
+                t = tunnus_viiva((f.get("properties") or {}).get("kiinteistotunnus") or "?")
+                k["tunnukset"].append(t)
+                if t.split("-")[1:2] == ["894"] and t not in tulos:   # löytyi uusi yleinen vesialue → mukaan
+                    m = _renkaat(f.get("geometry"))
+                    if m:
+                        tulos.setdefault(t, {"kunta": KUNNAT.get(t.split("-")[0].zfill(3), "kunta " + t.split("-")[0]), "monikulmiot": []})["monikulmiot"].extend(m)
+                        k["lisatty"] = t
+        except Exception as e:  # noqa: BLE001
+            k["virhe"] = peita(str(e), avain)[:120]
+        tilasto["koepisteet"].append(k)
+        loki(f"vesialueet: koepiste {nimi} ({lat}, {lon}): {', '.join(k['tunnukset']) or k.get('virhe') or 'ei palstaa'}"
+             + (f" → lisätty {k['lisatty']}" if k.get("lisatty") else ""))
     tilasto["s"] = round(time.monotonic() - alku, 1)
     for t, v in sorted(tulos.items()):
         loki(f"vesialueet: {t} {v['kunta']}: {len(v['monikulmiot'])} monikulmiota, "
@@ -245,7 +276,7 @@ def reunaviivat(monikulmiot):
     return [v for v in viivat if len(v) >= 2]
 
 
-def rakenna(kaikki, alue, nyt):
+def rakenna(kaikki, alue, nyt, tilasto=None):
     valitut = valitse(kaikki, alue)
     origo = [round(alue["lat_min"] - 0.5, 1), round(alue["lon_min"] - 0.5, 1)]
     viivat = reunaviivat(valitut)
@@ -258,7 +289,9 @@ def rakenna(kaikki, alue, nyt):
             "osoite": f"{OSOITE}/collections/{KOKOELMA}", "origo": origo, "kerroin": HS.KERROIN, "tunnukset": tunnukset,
             "monikulmiot": [{"t": t, "r": [HS.koodaa(r, origo) for r in m]} for t, m in valitut],
             "viivat": [HS.koodaa(v, origo) for v in viivat],
-            "tilasto": {"monikulmioita": len(valitut), "viivoja": len(viivat), "pisteita": sum(len(r) for _, m in valitut for r in m)}}
+            "tilasto": {"monikulmioita": len(valitut), "viivoja": len(viivat), "pisteita": sum(len(r) for _, m in valitut for r in m)},
+            "haku": {"kutsuja": (tilasto or {}).get("kutsuja"), "virheet": ((tilasto or {}).get("virheet") or [])[:10],
+                     "koepisteet": (tilasto or {}).get("koepisteet") or [], "muodot": ["894-%d-%d" % m for m in MUODOT]}}
 
 
 def _hae_vanha(url):
@@ -298,8 +331,8 @@ def paivita(kansio, sivun_osoite, loki=print, alue=None, nyt=None, hae_vanha=_ha
             return {"tila": "vanha", "luotu": vanha["luotu"], "viesti": "ei avainta"}
         return {"tila": "ei avainta"}
     try:
-        kaikki, _ = hae_kaikki(avain, loki, hae, tauko)
-        sis = rakenna(kaikki, alue, nyt)
+        kaikki, tilasto = hae_kaikki(avain, loki, hae, tauko)
+        sis = rakenna(kaikki, alue, nyt, tilasto)
         _kirjoita(polku, sis)
         loki(f"vesialueet: kirjoitettu {polku}, {os.path.getsize(polku) // 1024} kt; "
              f"{', '.join(sis['tunnukset']) or 'ei yleistä vesialuetta alueella'}; {sis['tilasto']}")

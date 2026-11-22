@@ -98,6 +98,24 @@
   .peite[hidden] { display:none; }
   .peite .kortti { max-width:420px; width:100%; }
   .mukavuusnapit button { flex:1; font-size:24px; padding:14px 0; }
+  /* v72: Kala kiinni ja saaliskirjanpito */
+  .kalanappi { width:100%; margin:0 0 10px; font-size:30px; letter-spacing:1px; padding:20px; border:2px solid #ff6b5c; color:#fff; background:#b3261e; }
+  .kalarivi-tila { font-size:15px; margin:-4px 2px 10px; color:var(--teksti); }
+  .kalarivi-tila .var { color:#ffb4a8; display:block; }
+  #kalaPeite { align-items:flex-start; overflow:auto; }
+  #kalaPeite .kortti { max-height:none; margin-top:8px; }
+  .valinnat { display:flex; gap:6px; flex-wrap:wrap; margin:6px 0; }
+  .valinnat button { font-size:16px; padding:9px 11px; }
+  .valinnat button.valittu { border-color:var(--syaani); background:#1e4f73; color:#fff; }
+  .kalakentat { display:grid; grid-template-columns:1fr 1fr; gap:6px 10px; margin:6px 0; }
+  .kalakentat label, .kalaleve { display:flex; flex-direction:column; font-size:13px; color:var(--himmea); }
+  .kalakentat input, .kalaleve input { width:100%; box-sizing:border-box; font-size:18px; }
+  .kalaleve { margin:6px 0; }
+  .kalalista > div { padding:6px 0 8px; border-top:1px solid var(--reuna); font-size:15px; }
+  .kalalista .napit button { font-size:14px; padding:6px 9px; }
+  .kalaok { color:#7ee08a; } .kalaei { color:#ffb4a8; }
+  .kalailmoitus { position:fixed; left:12px; right:12px; top:10px; z-index:60; background:#b3261e; color:#fff; font-size:18px; font-weight:700;
+                  padding:12px 14px; border-radius:12px; text-align:center; pointer-events:none; }   /* ei peitä täydennyksen nappeja */
 
   details summary { cursor:pointer; color:var(--himmea); font-weight:600; padding:6px 0; }
   .asetus { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:4px 0; font-size:16px; }
@@ -197,6 +215,8 @@
     <div class="varoitus" id="varoitusRivi" role="button" hidden></div>
     <div class="varoitus" id="salamaRivi" role="button" hidden></div>
     <div class="pieni ikarivi" id="ikaRivi" role="button" hidden></div>
+    <button class="kalanappi" id="kalaKiinni">🎣 KALA KIINNI</button>
+    <div class="kalarivi-tila" id="kalaTila" hidden></div>
 
     <div class="kortti" id="vPaluu">
       <h2>Paluu</h2>
@@ -276,7 +296,7 @@
         <div class="lohetrivi" id="lohetRivi" hidden></div>
       </div>
       <div class="karttanapit" id="karttaNapit">
-        <button id="zoomPlus">+</button><button id="zoomMiinus">−</button><button id="keskitaOma">◎</button><button id="lohiTaalla" title="Lohikerros omalla kohdalla">🐟</button><button id="kohdeNappi" title="Menomatkan kohde: napauta kohdepiste">🎯</button><button id="vesiNappi" title="Meriveden korkeus ja 12 h ennuste">🌊</button>
+        <button id="zoomPlus">+</button><button id="zoomMiinus">−</button><button id="keskitaOma">◎</button><button id="lohiTaalla" title="Lohikerros omalla kohdalla">🐟</button><button id="kohdeNappi" title="Menomatkan kohde: napauta kohdepiste">🎯</button><button id="vesiNappi" title="Meriveden korkeus ja 12 h ennuste">🌊</button><button id="kalaKartta" title="Kala kiinni: tallentaa paikan heti" style="background:#b3261e;border-color:#ff6b5c">🎣</button>
       </div>
       <div class="vesilaatikko" id="vesiLaatikko" hidden></div>
       <div class="kartta-ala" id="karttaAla">
@@ -391,6 +411,18 @@
       </details>
     </div>
     <div class="kortti">
+      <details id="kalaKirjanpito">
+        <summary>Saaliskirjanpito ja Omakala (vain tässä puhelimessa)</summary>
+        <div class="pieni" id="kalaYhteenveto"></div>
+        <div class="kalalista" id="kalaLista"></div>
+        <div class="napit" style="margin-top:8px"><button id="kalaCsv">Vie CSV</button></div>
+        <p class="pieni">📋 Omakala kopioi ilmoituksen tiedot (laji, pituus, rasvaevä, vapautus, päivä, väline, ICES-ruutu ja kunta) liitettäväksi
+          omakala.fi:hin; lohi merellä ilmoitetaan saman päivän aikana. ICES-pienruutu on laskettu iskupaikasta. Kunta tiedetään, kun paikka on
+          yleisellä vesialueella (kiinteistötunnus kertoo kunnan); muuten valitse kunta Omakalassa. Kiintiölaskuri on yhden kalastajan ja
+          yksinkertaistettu: virallinen tieto kalastusrajoitus.fi.</p>
+      </details>
+    </div>
+    <div class="kortti">
       <details>
         <summary>Venepuhelin: klooni tästä puhelimesta</summary>
         <p class="pieni">Tekee tiedoston, jossa ovat asetukset, omat saalispisteet, karttatasot, alue ja reissut (ja MML-avain, jos se on
@@ -490,6 +522,29 @@
   <span class="suunta" id="suunta"></span>
   <span class="lisa" id="gpsLisa">GPS odotetaan</span>
 </div>
+<div class="peite" id="kalaPeite" hidden>
+  <div class="kortti">
+    <h2 id="kalaOtsikko">Kala kiinni</h2>
+    <div class="pieni" id="kalaPaikka"></div>
+    <div class="valinnat" data-kentta="laji"><button data-arvo="lohi">Lohi</button><button data-arvo="taimen">Taimen</button><button data-arvo="siika">Siika</button><button data-arvo="muu">Muu</button></div>
+    <div class="valinnat" data-kentta="tulos"><button data-arvo="otettu">Otettu</button><button data-arvo="vapautettu">Vapautettu</button><button data-arvo="karkasi">Karkasi</button></div>
+    <div class="valinnat" data-kentta="rasvaeva" id="kalaRasva"><button data-arvo="leikattu">Rasvaevä leikattu</button><button data-arvo="ehja">Rasvaevä ehjä</button></div>
+    <div class="kalakentat">
+      <label>Pituus cm<input id="kalaPituus" inputmode="decimal" autocomplete="off"></label>
+      <label>Paino kg<input id="kalaPaino" inputmode="decimal" autocomplete="off"></label>
+      <label>Siimaa m<input id="kalaSiima" inputmode="decimal" autocomplete="off"></label>
+      <label>Paino siimassa g<input id="kalaPainoSiima" inputmode="decimal" autocomplete="off"></label>
+    </div>
+    <label class="kalaleve">Viehe<input id="kalaViehe" list="kalaVieheet" autocomplete="off"></label><datalist id="kalaVieheet"></datalist>
+    <div id="kalaMpk" class="pieni"></div>
+    <div class="valinnat" data-kentta="mpkValinta" id="kalaMpkValinta" hidden><button data-arvo="sisalla">4 mpk:n sisäpuolella</button><button data-arvo="ulkona">4 mpk:n ulkopuolella</button></div>
+    <label class="kalaleve">Huomautus<input id="kalaHuom" autocomplete="off"></label>
+    <div class="pieni" id="kalaVaroitus" style="color:#ffb4a8"></div>
+    <div class="napit" style="margin-top:8px"><button class="sininen" id="kalaTallenna">Tallenna</button><button id="kalaMyohemmin">Myöhemmin</button><button id="kalaPoista">Poista</button></div>
+    <p class="pieni">Paikka ja aika tallentuivat jo. Tiedot jäävät vain tähän puhelimeen (ja klooniin), eivät GitHubiin.</p>
+  </div>
+</div>
+<div class="kalailmoitus" id="kalaIlmoitus" hidden></div>
 <div class="peite" id="mukavuus" hidden>
   <div class="kortti">
     <h2>Miltä keli tuntui?</h2>
@@ -518,6 +573,7 @@
 <script src="reitti.js?v=9"></script>
 <script src="ais.js?v=23"></script>
 <script src="vesialue.js?v=1"></script>
+<script src="saalis.js?v=1"></script>
 <script>
 'use strict';
 // ---------- Apufunktiot ----------
@@ -1334,7 +1390,11 @@ function vesialueTeksti(lat, lon) {
     : mt && mt.tila === 'virhe' ? '🌊 Yleistä vesialuetta ei saatu haettua (ⓘ)' : '';
   if (T.rajalla) return `🌊 Yleisen vesialueen rajalla (alle ${etaisyys(VESIRAJA_M)}; kiinteistörekisterin raja)`;
   if (T.sisalla) return `🌊 Yleinen vesialue ${T.tunnus}: kalastonhoitomaksulla, vapamäärää ei rajoiteta` + (isFinite(T.m) ? `, rajalle ${etaisyys(T.m)}` : '');
-  return '🌊 Ei yleistä vesialuetta (kylän tai osakaskunnan vesi)' + (isFinite(T.m) ? `, yleiselle vesialueelle ${etaisyys(T.m)}` : ', alueella ei yleistä vesialuetta');
+  // v72: ulkoreunan takana on aluemeren ulkopuolinen vesi (ei kylän vettä): yli 12 mpk Traficomin perusviivasta (laskettu)
+  const perus = lohirajat && lohirajat.perus && lohirajat.perus.length ? KarttaMalli.etaisyysViivoihin(lohirajat.perus, lat, lon, 60000) : NaN;
+  if (isFinite(perus) && perus > 12 * 1852) return '🌊 Ei yleistä vesialuetta: aluemeren ulkopuolella (yli 12 mpk perusviivasta, laskettu)'
+    + (isFinite(T.m) ? `, yleiselle vesialueelle ${etaisyys(T.m)}` : '');
+  return '🌊 Ei yleistä vesialuetta (muu omistaja, esim. kylän tai osakaskunnan vesi)' + (isFinite(T.m) ? `, yleiselle vesialueelle ${etaisyys(T.m)}` : ', alueella ei yleistä vesialuetta');
 }
 const VESIRAJA_M = 100;
 /** v67: lohen rajat napautuskohdassa (kun Lohirajat-taso on päällä): 4 mpk:n puoli, etäisyys rajaan, säännöt ja alamitta. */
@@ -1349,6 +1409,8 @@ function rajaTeksti(lat, lon) {
       : KarttaMalli.lohisaanto(tila.sisalla, pv));
   } else if (meri && meri.rajat && meri.rajat.tila === 'virhe') osat.push('4 mpk:n rajaa ei saatu laskettua (ⓘ)');
   osat.push(`lohen alamitta ${KarttaMalli.alamitta(lat)} cm (63°30′:n ${lat >= KarttaMalli.ALAMITTA.lat ? 'pohjois' : 'etelä'}puolella)`);
+  const ic = window.Saalis ? Saalis.icesRuutu(lat, lon) : null;   // v72: Omakalan pyyntialue
+  if (ic) osat.push(`ICES-ruutu ${ic.ruutu}, pienruutu ${ic.pien}`);
   return '🎣 ' + osat.join(', ');
 }
 
@@ -1646,7 +1708,7 @@ function havaintoTeksti(lat, lon) {
 }
 /** Saalispisteet tallennetaan vain tähän puhelimeen (localStorage), ei GitHubiin: varasto ja sivu ovat julkisia. */
 function lueSaaliit() { const l = lue('mlt_saaliit'); return Array.isArray(l) ? l : []; }
-function kaikkiHavainnot() { return (window.HAVAINNOT || []).concat(lueSaaliit()); }
+function kaikkiHavainnot() { return (window.HAVAINNOT || []).concat(lueSaaliit(), window.Saalis ? Saalis.havainnot(Saalis.lue(localStorage)) : []); }   // v72: Kala kiinni -kirjaukset
 function piirraSaaliit() {
   const l = lueSaaliit();
   $('saalisTila').textContent = l.length ? `${l.length} pistettä tallessa tässä puhelimessa.` : 'Ei tallennettuja pisteitä.';
@@ -2410,6 +2472,176 @@ function lueKlooni(teksti) {
   for (const x of avaimet) localStorage.setItem(x, k.tiedot[x]);
   setTimeout(() => location.reload(), 300);
   return `Luettu ${avaimet.length} kohdetta. Sivu latautuu uudelleen.`;
+}
+
+// ---------- v72: Kala kiinni ja saaliskirjanpito (saalis.js) ----------
+// Hannu 22.11.2026: täydennykseen viehe, siiman pituus ja paino siimassa (g); 4 mpk:n rajalla kysytään puoli; ICES ja kunta näkyviin.
+// Saalistiedot vain tähän puhelimeen (localStorage mlt_saalisloki, klooni), ei GitHubiin eikä verkkoon.
+let kalaAuki = null, kalaArvot = {};
+function kalaLista() { return Saalis.lue(localStorage); }
+function kalaTallennaLista(l) { if (!Saalis.tallenna(localStorage, l)) kalaIlmoita('Tallennus epäonnistui (puhelimen muisti täynnä?)', 6000); }
+function kalaIlmoita(t, ms = 3000) {
+  const el = $('kalaIlmoitus'); el.textContent = t; el.hidden = false;
+  clearTimeout(kalaIlmoita.ajastin); kalaIlmoita.ajastin = setTimeout(() => { el.hidden = true; }, ms);
+}
+/** 4 mpk ja yleinen vesialue pisteessä (kartan valitun alueen aineistosta; muulla alueella null). */
+function kalaPaikkatiedot(lat, lon) {
+  const o = { mpk: null, vesialue: null, kunta: null };
+  if (lat == null || !valittuAlue.lohirajat) return o;
+  const r = lohirajat ? KarttaMalli.rajaTila(lohirajat, lat, lon) : null;
+  if (r) o.mpk = { sisalla: r.sisalla, m: Math.round(r.m), rajalla: !!r.rajalla, valinta: null };
+  const v = vesialueet ? KarttaMalli.vesialueTila(vesialueet, lat, lon) : null;
+  if (v && v.sisalla) {
+    o.vesialue = v.tunnus;
+    const t = vesialueet.tunnukset && vesialueet.tunnukset[v.tunnus];
+    o.kunta = { nimi: t && t.kunta ? t.kunta : 'kuntanumero ' + v.tunnus.split('-')[0], lahde: 'yleinen vesialue ' + v.tunnus };
+  }
+  return o;
+}
+/** Yksi napautus: paikka ja aika talteen heti, sitten täydennys. Olosuhteet lisätään taustalla. */
+function kalaKiinni() {
+  const lista = kalaLista(), viim = gpsPisteet.length ? gpsPisteet[gpsPisteet.length - 1] : null;
+  const tuore = sijainti && viim && Date.now() - viim.t < 60000;
+  const lat = sijainti ? sijainti.lat : null, lon = sijainti ? sijainti.lon : null;
+  const pt = kalaPaikkatiedot(lat, lon), al = aktiivinenAlue();
+  const r = Saalis.uusi(lista, { aika: new Date(), lat, lon, tark: tuore ? sijaintiTarkkuus : null,
+    nopeus: viim && isFinite(viim.speed) && viim.speed !== null ? viim.speed * 3.6 : null, suunta: viim && isFinite(viim.heading) ? viim.heading : null,
+    alue: al ? al.tunnus : null, reissu: uistelu && uistelu.alku ? uistelu.alku : null, mpk: pt.mpk, vesialue: pt.vesialue, kunta: pt.kunta });
+  if (!tuore) r.huom = sijainti ? 'GPS-paikka yli minuutin vanha' : 'ei GPS-paikkaa';
+  kalaTallennaLista(lista);
+  try { if (navigator.vibrate) navigator.vibrate(200); } catch (e) {}
+  kalaIlmoita(`🎣 Kirjattu klo ${klo(new Date(r.aika))}` + (lat == null ? ' – ilman paikkaa' : ''));
+  kalaOlotTaustalla(r.id, lat, lon, Date.parse(r.aika));
+  kalaPaivitaKaikki();
+  kalaAvaa(r.id);
+}
+async function kalaOlotTaustalla(id, lat, lon, ms) {
+  if (lat == null) return;
+  try {
+    const d = nakyma && valittuPvm === tamaPaiva() ? nakyma : await haePaiva(tamaPaiva());
+    const o = Saalis.olot(d, ms, lat, lon, KarttaMalli, [asetukset.lohiMin, asetukset.lohiMax]);
+    const l = kalaLista(); if (Saalis.paivita(l, id, { olot: o })) kalaTallennaLista(l);
+  } catch (e) {}
+}
+function kalaAvaa(id) {
+  const r = Saalis.etsi(kalaLista(), id); if (!r) return;
+  kalaAuki = id;
+  const edel = kalaLista().filter(x => x.id !== id && (x.viehe || x.siima != null || x.painoSiimassa != null)).pop();   // edellisen kalan välineet valmiiksi
+  kalaArvot = { laji: r.laji, tulos: r.tulos, rasvaeva: r.rasvaeva, mpkValinta: r.mpk ? r.mpk.valinta : null };
+  const lukuK = v => v == null ? '' : String(v).replace('.', ',');
+  $('kalaPituus').value = lukuK(r.pituus); $('kalaPaino').value = lukuK(r.paino);
+  $('kalaSiima').value = lukuK(r.siima != null ? r.siima : !r.taydennetty && edel ? edel.siima : null);
+  $('kalaPainoSiima').value = lukuK(r.painoSiimassa != null ? r.painoSiimassa : !r.taydennetty && edel ? edel.painoSiimassa : null);
+  $('kalaViehe').value = r.viehe || (!r.taydennetty && edel && edel.viehe) || '';
+  $('kalaHuom').value = r.huom || '';
+  const vieheet = [...new Set(kalaLista().map(x => x.viehe).filter(Boolean).reverse())].slice(0, 30);
+  $('kalaVieheet').innerHTML = vieheet.map(v => `<option value="${v.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}">`).join('');
+  const d = new Date(r.aika);
+  $('kalaOtsikko').textContent = `Kala kiinni ${pvm(d)} klo ${klo(d)}`;
+  $('kalaPaikka').textContent = r.lat == null ? 'Ei GPS-paikkaa.' : `${r.lat.toFixed(5)}, ${r.lon.toFixed(5)}` + (r.ices ? ` · ICES ${r.ices.ruutu}/${r.ices.pien}` : '')
+    + (r.kunta ? ` · ${r.kunta.nimi} (yleinen vesialue)` : '') + (r.huom && /GPS/.test(r.huom) ? ' · ' + r.huom : '');
+  const m = r.mpk;
+  $('kalaMpk').textContent = !m ? (valittuAlue.lohirajat ? '4 mpk:n puoli ei tiedossa (ei paikkaa tai alueen ulkopuolella): valitse.' : '')
+    : m.rajalla ? `4 mpk:n rajalla (alle 100 m, laskettu raja): valitse puoli.` : `4 mpk:n ${m.sisalla ? 'sisäpuolella' : 'ulkopuolella'}, rajalle ${etaisyys(m.m)} (laskettu).`;
+  $('kalaMpkValinta').hidden = !!(m && !m.rajalla) || !valittuAlue.lohirajat;
+  kalaValinnat(); kalaTarkista();
+  $('kalaPeite').hidden = false; $('kalaPeite').scrollTop = 0;
+}
+function kalaValinnat() {
+  document.querySelectorAll('#kalaPeite .valinnat').forEach(v => {
+    const k = v.dataset.kentta;
+    v.querySelectorAll('button').forEach(b => b.classList.toggle('valittu', kalaArvot[k] === b.dataset.arvo));
+  });
+  $('kalaRasva').hidden = !['lohi', 'taimen'].includes(kalaArvot.laji);
+}
+function kalaLukuKentta(id) { const v = parseFloat(String($(id).value).replace(',', '.')); return isFinite(v) && v >= 0 ? v : null; }
+function kalaMuutokset() {
+  const m = { laji: kalaArvot.laji || 'lohi', tulos: kalaArvot.tulos || null, rasvaeva: ['lohi', 'taimen'].includes(kalaArvot.laji) ? kalaArvot.rasvaeva || null : null,
+    pituus: kalaLukuKentta('kalaPituus'), paino: kalaLukuKentta('kalaPaino'), siima: kalaLukuKentta('kalaSiima'), painoSiimassa: kalaLukuKentta('kalaPainoSiima'),
+    viehe: $('kalaViehe').value.trim() || null, huom: $('kalaHuom').value.trim() || null };
+  if (!$('kalaMpkValinta').hidden && kalaArvot.mpkValinta) m.mpkValinta = kalaArvot.mpkValinta;
+  return m;
+}
+function kalaTarkista() {
+  const r = Saalis.etsi(kalaLista(), kalaAuki); if (!r) return;
+  const koe = Object.assign({}, r, kalaMuutokset());
+  if (kalaArvot.mpkValinta) koe.mpk = Object.assign({}, r.mpk || {}, { valinta: kalaArvot.mpkValinta });
+  $('kalaVaroitus').textContent = Saalis.rivinVaroitus(koe)
+    || (koe.laji === 'lohi' && koe.pituus != null && koe.pituus < KarttaMalli.alamitta(r.lat == null ? 64 : r.lat) && koe.tulos === 'otettu'
+      ? `alle alamitan (${KarttaMalli.alamitta(r.lat == null ? 64 : r.lat)} cm)` : '');
+}
+function kalaSulje() { kalaAuki = null; $('kalaPeite').hidden = true; kalaPaivitaKaikki(); }
+document.querySelectorAll('#kalaPeite .valinnat').forEach(v => v.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  const k = v.dataset.kentta; kalaArvot[k] = kalaArvot[k] === b.dataset.arvo ? null : b.dataset.arvo;
+  kalaValinnat(); kalaTarkista();
+}));
+['kalaPituus', 'kalaPaino'].forEach(id => $(id).addEventListener('input', kalaTarkista));
+$('kalaTallenna').addEventListener('click', () => {
+  const l = kalaLista(); Saalis.paivita(l, kalaAuki, kalaMuutokset()); kalaTallennaLista(l); kalaSulje();
+});
+$('kalaMyohemmin').addEventListener('click', kalaSulje);
+$('kalaPoista').addEventListener('click', () => {
+  if (!confirm('Poistetaanko tämä kirjaus kokonaan?')) return;
+  const l = kalaLista(); Saalis.poista(l, kalaAuki); kalaTallennaLista(l); kalaSulje();
+});
+$('kalaKiinni').addEventListener('click', kalaKiinni);
+$('kalaKartta').addEventListener('click', kalaKiinni);
+/** Vesillä-rivi: päivän lohikiintiö nykyisestä paikasta ja ilmoittamattomat Omakala-kalat. */
+function kalaTilaNyt() {
+  const l = kalaLista(), nyt = new Date();
+  const p = sijainti ? kalaPaikkatiedot(sijainti.lat, sijainti.lon) : { mpk: null };
+  const s = p.mpk ? (p.mpk.rajalla ? null : p.mpk.sisalla) : null;
+  const k = Saalis.kiintio(l, nyt, { sisalla: s });
+  const tanaan = l.filter(r => new Date(r.aika).toDateString() === nyt.toDateString());
+  const ilmoittamatta = tanaan.filter(r => Saalis.ilmoitettava(r) && !r.omakala).length;
+  const taydentamatta = tanaan.filter(r => !r.taydennetty).length;
+  const el = $('kalaTila');
+  if (!tanaan.length) { el.hidden = true; return; }
+  el.hidden = false;
+  const rivit = [];
+  if (k.otettu || tanaan.some(r => r.laji === 'lohi')) rivit.push(k.teksti);
+  if (taydentamatta) rivit.push(`${taydentamatta} kirjausta täydentämättä (Raportit → Saaliskirjanpito)`);
+  if (ilmoittamatta) rivit.push(`Omakala: ${ilmoittamatta} ilmoittamatta tänään`);
+  el.innerHTML = rivit.map(t => escH(t)).join('<br>') + k.varoitukset.filter(v => k.otettu || !/puoli ei tiedossa/.test(v)).map(v => `<span class="var">⚠ ${escH(v)}</span>`).join('');
+}
+function escH(t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function kalaPiirraKirjanpito() {
+  const l = kalaLista().slice().reverse(), el = $('kalaLista');
+  const kpl = l.filter(r => r.laji === 'lohi' && r.tulos === 'otettu').length, vap = l.filter(r => r.tulos === 'vapautettu').length;
+  $('kalaYhteenveto').textContent = l.length ? `${l.length} kirjausta: lohia otettu ${kpl}, vapautettu ${vap}, karanneita ${l.filter(r => r.tulos === 'karkasi').length}.` : 'Ei vielä kirjauksia. 🎣 KALA KIINNI tallentaa paikan ja ajan yhdellä napautuksella.';
+  el.innerHTML = l.slice(0, 60).map(r => {
+    const d = new Date(r.aika), il = Saalis.ilmoitettava(r), puu = il ? Saalis.puuttuu(r) : [], va = Saalis.rivinVaroitus(r);
+    return `<div><b>${escH(Saalis.lyhyt(r, true))}</b> · ${pvm(d)} klo ${klo(d)}${r.ices ? ' · ICES ' + r.ices.koodi : ''}${r.kunta ? ' · ' + escH(r.kunta.nimi) : ''}`
+      + `${r.viehe ? ' · ' + escH(r.viehe) : ''}${r.siima != null ? ` · siimaa ${luku(r.siima, 0)} m` : ''}${r.painoSiimassa != null ? ` · ${luku(r.painoSiimassa, 0)} g` : ''}`
+      + `${r.olot && isFinite(r.olot.pinta) ? ` · pinta ${luku(r.olot.pinta, 1)} °C` : ''}`
+      + (il ? (r.omakala ? ` · <span class="kalaok">Omakala ✓</span>` : ` · <span class="kalaei">Omakala ilmoittamatta${puu.length ? ' (puuttuu: ' + puu.join(', ') + ')' : ''}</span>`) : '')
+      + (!r.taydennetty ? ' · <span class="kalaei">täydentämättä</span>' : '') + (va ? `<br><span class="kalaei">⚠ ${escH(va)}</span>` : '')
+      + `<div class="napit" style="margin-top:4px"><button data-k="muokkaa" data-id="${r.id}">✏️ Muokkaa</button>`
+      + (il ? `<button data-k="omakala" data-id="${r.id}">📋 Omakala</button><button data-k="ilmoitettu" data-id="${r.id}">${r.omakala ? '↺ Ei ilmoitettu' : '✓ Ilmoitettu'}</button>` : '')
+      + `</div></div>`;
+  }).join('') + (l.length > 60 ? `<div class="pieni">… ${l.length - 60} vanhempaa (kaikki mukana CSV:ssä)</div>` : '');
+}
+$('kalaLista').addEventListener('click', e => {
+  const b = e.target.closest('button[data-k]'); if (!b) return;
+  const id = +b.dataset.id, l = kalaLista(), r = Saalis.etsi(l, id); if (!r) return;
+  if (b.dataset.k === 'muokkaa') { kalaAvaa(id); return; }
+  if (b.dataset.k === 'ilmoitettu') { Saalis.paivita(l, id, { omakala: r.omakala ? null : new Date().toISOString() }); kalaTallennaLista(l); kalaPaivitaKaikki(); return; }
+  if (b.dataset.k === 'omakala') {
+    const t = Saalis.omakalaTeksti(r);
+    const ok = () => { b.textContent = 'Kopioitu ✓'; setTimeout(() => { b.textContent = '📋 Omakala'; }, 4000); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(ok, () => alert(t)); else alert(t);
+  }
+});
+$('kalaCsv').addEventListener('click', () => {
+  const blob = new Blob([Saalis.csv(kalaLista())], { type: 'text/csv' }), d = new Date();
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `merilohitutka_saaliit_${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}.csv`;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+});
+function kalaPaivitaKaikki() {
+  kalaTilaNyt(); kalaPiirraKirjanpito();
+  if (kartta) { kartta.havainnot = kaikkiHavainnot(); kartta.piirra(); }
 }
 
 // ---------- Nousun lämpöraja ja 48 h aikajana (v28, Hannu 14.11.2026: "1 2 3 kerralla") ----------
@@ -3295,8 +3527,9 @@ kaynnistaGps();
   haeVarastosta(dataPolku(al) + 'meri.json').then(m => { if (m && !meri && al === valittuAlue) { meri = m; piirraMeriTila(); lataaNykyPaiva(); if (kartta) valitsePaiva(valittuPvm, null); } }); }
 lataaSyvyys();
 paivita();
+kalaPaivitaKaikki();   // v72
 setInterval(paivita, 10 * 60000);           // uusi data 10 min välein
-setInterval(() => { piirra(); }, 30000);    // tila päivittyy ajan kuluessa
+setInterval(() => { piirra(); kalaTilaNyt(); }, 30000);    // tila päivittyy ajan kuluessa (v72: kiintiörivi paikan mukaan)
 setInterval(piirraNopeus, 1000);            // nopeus ja hälytys sekunnin välein
 if (document.readyState === 'complete') rekisteroiSw(); else window.addEventListener('load', rekisteroiSw);   // v26
 </script>
