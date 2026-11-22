@@ -2527,9 +2527,15 @@ function piirraJokilaskuri() {
   if (!kortti || !window.Ikaluokat) return;
   const I = Ikaluokat, nyt = new Date(), huhti = ikaHuhti(), kv = I.kausiVuosi(nyt);
   const j = jokiData && jokiData.laskurit && jokiData.laskurit.jockfall;
-  const vuodet = j && j.vuodet ? Object.keys(j.vuodet).sort() : [];
+  const vuodet = j && j.vuodet ? Object.keys(j.vuodet).filter(k => Object.keys(j.vuodet[k].paivat || {}).length).sort() : [];
+  const kaudet = j && j.kaudet ? Object.keys(j.kaudet).filter(k => isFinite(j.kaudet[k].yhteensa)).sort() : [];
   if (!vuodet.length) {
-    $('jokiTila').textContent = jokiHaettu ? 'Ei vielä dataa: hakuajo kerää päivät kesä–elokuussa.' : 'Haetaan…';
+    // v65: päättyneen kauden sivulla vain kokonaismäärä (Hannu 22.11.: "Fiskräkning Jockfall, Kalixälven är nu avslutad")
+    const ks = kaudet.length ? j.kaudet[kaudet[kaudet.length - 1]] : null, fi = x => Number(x).toLocaleString('fi-FI');
+    const taimen = ks && ks.lajit && isFinite(ks.lajit['öring']) ? `, taimenia ${fi(ks.lajit['öring'])}` : '';
+    $('jokiTila').textContent = ks ? `${kaudet[kaudet.length - 1]}: ${fi(ks.yhteensa)} lohta (laskurin kokonaismäärä${taimen})${ks.paattynyt ? ', laskenta päättynyt' : ''}. `
+      + 'Päiväkohtaisia lukuja ei saatu talteen, joten nousun ajoitusta ei sovitettu eikä ennustetta korjattu. Hakuajo kerää päivät ensi kesästä.'
+      : jokiHaettu ? 'Ei vielä dataa: hakuajo kerää päivät kesä–elokuussa.' : 'Haetaan…';
     $('jokiKayra').innerHTML = ''; $('jokiLuku').textContent = '';
   } else {
     const y = Number(vuodet.includes(String(kv)) ? kv : vuodet[vuodet.length - 1]), v = j.vuodet[y];

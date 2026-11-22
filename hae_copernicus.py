@@ -21,6 +21,16 @@ pisteisiin (hae_tuuli.py, päivätiedostoihin). Näiden epäonnistuminen ei vaik
 v54 (17.11.2026): alueille, joilla "silakka": {"happi": true} (Eckerö), BGC-hakuun myös pohjan happi o2b (mmol/m3,
 päivätiedoston bgc.o2b); jos se ei onnistu, haetaan kd/zsd kuten ennen.
 
+v65 (22.11.2026, Hannu "tehdään korjaus mikä on tarpeen"): 1) REP-pintalämmön tunnus vaihtunut: ajon #101 lokin
+mukaan tuotteessa SST_BAL_SST_L4_REP_OBSERVATIONS_010_016 on nyt vain cmems_obs-sst_bal_phy-temp_my_l4_P1D-m (versio
+202511) → uusi tunnus ensin, vanha varalla; jos muuttujaa "analysed_sst" ei ole, avataan ilman muuttujarajausta ja
+lämpö valitaan nimestä. Vuodet 2016–2023 yritetään heti uudelleen (yritetty-merkinnät nollataan kerran, REP_KORJAUS).
+2) Jockfall: laskenta on päättynyt tältä vuodelta ("Fiskräkning Jockfall, Kalixälven är nu avslutad"). Sivulla on silloin
+otsikko ilman "i <joki>, <paikka>, <vuosi>" ja taulukossa vain rivi "TOTAL 2026" (WebFetch 22.11.2026: lax 15563) → ajon
+#101 virhe "ei laskuritaulukoita". Nyt taulukko tunnistetaan väljemmin (Datum + Lax, laskuri sanasta Jockfall/Linafallet,
+vuosi TOTAL-riviltä), kauden kokonaismäärä lajeittain laskurit.<avain>.kaudet.<vuosi>:iin, päivät edelleen vuodet-kohtaan.
+Taulukoton "avslutad"-sivu ei ole virhe; tunnistamattomasta sivusta ote jokilaskurit.json:n tila-kohtaan. Merkistö otsakkeesta.
+
 v64 (21.11.2026, Hannu "7 8 10 myös muikku silakka ahven taimen jos löytyy"): alueittain Luken VELMU-aineiston
 silakan, muikun ja ahvenen mallinnetut poikastuotantoalueet kuvina (hae_lisaantyminen.py, kerran vuodessa).
 
@@ -100,9 +110,11 @@ LAHTEET = {
                 muuttujat=["analysed_sst"]),
     # v57: uusinta-ajo huhtikuiden vertailujaksoon (NRT-arkisto ei ulotu vuoteen 2016). Datasetin tunnus STAC-
     # metatiedosta (sextant.ifremer.fr), ei vielä kokeiltu ajossa: virheessä avaa() listaa tuotteen datasetit lokiin.
+    # v65: tunnus vaihtunut [L, ajon #101 loki 22.11.2026: tuotteen ainoa datasetti cmems_obs-sst_bal_phy-temp_my_l4_P1D-m,
+    # versio 202511]; vanha varalla. muuttuja_vapaa: jos muuttujarajaus kaatuu, avataan ilman (sst_kentta valitsee).
     "sst_rep": dict(tuote="SST_BAL_SST_L4_REP_OBSERVATIONS_010_016",
-                    ehdokkaat=["DMI_BAL_SST_L4_REP_OBSERVATIONS_010_016"],
-                    muuttujat=["analysed_sst"]),
+                    ehdokkaat=["cmems_obs-sst_bal_phy-temp_my_l4_P1D-m", "DMI_BAL_SST_L4_REP_OBSERVATIONS_010_016"],
+                    muuttujat=["analysed_sst"], muuttuja_vapaa=True),
     # v43: PUM CMEMS-BAL-PUM-003-006-007: kd [m-1] "Light Attenuation" ja zsd [m] Secchi, hetkiarvot klo 12 UTC
     # päiväaineistossa (ei tuntiaineistoa). deptho staattisessa mask_bathy-tiedostossa.
     "bgc": dict(tuote="BALTICSEA_ANALYSISFORECAST_BGC_003_007",
@@ -371,9 +383,19 @@ def avaa(lahde, alku, loppu, syvyys=None, alue=None):
             if syvyys:
                 kw.update(minimum_depth=syvyys[0], maximum_depth=syvyys[1])
             try:
-                return copernicusmarine.open_dataset(coordinates_selection_method="inside", **kw), ds_id
-            except TypeError:
-                return copernicusmarine.open_dataset(**kw), ds_id
+                try:
+                    return copernicusmarine.open_dataset(coordinates_selection_method="inside", **kw), ds_id
+                except TypeError:
+                    return copernicusmarine.open_dataset(**kw), ds_id
+            except Exception as e1:  # noqa: BLE001
+                if not lahde.get("muuttuja_vapaa"):
+                    raise
+                virheet.append(f"{ds_id} ({','.join(lahde['muuttujat'])}): {str(e1)[:200]}")
+                kw.pop("variables", None)   # v65: muuttujan nimi voi olla uudessa datasetissä toinen
+                try:
+                    return copernicusmarine.open_dataset(coordinates_selection_method="inside", **kw), ds_id
+                except TypeError:
+                    return copernicusmarine.open_dataset(**kw), ds_id
         except Exception as e:  # noqa: BLE001
             virheet.append(f"{ds_id}: {e}")
     # Apua korjaukseen: listataan tuotteen datasetit lokiin
@@ -564,12 +586,30 @@ def palauta_edelliset(kansio, vanha, osoite=None):
 
 # ---------------------------------------------------------------- v57: ikäluokkaennusteen huhtikuun lämpö
 
+def sst_kentta(ds):
+    """v65: pintalämpömuuttuja: analysed_sst, muuten ensimmäinen, jonka nimessä sst, sitten temp/thetao."""
+    try:
+        return ds["analysed_sst"]
+    except KeyError:
+        pass
+    nimet = list(getattr(ds, "data_vars", {}))
+    for avain in ("sst", "temp", "thetao"):
+        for n in nimet:
+            if avain in n.lower() and "error" not in n.lower() and "mask" not in n.lower():
+                print(f"  pintalämpö muuttujasta {n} (ei analysed_sst)")
+                return ds[n]
+    raise KeyError(f"ei pintalämpömuuttujaa: {nimet}")
+
+
+REP_KORJAUS = "v65"   # muutos nollaa epäonnistuneiden vuosien päivämerkinnät kerran (uusi yritys heti)
+
+
 def huhtikuun_lampo(lahde, vuosi):
     """Huhtikuun keskimääräinen pintalämpö (°C) laatikossa IKA_ALUE: päivittäinen alueen keskiarvo, sitten päivien keskiarvo."""
     alku = datetime(vuosi, 4, 1, tzinfo=timezone.utc)
     loppu = datetime(vuosi, 4, 30, 23, 59, tzinfo=timezone.utc)
     ds, ds_id = avaa(lahde, alku, loppu, alue=IKA_ALUE)
-    a = np.asarray(ds["analysed_sst"].values, dtype=float)
+    a = np.asarray(sst_kentta(ds).values, dtype=float)
     a = a.reshape(a.shape[0], -1) if a.ndim >= 2 else a.reshape(-1, 1)
     if np.isfinite(a).any() and np.nanmean(a) > 200:   # kelvin -> °C
         a = a - 273.15
@@ -612,7 +652,7 @@ def paivita_ikaluokat(perus, nyt, osoite=None, hae=huhtikuun_lampo, vanha=None):
         kirjoita_json(polku, vanha)   # aikakatkaisunkin jälkeen julkaisuun menee vähintään edellinen
     tanaan = nyt.strftime("%Y-%m-%d")
     huhti = dict(vanha.get("huhtikuu") or {})
-    yritetty = dict(vanha.get("yritetty") or {})
+    yritetty = dict(vanha.get("yritetty") or {}) if vanha.get("korjaus") == REP_KORJAUS else {}   # v65: uusi REP-tunnus → heti uudelleen
     virheet = []
     for v in range(IKA_ENSIMMAINEN, viimeisin_huhtikuu(nyt) + 1):
         if str(v) in huhti or yritetty.get(str(v)) == tanaan:
@@ -641,7 +681,7 @@ def paivita_ikaluokat(perus, nyt, osoite=None, hae=huhtikuun_lampo, vanha=None):
                     "erotus": round(r["T"] - rep["T"], 2) if r["T"] is not None else None}
         except Exception as e:  # noqa: BLE001
             vert = {"vuosi": IKA_REP_VIIMEINEN, "virhe": str(e)[:200]}
-    tulos = {"versio": 1, "paivitetty": iso(nyt), "paikka": "Trelleborg–Sassnitz", "laatikko": IKA_ALUE,
+    tulos = {"versio": 1, "korjaus": REP_KORJAUS, "paivitetty": iso(nyt), "paikka": "Trelleborg–Sassnitz", "laatikko": IKA_ALUE,
              "huhtikuu": dict(sorted(huhti.items())), "vertailu": vert, "yritetty": yritetty, "virheet": virheet}
     if huhti:
         kirjoita_json(polku, tulos)
@@ -668,7 +708,7 @@ def loma_sst(lahde, vuosi):
     laatikko = dict(lat_min=LOMA_RANTA["lat"] - 0.02, lat_max=LOMA_RANTA["lat"] + 0.02,
                     lon_min=min(p["lon"] for p in pp) - 0.02, lon_max=max(p["lon"] for p in pp) + 0.02)
     ds, ds_id = avaa(lahde, a, a + timedelta(days=n) - timedelta(minutes=1), alue=laatikko)
-    x = np.asarray(ds["analysed_sst"].values, dtype=float)          # (aika, lat, lon)
+    x = np.asarray(sst_kentta(ds).values, dtype=float)          # (aika, lat, lon)
     if np.isfinite(x).any() and np.nanmean(x) > 200:
         x = x - 273.15
     lat = np.asarray(ds["latitude"].values, dtype=float)
@@ -740,14 +780,14 @@ def paivita_lomadata(perus, nyt, osoite=None, hae_sst=loma_sst, hae_tuuli_fn=lom
     if vanha.get("versio") != LOMA_VERSIO:   # v60: muoto muuttui → kaikki kesät uudelleen
         vanha = {}
     vuodet = dict(vanha.get("vuodet") or {})
-    yritetty = dict(vanha.get("yritetty") or {})
+    yritetty = dict(vanha.get("yritetty") or {}) if vanha.get("korjaus") == REP_KORJAUS else {}   # v65: uusi REP-tunnus → heti uudelleen
     tanaan, virheet, asema = nyt.strftime("%Y-%m-%d"), [], vanha.get("asema")
     viimeinen = nyt.year if nyt >= datetime(nyt.year, 8, 2, tzinfo=timezone.utc) else nyt.year - 1
     alku_t = time.monotonic()
 
     def kirjoita_nyt():
         if vuodet:
-            kirjoita_json(polku, {"versio": LOMA_VERSIO, "paivitetty": iso(nyt), "piste": LOMA_PISTE, "asema": asema,
+            kirjoita_json(polku, {"versio": LOMA_VERSIO, "korjaus": REP_KORJAUS, "paivitetty": iso(nyt), "piste": LOMA_PISTE, "asema": asema,
                                   "asemaNimi": LOMA_ASEMA["nimi"], "jakso": ["05-01", "07-31"], "ranta": LOMA_RANTA,
                                   "suunta": 270, "pisteet": loma_pisteet(), "vuodet": dict(sorted(vuodet.items())),
                                   "yritetty": yritetty, "virheet": virheet})
@@ -868,28 +908,55 @@ def jasenna_fiskrakning(html):
     luku = lambda x: int(re.sub(r"[^\d]", "", x)) if re.search(r"\d", x or "") else 0
     tulos = {}
     for t in p.taulut:
-        m = re.search(r"fiskr\u00e4kning i ([^,]+),\s*([^,]+?),\s*(\d{4})", t["ennen"]) or \
-            re.search(r"fiskr\u00e4kning i ([^,]+),\s*([^,]+?)\s*,?\s*(\d{4})", " ".join(" ".join(r) for r in t["rivit"][:2]))
-        if not m:
+        sisalto = " ".join(" ".join(r) for r in t["rivit"][:2])
+        # v65: otsikko väljemmin (ä voi olla mitä tahansa merkistövirheen takia); laskuri myös pelkästä paikan nimestä
+        m = re.search(r"fiskr.{1,2}kning i ([^,]+),\s*([^,]+?),\s*(\d{4})", t["ennen"]) or \
+            re.search(r"fiskr.{1,2}kning i ([^,]+),\s*([^,]+?)\s*,?\s*(\d{4})", sisalto)
+        otsake = next((r for r in t["rivit"] if any(c.lower().startswith("datum") for c in r)), None)
+        if not otsake or not any(c.lower().startswith("lax") for c in otsake):
             continue
-        avain = _avain(m.group(2))
-        otsake = next((r for r in t["rivit"] if any(c.lower() == "datum" for c in r)), None)
-        if not otsake or not any(c.lower() == "lax" for c in otsake):
-            continue
-        i_lax = [c.lower() for c in otsake].index("lax")
-        paivat, yhteensa, asennettu = {}, None, None
+        if m:
+            avain = _avain(m.group(2))
+        else:
+            loydetyt = [(t["ennen"] + " " + sisalto).lower().rfind(k) for k in ("jockfall", "linafallet")]
+            if max(loydetyt) < 0:
+                continue
+            avain = ("jockfall", "linafallet")[loydetyt.index(max(loydetyt))]   # lähimpänä taulukkoa oleva nimi
+        i_lax = [c.lower()[:3] for c in otsake].index("lax")
+        paivat, yhteensa, asennettu, lajit, v_total = {}, None, None, {}, None
         for r in t["rivit"]:
             eka = r[0] if r else ""
             if re.fullmatch(r"\d{4}-\d{2}-\d{2}", eka):
                 paivat[eka] = luku(r[i_lax]) if len(r) > i_lax else 0
             elif eka.upper().startswith("TOTAL") and len(r) > i_lax:
                 yhteensa = luku(r[i_lax])
+                # v65: kauden päätyttyä sivulla vain "TOTAL 2026" -rivi (Jockfall) / "TOTALT 2026" (Linafallet)
+                lajit = {otsake[i].lower(): luku(r[i]) for i in range(1, min(len(r), len(otsake))) if re.search(r"\d", r[i])}
+                vt = re.search(r"(20\d{2})", eka)
+                v_total = int(vt.group(1)) if vt else None
         a = re.search(r"[Ii]nstaller\w*\D{0,20}(\d{4}-\d{2}-\d{2})", t["ennen"] + " " + " ".join(" ".join(r) for r in t["rivit"]))
         if a:
             asennettu = a.group(1)
-        tulos[avain] = {"vuosi": int(m.group(3)), "paivat": paivat, "yhteensa": yhteensa, "asennettu": asennettu,
-                        "joki": m.group(1).strip(), "paikka": m.group(2).strip()}
+        vuodet = [int(k[:4]) for k in paivat]
+        vuosi = int(m.group(3)) if m else (max(set(vuodet), key=vuodet.count) if vuodet else v_total)
+        if vuosi is None:
+            continue
+        perus = JOKILASKURIT.get(avain, {})
+        tulos[avain] = {"vuosi": vuosi, "paivat": paivat, "yhteensa": yhteensa, "asennettu": asennettu, "lajit": lajit,
+                        "paattynyt": bool(re.search(r"avslutad", t["ennen"], re.I)),
+                        "joki": m.group(1).strip() if m else perus.get("joki", ""), "paikka": m.group(2).strip() if m else perus.get("nimi", avain)}
     return tulos
+
+
+def jokisivun_tila(html):
+    """v65: { paattynyt, ote }: päättynyt = sivulla "avslutad" (Hannu 22.11.: "Fiskräkning Jockfall, Kalixälven är nu
+    avslutad"); ote = raaka HTML Jockfall-kohdan ympäriltä tunnistuksen korjaamiseksi."""
+    import re
+    teksti = re.sub(r"<[^>]+>", " ", html)
+    paattynyt = bool(re.search(r"avslutad", teksti, re.I))
+    i = html.lower().find("jockfall")
+    ote = html[max(0, i - 1500): i + 3000] if i >= 0 else html[:3000]
+    return {"paattynyt": paattynyt, "taulukoita": html.lower().count("<table"), "pituus": len(html), "ote": ote}
 
 
 def paivita_jokilaskurit(perus, nyt, hae=None, vanha=None):
@@ -905,12 +972,30 @@ def paivita_jokilaskurit(perus, nyt, hae=None, vanha=None):
     def lataa(url):
         pyynto = urllib.request.Request(url, headers={"User-Agent": "merilohitutka (github.com/Lohirosvo/merilohitutka)"})
         with urllib.request.urlopen(pyynto, timeout=30) as r:
-            return r.read().decode("utf-8", "replace")
-    taulut = jasenna_fiskrakning((hae or lataa)(JOKILASKURI_URL))
+            return r.read().decode(r.headers.get_content_charset() or "utf-8", "replace")   # v65: merkistö otsakkeesta
+    html = (hae or lataa)(JOKILASKURI_URL)
+    taulut = jasenna_fiskrakning(html)
     if not taulut:
-        raise ValueError("sivulta ei löytynyt laskuritaulukoita (rakenne muuttunut?)")
+        tila = jokisivun_tila(html)
+        sis["luotu"] = nyt.strftime("%Y-%m-%dT%H:%MZ")
+        if tila["paattynyt"]:   # v65: kausi ohi → ei virhe; kerätyt päivät säilyvät
+            sis["tila"] = {"tulos": "päättynyt", "haettu": sis["luotu"]}
+            kirjoita_json(polku, sis)
+            print("  jokilaskurit: laskenta päättynyt tältä vuodelta (sivulla 'avslutad'), ei taulukkoa")
+            return sis
+        sis["tila"] = {"tulos": "virhe", "haettu": sis["luotu"], "taulukoita": tila["taulukoita"], "pituus": tila["pituus"],
+                       "ote": tila["ote"]}
+        kirjoita_json(polku, sis)   # ote julkiseen tiedostoon: tunnistus korjataan sen perusteella
+        raise ValueError(f"sivulta ei löytynyt laskuritaulukoita ({tila['taulukoita']} <table>, {tila['pituus']} merkkiä; ote jokilaskurit.json:ssa)")
     for avain, t in taulut.items():
         k = sis["laskurit"].setdefault(avain, dict(JOKILASKURIT.get(avain, {"nimi": t["paikka"], "joki": t["joki"], "km": None}), vuodet={}))
+        if t["yhteensa"] is not None:   # v65: kauden kokonaismäärä erikseen (päättyneen kauden sivulla vain TOTAL-rivi)
+            k.setdefault("kaudet", {})[str(t["vuosi"])] = {"yhteensa": t["yhteensa"], "lajit": t.get("lajit") or {},
+                                                          "paattynyt": bool(t.get("paattynyt")), "haettu": nyt.strftime("%Y-%m-%dT%H:%MZ")}
+        if not t["paivat"] and str(t["vuosi"]) not in k["vuodet"]:
+            print(f"  jokilaskuri {avain} {t['vuosi']}: ei päiviä sivulla, kauden kokonaismäärä {t['yhteensa']}"
+                  + (" (laskenta päättynyt)" if t.get("paattynyt") else ""))
+            continue   # vuosi ilman päiviä ei vuodet-kohtaan (sovellus piirtää sieltä päiväkuvaajan)
         v = k["vuodet"].setdefault(str(t["vuosi"]), {"paivat": {}})
         v["paivat"] = dict(sorted({**v.get("paivat", {}), **t["paivat"]}.items()))
         if t["yhteensa"] is not None:
@@ -920,6 +1005,7 @@ def paivita_jokilaskurit(perus, nyt, hae=None, vanha=None):
         v["haettu"] = nyt.strftime("%Y-%m-%dT%H:%MZ")
         print(f"  jokilaskuri {avain} {t['vuosi']}: {len(t['paivat'])} päivää sivulla, talteen {len(v['paivat'])}, yhteensä {t['yhteensa']}")
     sis["luotu"] = nyt.strftime("%Y-%m-%dT%H:%MZ")
+    sis["tila"] = {"tulos": "päättynyt" if any(t.get("paattynyt") for t in taulut.values()) else "ok", "haettu": sis["luotu"]}
     kirjoita_json(polku, sis)
     return sis
 
