@@ -21,6 +21,9 @@ pisteisiin (hae_tuuli.py, päivätiedostoihin). Näiden epäonnistuminen ei vaik
 v54 (17.11.2026): alueille, joilla "silakka": {"happi": true} (Eckerö), BGC-hakuun myös pohjan happi o2b (mmol/m3,
 päivätiedoston bgc.o2b); jos se ei onnistu, haetaan kd/zsd kuten ennen.
 
+v68 (22.11.2026, Hannu "Tehdään koeajo"): koe_vesialueet.py ajetaan lopuksi kerran vuorokaudessa: tunnistuuko valtion yleinen
+vesialue Maanmittauslaitoksen avoimesta INSPIRE-kiinteistöaineistosta. Vain loki ja data/vesialue_koe.json, ei karttaa.
+
 v67 (22.11.2026, Hannu "Saako kartalle sen lohen kalastusviivan missä raja kulkee … Tehdään, ei viivaa ahvenanmaalle"):
 alueille, joilla alueet.js:ssä "lohirajat": true, haetaan Traficomin perusviiva ja lasketaan 4 mpk:n raja (hae_rajat.py,
 rajat.json alueen kansioon, uusinta 90 vrk). Virhe ei vaikuta muuhun hakuun.
@@ -1196,7 +1199,8 @@ def main(polku):
     except Exception as e:  # noqa: BLE001
         traceback.print_exc()
         print(f"Ikäluokat: VIRHE {e}", file=sys.stderr)
-    for alue in lue_alueet():
+    alueet = lue_alueet()
+    for alue in alueet:
         alku = time.monotonic()
         try:
             ok = hae_alue(alue, perus, nyt, luotu)
@@ -1211,6 +1215,12 @@ def main(polku):
     except Exception as e:  # noqa: BLE001
         traceback.print_exc()
         print(f"Lomadata: VIRHE {e}", file=sys.stderr)
+    try:   # v68: KOEAJO – yleinen vesialue MML:n kiinteistöaineistosta (kerran vuorokaudessa, ≤ 4 min); ei vaikuta muuhun
+        import koe_vesialueet
+        koe_vesialueet.aja(perus, alueet, sivun_osoite(), hae_vanha=hae_json_sivulta)
+    except Exception as e:  # noqa: BLE001
+        traceback.print_exc()
+        print(f"Vesialuekoe: VIRHE {e}", file=sys.stderr)
     if not all(onnistui):
         sys.exit(1)   # lokiin punainen merkki; julkaisu tehdään silti (continue-on-error)
 
