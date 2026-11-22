@@ -21,6 +21,11 @@ pisteisiin (hae_tuuli.py, päivätiedostoihin). Näiden epäonnistuminen ei vaik
 v54 (17.11.2026): alueille, joilla "silakka": {"happi": true} (Eckerö), BGC-hakuun myös pohjan happi o2b (mmol/m3,
 päivätiedoston bgc.o2b); jos se ei onnistu, haetaan kd/zsd kuten ennen.
 
+v66 (22.11.2026, Hannu "Itse hyväksyisin 59 päivää"): lomadatan kesä hyväksytään, kun tuulipäiviä on vähintään
+LOMA_TUULI_MIN = 59 (ennen 60; raja on arvio, ei lähteestä). Ajon #103 mukaan 2022:ssa on 59 tuulipäivää → kesä haettiin
+turhaan joka päivä. Puuttuvat päivät ovat laskennassa tuntemattomia (ikaluokat.js lomaVuosi: tuuli null, jos alle puolet
+tunneista). REP_KORJAUS "v66" nollaa yritetty-merkinnät kerran → 2022 haetaan jo latauksen käynnistämässä ajossa.
+
 v65 (22.11.2026, Hannu "tehdään korjaus mikä on tarpeen"): 1) REP-pintalämmön tunnus vaihtunut: ajon #101 lokin
 mukaan tuotteessa SST_BAL_SST_L4_REP_OBSERVATIONS_010_016 on nyt vain cmems_obs-sst_bal_phy-temp_my_l4_P1D-m (versio
 202511) → uusi tunnus ensin, vanha varalla; jos muuttujaa "analysed_sst" ei ole, avataan ilman muuttujarajausta ja
@@ -601,7 +606,8 @@ def sst_kentta(ds):
     raise KeyError(f"ei pintalämpömuuttujaa: {nimet}")
 
 
-REP_KORJAUS = "v65"   # muutos nollaa epäonnistuneiden vuosien päivämerkinnät kerran (uusi yritys heti)
+REP_KORJAUS = "v66"   # muutos nollaa epäonnistuneiden vuosien päivämerkinnät kerran (uusi yritys heti; v65 REP-tunnus, v66 lomadatan 59 pv)
+LOMA_TUULI_MIN = 59  # v66: kesän vähimmäistuulipäivät (≥ 12 tuntiarvoa); arvio [A], Hannu 22.11. (2022: 59 päivää)
 
 
 def huhtikuun_lampo(lahde, vuosi):
@@ -814,7 +820,7 @@ def paivita_lomadata(perus, nyt, osoite=None, hae_sst=loma_sst, hae_tuuli_fn=lom
         try:
             tuuli, a = hae_tuuli_fn(v)
             paivia = sum(1 for d in tuuli if sum(x is not None for x in d) >= 12)
-            if paivia >= 60:
+            if paivia >= LOMA_TUULI_MIN:
                 rivi["tuuli"] = tuuli
                 asema = asema or a
             else:
