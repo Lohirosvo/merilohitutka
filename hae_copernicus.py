@@ -21,6 +21,10 @@ pisteisiin (hae_tuuli.py, päivätiedostoihin). Näiden epäonnistuminen ei vaik
 v54 (17.11.2026): alueille, joilla "silakka": {"happi": true} (Eckerö), BGC-hakuun myös pohjan happi o2b (mmol/m3,
 päivätiedoston bgc.o2b); jos se ei onnistu, haetaan kd/zsd kuten ennen.
 
+v67 (22.11.2026, Hannu "Saako kartalle sen lohen kalastusviivan missä raja kulkee … Tehdään, ei viivaa ahvenanmaalle"):
+alueille, joilla alueet.js:ssä "lohirajat": true, haetaan Traficomin perusviiva ja lasketaan 4 mpk:n raja (hae_rajat.py,
+rajat.json alueen kansioon, uusinta 90 vrk). Virhe ei vaikuta muuhun hakuun.
+
 v66 (22.11.2026, Hannu "Itse hyväksyisin 59 päivää"): lomadatan kesä hyväksytään, kun tuulipäiviä on vähintään
 LOMA_TUULI_MIN = 59 (ennen 60; raja on arvio, ei lähteestä). Ajon #103 mukaan 2022:ssa on 59 tuulipäivää → kesä haettiin
 turhaan joka päivä. Puuttuvat päivät ovat laskennassa tuntemattomia (ikaluokat.js lomaVuosi: tuuli null, jos alle puolet
@@ -1066,6 +1070,16 @@ def hae_alue(alue, perus, nyt, luotu):
     except Exception as e:  # noqa: BLE001
         traceback.print_exc()
         lisa = {"tila": "virhe", "viesti": f"{e}"[:300]}
+    rajat_tila = None
+    if alue.get("lohirajat"):   # v67: lohen 4 mpk:n raja Traficomin perusviivasta (harvoin, 90 vrk); ei Ahvenanmaalle (Hannu 22.11.)
+        try:
+            import hae_rajat
+            alku = time.monotonic()
+            rajat_tila = hae_rajat.paivita(kansio, osoite, alue=rajat, kuvaus=alue)
+            print(f"lohirajat: {rajat_tila.get('tila')}, {time.monotonic() - alku:.0f} s")
+        except Exception as e:  # noqa: BLE001
+            traceback.print_exc()
+            rajat_tila = {"tila": "virhe", "viesti": f"{e}"[:300]}
     tulokset, virheet = {}, []
     for nimi, hakija in (("phy", hae_phy), ("wav", hae_wav), ("sst", hae_sst)):
         alku = time.monotonic()
@@ -1157,6 +1171,8 @@ def hae_alue(alue, perus, nyt, luotu):
                                    bgc=bgc, pohja=pohja, kerros=kerros, lisaantyminen=lisa)
     if alue.get("silakka") and vanha_pohja and "pohja" not in hakemisto:
         hakemisto["pohja"] = vanha_pohja
+    if rajat_tila:   # v67
+        hakemisto["rajat"] = rajat_tila
     hakemisto["tunnus"], hakemisto["nimi"] = tunnus, alue.get("nimi", tunnus)
     kirjoita(kansio, hakemisto, tiedostot)
     return True

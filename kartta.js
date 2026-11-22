@@ -2,6 +2,9 @@
  * Kevyt oma karttanäkymä (ei ulkoisia kirjastoja): OSM-taustakartta valinnaisena,
  * Copernicus-datasta lämpökäyrät, lohikerros (lämpövälin syvyys; v25 pehmeä reuna ja rajaviiva), satelliittilämpö, pintavirtanuolet
  * ja aallonkorkeus. Traficomin merikartan syvyyskäyrät (v8), Väyläviraston väylät ja IL:n tuulinuolet (v9).
+ * v67 (Hannu 22.11.2026 "Saako kartalle sen lohen kalastusviivan missä raja kulkee … Tehdään, ei viivaa ahvenanmaalle"):
+ *   lohen 4 mpk:n raja (laskettu Traficomin perusviivasta, hae_rajat.py → rajat.json) ja 63°30′N:n alamittaraja; siru "Lohirajat".
+ *   Ei virallinen raja, ei navigointiin.
  * v64 (Hannu 21.11.2026 "7 8 10 myös muikku silakka ahven"): Luken VELMU-mallin poikastuotantoalueet (silakka, muikku, ahven)
  *   kuvana alueen rajoille (EPSG:3857 = kartan projektio), siru "Poikasalueet", laji valitaan sirun vierestä.
  * v63 (Hannu 21.11.2026 "2 4 5"): salamat (IL, viimeinen tunti) salamasymbolina, 0–15 min kirkas, 15–60 min haalea; siru "Salamat".
@@ -231,6 +234,67 @@
       merkit: (j.merkit || []).filter(m => m && Array.isArray(m.p) && m.p.length === 2 && isFinite(m.p[0]) && isFinite(m.p[1])),
       merkitLahde: j.merkitLahde || null, merkitVirhe: j.merkitVirhe || null };
   }
+  // v67: lohen kalastusrajat. 4 mpk = 4 × 1852 m perusviivasta [L SVK 2026: "Alue ulottuu rannikosta 4 meripeninkulmaa (7,41 km)
+  // perusviivan ulkopuolelle"]; viiva laskettu (hae_rajat.py), ei virallinen. Alamitta [L SVK/ahven.net pyyntimittataulukko 2025]:
+  // lohi vähintään 60 cm, leveyspiirin 63°30′N pohjoispuolella Perämeressä vähintään 50 cm.
+  const ALAMITTA = { lat: 63.5, pohjoinen: 50, etela: 60 };
+  const RAJAVARI = '#d4ff3a', RAJALLA_M = 100;
+  /** rajat.json -> { luotu, lahde, huom, raja4: [puraViiva…], perus: [puraViiva…], ruudukko, tilasto } tai null. */
+  function puraRajat(j) {
+    if (!j || !Array.isArray(j.raja4) || !j.ruudukko || !Array.isArray(j.ruudukko.rle)) return null;
+    const [olat, olon] = j.origo, k = j.kerroin || 100000;
+    const pura = a => (Array.isArray(a) && a.length >= 4 ? puraViiva(a, olat, olon, k) : null);
+    return { luotu: j.luotu, lahde: j.lahde, huom: j.huom, alue: j.alue, raja4: j.raja4.map(pura).filter(Boolean),
+      perus: (j.perusviiva || []).map(pura).filter(Boolean), ruudukko: j.ruudukko, tilasto: j.tilasto || null };
+  }
+  /** Ruudukon luokka pisteessä: true = 4 mpk:n sisäpuolella, false = ulkopuolella, null = ruudukon ulkopuolella. */
+  function rajaRuutu(g, lat, lon) {
+    const i = Math.floor((lat - g.lat0) / g.dlat), j = Math.floor((lon - g.lon0) / g.dlon);
+    if (!(i >= 0 && i < g.rivit && j >= 0 && j < g.sarakkeet)) return null;
+    let tila = true, n = 0;
+    for (const r of g.rle[i] || []) { if (j < n + r) return tila; n += r; tila = !tila; }
+    return null;
+  }
+  /** Lähin etäisyys (m) purettuihin viivoihin ({ ll, la0, la1, lo0, lo1 }); rajaM: kauemmat ohitetaan rajauslaatikosta. */
+  function etaisyysViivoihin(viivat, lat, lon, rajaM = 50000) {
+    const kx = kmLon(lat) * 1000, ky = KM_LAT * 1000, mla = rajaM / ky, mlo = rajaM / kx;
+    let paras = Infinity;
+    for (const v of viivat) {
+      if (lat < v.la0 - mla || lat > v.la1 + mla || lon < v.lo0 - mlo || lon > v.lo1 + mlo) continue;
+      const ll = v.ll;
+      for (let i = 0; i + 3 < ll.length; i += 2) {
+        const ax = (ll[i + 1] - lon) * kx, ay = (ll[i] - lat) * ky, bx = (ll[i + 3] - lon) * kx, by = (ll[i + 2] - lat) * ky;
+        const dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy, t = L2 > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / L2)) : 0;
+        const d = Math.hypot(ax + t * dx, ay + t * dy);
+        if (d < paras) paras = d;
+      }
+    }
+    return paras;
+  }
+  /** 4 mpk:n tilanne pisteessä: { sisalla (true/false/null), m (etäisyys rajaviivaan), rajalla } tai null ilman dataa. */
+  function rajaTila(R, lat, lon) {
+    if (!R) return null;
+    const sisalla = rajaRuutu(R.ruudukko, lat, lon);
+    if (sisalla === null) return null;
+    const m = etaisyysViivoihin(R.raja4, lat, lon);
+    return { sisalla, m, rajalla: m < RAJALLA_M };
+  }
+  /** 63°30′:n alamittaraja niille alueille, joilla lohirajat ja joiden rajojen läpi leveyspiiri kulkee: [{ lat, lon0, lon1 }]. */
+  function alamittaViivat(alueet) {
+    return (alueet || []).filter(a => a.lohirajat && a.rajat && a.rajat.lat_min < ALAMITTA.lat && a.rajat.lat_max > ALAMITTA.lat)
+      .map(a => ({ lat: ALAMITTA.lat, lon0: a.rajat.lon_min, lon1: a.rajat.lon_max }));
+  }
+  /** Lohen alamitta (cm) pisteessä alueella, jolla lohirajat (Ahvenanmaa pois: omat säännöt). */
+  function alamitta(lat) { return lat >= ALAMITTA.lat ? ALAMITTA.pohjoinen : ALAMITTA.etela; }
+  /** Vapaa-ajan lohisäännöt 2026, osa-alueet 29–31 [L SVK 2026, tietopohja L39]. pvm = Date. */
+  const LOHISAANNOT_VUOSI = 2026;
+  function lohisaanto(sisalla, pvm) {
+    const kk = pvm.getMonth() + 1, kesa = kk >= 5 && kk <= 8;
+    const t = sisalla && kesa ? '2 lohta/vrk, rasvaevällisiä tai -eväleikattuja (1.5.–31.8.)'
+      : '1 rasvaeväleikattu lohi/vrk, rasvaevällinen heti takaisin' + (sisalla ? ', kalastus loppuu päiväksi ensimmäisen jälkeen' : '');
+    return t + (pvm.getFullYear() !== LOHISAANNOT_VUOSI ? ` (vuoden ${LOHISAANNOT_VUOSI} säännöt – tarkista kalastusrajoitus.fi)` : '');
+  }
+
   // v61: turvalaitteet. Navigointilajikoodi 1–6 päätelty rajapinnan esimerkkiriveistä 21.11.2026 [K]: 1 vasen (punainen),
   // 2 oikea (vihreä), 3 pohjois (musta/keltainen), 4 etelä (keltainen/musta), 5 länsi (keltainen/musta/keltainen),
   // 6 itä (musta/keltainen/musta); 99 = ei navigointilajia (kiinteät). Muut koodit: väri symbolikirjaimesta, jos tunnettu.
@@ -656,7 +720,7 @@
       this.lohiReuna = isFinite(opts.lohiReuna) ? opts.lohiReuna : 0.4;
       this.jyrkka = opts.jyrkka || [0.3, 0.05];   // v26: [vähintään Hs m, jyrkkyys osuutena]   // v25: pehmeän reunan leveys (°C), 0 = terävä
       this.aaltoRajat = opts.aaltoRajat || [0.35, 0.5];   // merkitsevä aallonkorkeus (m)
-      this.tasot = { lampo: true, lohi: true, syvyys: true, tuuli: true, vaylat: true, havainnot: true, aaltoraja: true, jalki: true, matalikot: true, ais: false, sst: false, virta: true, aalto: false, tausta: true, silakka: false, turvalaitteet: true, salamat: true, poikaset: false };   // v43: silakka = valomallin napautusteksti; v61 turvalaitteet
+      this.tasot = { lampo: true, lohi: true, syvyys: true, tuuli: true, vaylat: true, havainnot: true, aaltoraja: true, jalki: true, matalikot: true, ais: false, sst: false, virta: true, aalto: false, tausta: true, silakka: false, turvalaitteet: true, salamat: true, poikaset: false, rajat: true };   // v43: silakka = valomallin napautusteksti; v61 turvalaitteet
       this.syvyys = null;   // puraSyvyys()-tulos
       this.vaylat = null;   // puraVaylat()-tulos
       this.ylaVara = 0; this.alaVara = 0;   // ohjainten peittämä osa ylhäällä ja alhaalla (px)
@@ -670,6 +734,7 @@
       this.silakkaFn = null;   // v50: (aikaIndeksi) => { lat, lon, luokka[i][j] (0 ei, 1 sopiva, 2 optimi), vaiheet, kaudella } tai null
       this.lohiTaalla = false; this.valittuOma = false;   // v24: lohikerros omalla kohdalla (profiili seuraa venettä)
       this.poikaset = null;   // v64: { valittu, lajit: [{ laji, nimi, bbox3857, kuva, leveys, korkeus, selite }] }
+      this.lohirajat = null; this.alamitta = [];   // v67: puraRajat()-tulos ja 63°30′:n janat (alamittaViivat)
       this.salamat = [];   // v63: [{ lat, lon, aika (ms), maa, virta }] (avoindata.js salamat)
       this.viat = [];   // v62: turvalaiteviat [{ lat, lon, u, nimi, vika, tila, aika }] (avoindata.js jasennaViat)
       this.ais = [];   // AIS-kohteet (v23): [{ lat, lon, t, sog, cog, suunta, liikkuu, vari, nimi }]   // matalikot()-tuloksen lista ja selitteen väli (v21)
@@ -807,6 +872,7 @@
       if (this.tasot.matalikot && this.matalikot.length) this._matalikot();
       if (this.tasot.silakka && this.silakkaFn) this._silakka();   // v50: pohjan sopivuus silakan vaiheelle
       if (this.tasot.vaylat && this.vaylat) this._vaylat();
+      if (this.tasot.rajat && (this.lohirajat || this.alamitta.length)) this._lohirajat();   // v67
       if (this.tasot.turvalaitteet && this.turvalaitteetNakyvissa()) this._turvalaitteet();   // v61
       if (this.tasot.turvalaitteet && this.viat.length && this.leveysKm() <= 5.5) this._viat();   // v62
       if (this.tasot.havainnot && this.havainnot.length) this._havainnot();   // virta- ja tuulinuolten alle
@@ -886,6 +952,7 @@
       if (this.tasot.syvyys && this.syvyys) osat.push('syvyys Traficom');
       if (this.tasot.vaylat && this.vaylat) osat.push('väylät Väylävirasto');
       else if (this.tasot.turvalaitteet && this.turvalaitteetNakyvissa()) osat.push('turvalaitteet Väylävirasto');
+      if (this.tasot.rajat && this.lohirajat) osat.push('4 mpk laskettu (Traficom)');   // v67
       if (this.tasot.ais && this.ais.length) osat.push('AIS Fintraffic');
       if (this.syvyys || this.vaylat) osat.push('ei navigointiin');
       const g = this.ctx, txt = osat.join(' · ');
@@ -949,6 +1016,43 @@
       g.drawImage(L.kuva, x0, y0, x1 - x0, y1 - y0);
       g.restore();
     }
+    /** v67: 4 mpk:n raja (yhtenäisempi katkoviiva), perusviiva (ohut pisteviiva) ja 63°30′:n alamittaraja (pitkä katko). */
+    _lohirajat() {
+      const g = this.ctx, R = this.lohirajat, yla = this.ylaVara + 4, ala = this.h - this.alaVara - 4;
+      const [nla0, nlo0] = this.paikka(0, this.h), [nla1, nlo1] = this.paikka(this.w, 0);
+      const nakyy = v => !(v.la1 < nla0 || v.la0 > nla1 || v.lo1 < nlo0 || v.lo0 > nlo1);
+      const polku = v => { const p = new Path2D(), ll = v.ll; for (let i = 0; i < ll.length; i += 2) { const [x, y] = this.ruutu(ll[i], ll[i + 1]); if (i) p.lineTo(x, y); else p.moveTo(x, y); } return p; };
+      g.save(); g.lineJoin = 'round'; g.lineCap = 'butt';
+      if (R) {
+        g.setLineDash([2, 5]); g.lineWidth = 1.2; g.strokeStyle = 'rgba(212,255,58,0.55)';
+        for (const v of R.perus) if (nakyy(v)) g.stroke(polku(v));
+        const ehd = [];
+        for (const v of R.raja4) {
+          if (!nakyy(v)) continue;
+          const p = polku(v);
+          g.setLineDash([]); g.lineWidth = 5; g.strokeStyle = 'rgba(0,0,0,0.7)'; g.stroke(p);
+          g.setLineDash([16, 5, 3, 5]); g.lineWidth = 2.6; g.strokeStyle = RAJAVARI; g.stroke(p);
+          for (let i = 0; i < v.ll.length; i += 2) { const [x, y] = this.ruutu(v.ll[i], v.ll[i + 1]); if (x > 30 && x < this.w - 90 && y > yla + 14 && y < ala - 10) ehd.push([x + 6, y - 6]); }
+        }
+        if (ehd.length) {
+          ehd.sort((a, b) => Math.hypot(a[0] - this.w / 2, a[1] - this.h / 2) - Math.hypot(b[0] - this.w / 2, b[1] - this.h / 2));
+          this._nimi('4 mpk', ehd.filter((_, k) => k % 7 === 0).slice(0, 12), RAJAVARI, 1);
+        }
+      }
+      for (const a of this.alamitta) {
+        const [x0, y] = this.ruutu(a.lat, a.lon0), [x1] = this.ruutu(a.lat, a.lon1);
+        if (y < yla - 2 || y > ala + 2 || x1 < 0 || x0 > this.w) continue;
+        g.setLineDash([]); g.lineWidth = 4.2; g.strokeStyle = 'rgba(0,0,0,0.6)';
+        g.beginPath(); g.moveTo(x0, y); g.lineTo(x1, y); g.stroke();
+        g.setLineDash([12, 9]); g.lineWidth = 2; g.strokeStyle = RAJAVARI;
+        g.beginPath(); g.moveTo(x0, y); g.lineTo(x1, y); g.stroke();
+        const xa = Math.max(x0, 8) + 4, xb = Math.min(x1, this.w - 70) - 230;
+        this._nimi(`63°30′ alamitta ↑ ${ALAMITTA.pohjoinen} cm · ↓ ${ALAMITTA.etela} cm`, [[xa, y - 6], [Math.max(xa, xb), y - 6], [xa, y + 16]], RAJAVARI, 1);
+      }
+      g.restore();
+    }
+    /** v67: 4 mpk:n tilanne pisteessä (rajaTila) tai null. */
+    rajaPisteessa(lat, lon) { return this.lohirajat ? rajaTila(this.lohirajat, lat, lon) : null; }
     /** v64: poikastuotantoalue pisteessä: { laji, nimi, luokka } tai null (läpinäkyvä tai alueen ulkopuolella). */
     poikasArvo(lat, lon) {
       const L = this.poikasLaji();
@@ -1710,6 +1814,9 @@
         rivit.push([['', '#e9f1f7'], ['<5', '#e9f1f7', '#e8f4ff'], ['5–8', '#e9f1f7', '#ffe066'], ['8–10', '#e9f1f7', '#ffa94d'], ['≥10 m/s', '#e9f1f7', '#ff5c5c']]);
       }
       if (this.tasot.vaylat && this.vaylat) rivit.push([['Väylä (Väylävirasto), mitoitussyväys m', '#ffd166']]);
+      if (this.tasot.rajat && (this.lohirajat || this.alamitta.some(a => { const y = this.ruutu(a.lat, a.lon0)[1]; return y > 0 && y < this.h; })))
+        rivit.push([['Lohiraja (laskettu)', RAJAVARI]].concat(this.lohirajat ? [['4 mpk', '#e9f1f7', RAJAVARI], ['perusviiva', '#e9f1f7', 'rgba(212,255,58,0.5)']] : [],
+          this.alamitta.length ? [['63°30′ alamitta', '#e9f1f7', RAJAVARI]] : []));   // v67
       const PL = this.tasot.poikaset ? this.poikasLaji() : null;   // v64
       if (PL) {
         rivit.push([[PL.nimi + ' (Luke VELMU, malli)', '#9fd0ff']]);
@@ -1774,7 +1881,8 @@
   const KarttaMalli = { lonX, latY, xLon, yLat, kayra, tasot, arvovali, lahinIndeksi, lahinArvo, lahinAika, virta, akseliArvo,
                         kerros, lohiLuokka, lohiMarginaali, lohiPehmeys, profiiliPisteessa, puraSyvyys, lahinKayra, puraVaylat, lahinVayla, tuuliVari, merkkiTyyli, merkkiKuvaus, MERKKI_LAJI,
                         havainnotPisteessa, havaintoTiedot, havaintoVari, etaisyysViivaan, jasennaSaaliit, aaltoLuokka, aallonPituus, aaltoJyrkkyys, onJyrkka,
-                        jalkiOsat, jalkiAlfa, lahinJalki, ketjuta, matalikot, matalikkoPisteessa, renkaanSisalla, pohjaKayrista, kayratTasoittain, pohjaArvio };
+                        jalkiOsat, jalkiAlfa, lahinJalki, ketjuta, matalikot, matalikkoPisteessa, renkaanSisalla, pohjaKayrista, kayratTasoittain, pohjaArvio,
+                        ALAMITTA, puraRajat, rajaRuutu, etaisyysViivoihin, rajaTila, alamittaViivat, alamitta, lohisaanto, LOHISAANNOT_VUOSI };
   if (typeof module !== 'undefined' && module.exports) module.exports = KarttaMalli;
   else { root.KarttaMalli = KarttaMalli; root.Kartta = Kartta; }
 })(typeof window !== 'undefined' ? window : this);

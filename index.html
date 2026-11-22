@@ -254,6 +254,7 @@
           <button data-taso="lohi">Lohikerros</button>
           <span class="lohivali" id="lohiRivi"><input id="lohiMin" inputmode="decimal">–<input id="lohiMax" inputmode="decimal">°C</span>
           <button data-taso="lohet">Lohet</button>
+          <button data-taso="rajat">Lohirajat</button>
           <button data-taso="silakka">Silakka</button>
           <button data-taso="poikaset">Poikasalueet</button>
           <span class="lohivali" id="poikasRivi" style="display:none"><select id="poikasLaji" aria-label="Poikastuotantoalueen laji"></select></span>
@@ -447,6 +448,7 @@
       Aaltopoijut ja mareografien vedenlämpö: Ilmatieteen laitos, avoin data (CC BY 4.0). Turvalaiteviat: Fintraffic / digitraffic.fi,
       lisenssi CC BY 4.0. Salamat: Ilmatieteen laitos, salamanpaikannus, avoin data (CC BY 4.0). Jokilaskuri: Länsstyrelsen Norrbotten, fiskräkning.
       Sovellus ei korvaa virallisia varoituksia eikä merenkulkuvaroituksia.</p>
+    <p class="pieni" id="rajaLahde">Lohirajat: 4 mpk:n raja laskettu Traficomin perusviivasta (Aluevesien rajat, CC BY 4.0), ei virallinen raja; alamitta 63°30′N (pohjoispuolella 50 cm, eteläpuolella 60 cm). Ahvenanmaalla omat säännöt, ei viivaa.</p>
     <p class="pieni" id="poikasLahde">Poikastuotantoalueet: Luke VELMU (CC BY 4.0).</p>
     <p class="pieni" id="vaylaLahde">Väylät: Lähde Väylävirasto, vesiväyläaineisto, CC BY 4.0. Aineisto ei sovellu navigointikäyttöön.</p>
     <p class="pieni" id="syvyysLahde">Syvyyskäyrät: Lähde Liikenne- ja viestintävirasto Traficom, Merikartan syvyystiedot.
@@ -476,13 +478,13 @@
   <button data-v="v-raportit">⋯<br>RAPORTIT</button>
 </nav>
 
-<script src="alueet.js?v=33"></script>
+<script src="alueet.js?v=34"></script>
 <script src="havainnot.js?v=15"></script>
 <script src="malli.js?v=25"></script>
 <script src="avoindata.js?v=2"></script>
 <script src="fmi.js?v=16"></script>
 <script src="nopeus.js?v=20"></script>
-<script src="kartta.js?v=39"></script>
+<script src="kartta.js?v=40"></script>
 <script src="sillat.js?v=2"></script>
 <script src="silakka.js?v=8"></script>
 <script src="ikaluokat.js?v=5"></script>
@@ -1238,11 +1240,13 @@ async function lataaKiintea(nimi, versio, al) {
 }
 async function lataaSyvyys() {
   const al = valittuAlue;
-  const [js, jv, jl] = await Promise.all([lataaKiintea('syvyys.json', meri && meri.syvyys && meri.syvyys.luotu, al),
+  const [js, jv, jl, jr] = await Promise.all([lataaKiintea('syvyys.json', meri && meri.syvyys && meri.syvyys.luotu, al),
                                       lataaKiintea('vaylat.json', meri && meri.vaylat && meri.vaylat.luotu, al),
-                                      lataaKiintea('lisaantyminen.json', meri && meri.lisaantyminen && meri.lisaantyminen.luotu, al)]);   // v64
+                                      lataaKiintea('lisaantyminen.json', meri && meri.lisaantyminen && meri.lisaantyminen.luotu, al),   // v64
+                                      al.lohirajat && meri && meri.rajat && meri.rajat.luotu ? lataaKiintea('rajat.json', meri.rajat.luotu, al) : null]);   // v67
   if (al !== valittuAlue) return;
   lataaPoikaset(jl, al);   // v64: kuvat taustalla
+  asetaLohirajat(jr, al);   // v67
   paivitaOfflineTila();   // v26
   let muuttui = false;
   if (js && (!syvyys || syvyys.luotu !== js.luotu)) {
@@ -1259,6 +1263,36 @@ async function lataaSyvyys() {
   laskeMatalikot();
   piirraMeriTila();
   if (kartta) { kartta.syvyys = syvyys; kartta.vaylat = vaylat; paivitaReititKartalle(); kartta.piirra(); }
+}
+
+// v67: lohen 4 mpk:n raja (rajat.json, laskettu Traficomin perusviivasta) ja 63°30′:n alamittaraja; ei Ahvenanmaalle.
+var lohirajat = null;
+function asetaLohirajat(jr, al) {
+  const R = al.lohirajat && jr ? KarttaMalli.puraRajat(jr) : null;
+  const sama = (a, b) => !!a && !!b && ['lat_min', 'lat_max', 'lon_min', 'lon_max'].every(k => Math.abs(a[k] - b[k]) < 1e-9);
+  if (R && R.alue && !sama(R.alue, al.rajat)) { lohirajat = null; }   // eri alueen tiedosto (rajat muuttuneet)
+  else lohirajat = R;
+  if (kartta) { kartta.lohirajat = lohirajat; kartta.piirra(); }
+  const L = $('rajaLahde');
+  if (L) L.textContent = 'Lohirajat: 4 mpk:n raja laskettu Traficomin perusviivasta (Liikenne- ja viestintävirasto Traficom, Aluevesien rajat, CC BY 4.0)'
+    + (lohirajat ? `, haettu ${pvm(new Date(lohirajat.luotu))} ${new Date(lohirajat.luotu).getFullYear()}` : al.lohirajat ? ', tälle alueelle ei vielä laskettu' : '')
+    + '. Ei virallinen raja, ei navigointiin. Alamitta 63°30′N: pohjoispuolella 50 cm, eteläpuolella 60 cm (pyyntimittataulukko 2025). '
+    + `Säännöt ${KarttaMalli.LOHISAANNOT_VUOSI} (SVK): 4 mpk:n sisäpuolella 1.5.–31.8. 2 lohta/vrk, muulloin ja ulkopuolella 1 rasvaeväleikattu/vrk. `
+    + 'Ahvenanmaalla omat säännöt, ei viivaa. Virallinen tieto: kalastusrajoitus.fi.';
+}
+/** v67: lohen rajat napautuskohdassa (kun Lohirajat-taso on päällä): 4 mpk:n puoli, etäisyys rajaan, säännöt ja alamitta. */
+function rajaTeksti(lat, lon) {
+  if (!kartta || !kartta.tasot.rajat || !valittuAlue.lohirajat) return '';
+  const osat = [], tila = kartta.rajaPisteessa(lat, lon);
+  const ajat = karttaAjat(), pv = ajat.length && ajat[kartta.aika] ? new Date(ajat[kartta.aika]) : new Date();
+  if (tila) {
+    osat.push(tila.rajalla ? `4 mpk:n rajalla (alle ${etaisyys(100)}; laskettu raja, ei virallinen)`
+      : `4 mpk:n ${tila.sisalla ? 'sisäpuolella' : 'ulkopuolella'}, rajalle ${etaisyys(tila.m)} (laskettu, ei virallinen)`);
+    osat.push(tila.rajalla ? 'sisäpuolella ' + KarttaMalli.lohisaanto(true, pv) + '; ulkopuolella ' + KarttaMalli.lohisaanto(false, pv)
+      : KarttaMalli.lohisaanto(tila.sisalla, pv));
+  } else if (meri && meri.rajat && meri.rajat.tila === 'virhe') osat.push('4 mpk:n rajaa ei saatu laskettua (ⓘ)');
+  osat.push(`lohen alamitta ${KarttaMalli.alamitta(lat)} cm (63°30′:n ${lat >= KarttaMalli.ALAMITTA.lat ? 'pohjois' : 'etelä'}puolella)`);
+  return '🎣 ' + osat.join(', ');
 }
 
 // v64: VELMU-poikastuotantoalueet (silakka, muikku, ahven): kuvat välimuistiin, kartalle siru "Poikasalueet"
@@ -1377,6 +1411,12 @@ function piirraMeriTila() {
   if (matalikkoTulos) { const t = matalikkoTulos, v = t.matalikot.filter(m => m.luokka === 'vali').length;
     osat.push(`Matalikot käyristä: ${t.matalikot.length} (huippu ${luku(t.min, 0)}–${luku(t.max, 0)} m: ${v}, muu nousu ≥ ${luku(t.nousuM, 0)} m: ${t.matalikot.length - v}); suljettuja käyriä ${t.renkaita}, mäkiä ${t.maki}, kuoppia ${t.kuoppa}, epäselviä ${t.epaselva}`); }
   if (vaylat) osat.push(`Väylät: Väylävirasto, vesiväyläaineisto (CC BY 4.0). Ei navigointikäyttöön`);
+  if (valittuAlue.lohirajat) {   // v67
+    const rt = meri.rajat, ti = lohirajat && lohirajat.tilasto;
+    osat.push('Lohirajat: 4 mpk laskettu Traficomin perusviivasta' + (lohirajat ? ` (haettu ${pvm(new Date(lohirajat.luotu))}; raja ${ti ? luku(ti.raja_km, 0) + ' km' : '?'}, perusviiva ${ti ? luku(ti.perus_km, 0) + ' km' : '?'}`
+      + `${ti ? ', erottaa maan ja meren ' + ti.janoja_erottaa + '/' + ti.janoja_arvioitu + ' janalla' : ''})` : rt ? ` – ${rt.tila}${rt.viesti ? ': ' + rt.viesti : ''}` : ' – ei vielä haettu')
+      + ', ei virallinen raja; alamitta 63°30′N');
+  }
   if (typeof aisTila === 'function' && aisTila()) osat.push(aisTila());
   if (typeof vesiTilaTeksti === 'function' && vesiTilaTeksti()) osat.push(vesiTilaTeksti());   // v35
   if (meri.bgc || valittuAlue.silakka) osat.push(`Silakkamalli (v56; alueet: ${silakkaAlueet()}${valittuAlue.silakka && valittuAlue.silakka.paiva === 'valo' ? '; tällä alueella päivän kerros yleissäännöllä, vaihe vain paikan sopivuuteen' : ''}): valon vaimennus `
@@ -1558,7 +1598,7 @@ function naytaPiste(lat, lon) {
   if (lat === null) { if (kartta && kartta.valittuOma) asetaLohiTaalla(false); suljePiste(); return; }   // profiilin × veneen kohdalla
   if (kartta) kartta.valittuOma = false;
   el.hidden = false;
-  const st = [siltaTeksti(lat, lon), turvalaiteTeksti(lat, lon), poikasTeksti(lat, lon)].filter(Boolean).join(' · ');   // v35: silta ensin; v61 turvalaite; v64 poikasalue
+  const st = [siltaTeksti(lat, lon), turvalaiteTeksti(lat, lon), rajaTeksti(lat, lon), poikasTeksti(lat, lon)].filter(Boolean).join(' · ');   // v35: silta ensin; v61 turvalaite; v67 lohiraja; v64 poikasalue
   if (st && siltaTeksti(lat, lon)) naytaVesi(5000);
   if (!nakyma) {   // ei meridataa (esim. Porin edusta): syvyys, väylä ja omat havainnot silti
     const osat = [st, jalkiTeksti(lat, lon), aisTeksti(lat, lon), matalikkoTeksti(lat, lon), syvyysTeksti(lat, lon), vaylaTeksti(lat, lon), havaintoTeksti(lat, lon)].filter(Boolean);
@@ -1712,6 +1752,7 @@ function avaaKarttaNakyma() {
     if (avoin.viat) kartta.viat = avoin.viat;   // v62
     if (avoin.salamat) kartta.salamat = avoin.salamat;   // v63
     if (poikaset) kartta.poikaset = poikaset;   // v64
+    kartta.lohirajat = lohirajat; kartta.alamitta = KarttaMalli.alamittaViivat(window.ALUEET);   // v67
     $('poikasLaji').addEventListener('change', () => { if (!poikaset) return; poikaset.valittu = $('poikasLaji').value; tallennaLS('mlt_poikaslaji', poikaset.valittu);
       kartta.naytaSelite(3000); if (kartta.valittu && !kartta.valittuOma) naytaPiste(kartta.valittu[0], kartta.valittu[1]); });
     paivitaReititKartalle();   // v30

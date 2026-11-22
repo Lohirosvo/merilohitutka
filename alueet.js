@@ -1,4 +1,4 @@
-/* Merilohitutka – alueet.js (v33)
+/* Merilohitutka – alueet.js (v34)
  * Kalastusalueet. Yksi lähde: sovellus lataa tämän skriptinä ja hae_copernicus.py lukee saman tiedoston.
  * Hakasulkeiden [ ] välissä on oltava puhdasta JSONia (ei kommentteja, ei pilkkua viimeisen alkion jälkeen).
  *
@@ -55,13 +55,16 @@
  *   Kokemäenjoen sameampi vesi → Copernicuksen Kd voi olla liian pieni, kerros liian syvällä [A]. Syyskutu jää kauden ulkopuolelle.
  *   Kaskinen–Kristiinankaupunki (v29): tietopohja 3.3, Kd 0,32 (Selkämeren Secchi 5,29 m → 1,7/5,29).
  *   Koordinaatit Hannun antamat (asteet, minuutit, sekunnit).
+ * lohirajat (v34, Hannu 22.11.2026 "Tehdään, ei viivaa ahvenanmaalle"): true = haetaan Traficomin perusviiva ja lasketaan
+ *   lohen 4 mpk:n raja (hae_rajat.py). Maan puolen tunnistus käyttää alueen luiskoja, jatko-satamaa ja neliömerkkejä (satamat);
+ *   lisäpisteitä voi antaa: "lohirajat": { "maa": [[lat, lon], ...] }. Eckerö pois (Ahvenanmaalla omat säännöt).
  * v23: Ohtakari toiseksi paluukohteeksi (Hannu 14.11.); merkki satamaan 64,08944 23,40594 (predictwind.com), paluukohteen tyyli.
  */
 (typeof window !== 'undefined' ? window : globalThis).ALUEET = [
   {
     "tunnus": "luoto", "nimi": "Luoto–Tankar", "lyhyt": "Luoto", "polku": "",
     "rajat": { "lat_min": 63.45, "lat_max": 64.13, "lon_min": 22.05, "lon_max": 23.65 },
-    "keski": [63.83, 22.62], "zoom": 10.6, "paluuikkuna": true, "tuulipisteetLisaa": true,
+    "keski": [63.83, 22.62], "zoom": 10.6, "lohirajat": true, "paluuikkuna": true, "tuulipisteetLisaa": true,
     "silakka": { "kdOletus": 0.36, "kausi": ["05-01", "08-31"], "paiva": "taulukko", "kohta": "3.1" },
     "lahtopisteet": [
       {"nimi": "Luoto", "minne": "Luodon pisteeseen", "mista": "Luodon pisteestä", "tyyppi": "turva", "lat": 63.8352, "lon": 22.646742, "jatko": {"nimi": "Köpmanholmen", "minne": "Köpmanholmeniin", "lat": 63.806844, "lon": 22.671069}},
@@ -82,7 +85,7 @@
   {
     "tunnus": "vaasa", "nimi": "Vaasa", "lyhyt": "Vaasa", "polku": "vaasa/",
     "rajat": { "lat_min": 62.95, "lat_max": 63.56, "lon_min": 21.15, "lon_max": 22.00 },
-    "keski": [63.12, 21.50], "zoom": 10.9, "paluuikkuna": false,
+    "keski": [63.12, 21.50], "zoom": 10.9, "lohirajat": true, "paluuikkuna": false,
     "silakka": { "kdOletus": 0.31, "kausi": ["05-01", "08-31"], "paiva": "valo", "kohta": "3.2", "malli": "saannot",
       "vaiheet": [
         {"tunnus": "odottava", "nimi": "kutua odottava", "pvm": ["05-01", "07-15"], "ellei": ["kutuSisa", "kutuUlko", "kutuKesa", "kutuAvo"], "pohja": [5, 10, 20, 30]},
@@ -106,7 +109,7 @@
   {
     "tunnus": "norrskar", "nimi": "Norrskär", "lyhyt": "Norrskär", "polku": "norrskar/",
     "rajat": { "lat_min": 63.05, "lat_max": 63.45, "lon_min": 20.30, "lon_max": 21.20 },
-    "keski": [63.24, 20.80], "zoom": 10.4, "paluuikkuna": false, "suoraMatala": 10,
+    "keski": [63.24, 20.80], "zoom": 10.4, "lohirajat": true, "paluuikkuna": false, "suoraMatala": 10,
     "silakka": { "kdOletus": 0.31, "kausi": ["05-01", "08-31"], "paiva": "valo", "kohta": "3.2", "malli": "saannot",
       "vaiheet": [
         {"tunnus": "odottava", "nimi": "kutua odottava", "pvm": ["05-01", "07-15"], "ellei": ["kutuSisa", "kutuUlko", "kutuKesa", "kutuAvo"], "pohja": [5, 10, 20, 30]},
@@ -132,7 +135,7 @@
   {
     "tunnus": "kaskinen", "nimi": "Kaskinen–Kristiinankaupunki", "lyhyt": "Kaskinen–Kristiinank.", "polku": "kaskinen/",
     "rajat": { "lat_min": 62.12, "lat_max": 62.65, "lon_min": 20.85, "lon_max": 21.65 },
-    "keski": [62.36, 21.25], "zoom": 10.3, "paluuikkuna": false,
+    "keski": [62.36, 21.25], "zoom": 10.3, "lohirajat": true, "paluuikkuna": false,
     "silakka": { "kdOletus": 0.32, "kausi": ["05-01", "08-31"], "paiva": "valo", "kohta": "3.3",
                  "vaiheet": { "odottava": [5, 10, 25, 40], "kutu": [0.5, 3, 10, 15], "syonnos": [10, 20, 40, 60] } },
     "lahtopisteet": [
@@ -147,7 +150,7 @@
   {
     "tunnus": "pori", "nimi": "Pori", "lyhyt": "Pori", "polku": "pori/",
     "rajat": { "lat_min": 61.40, "lat_max": 61.90, "lon_min": 20.85, "lon_max": 21.60 },
-    "keski": [61.65, 21.28], "zoom": 10.3, "paluuikkuna": false,
+    "keski": [61.65, 21.28], "zoom": 10.3, "lohirajat": true, "paluuikkuna": false,
     "silakka": { "kdOletus": 0.32, "kausi": ["05-01", "08-31"], "paiva": "valo", "kohta": "3.3, Porille sovellettu",
                  "vaiheet": { "odottava": [5, 10, 25, 40], "kutu": [0.5, 3, 10, 15], "syonnos": [10, 20, 40, 60] } },
     "lahtopisteet": [
