@@ -6,6 +6,7 @@ name: Julkaise merilohitutka
 # v65b (22.11.2026): julkaisu omaksi työkseen (GitHubin suositus) ja toinen yritys 2 min päästä. Syy: ajot #100/1, #102/1
 # ja #102/2 kaatuivat deploy-pagesiin "No artifacts named github-pages-N were found", vaikka paketti oli olemassa
 # (#102: github-pages-2, 8,06 MB). Kaatuessa "Re-run failed jobs" ajaa vain julkaisun eikä hae dataa uudelleen (~15 min).
+# v71 (22.11.2026): MML_API_KEY (GitHubin salaisuus) hakuvaiheelle: valtion yleinen vesialue MML:n kiinteistöpalvelusta.
 
 on:
   push:
@@ -56,6 +57,7 @@ jobs:
         env:
           COPERNICUSMARINE_SERVICE_USERNAME: ${{ secrets.COPERNICUSMARINE_SERVICE_USERNAME }}
           COPERNICUSMARINE_SERVICE_PASSWORD: ${{ secrets.COPERNICUSMARINE_SERVICE_PASSWORD }}
+          MML_API_KEY: ${{ secrets.MML_API_KEY }}   # v71: yleinen vesialue (hae_vesialueet.py); puuttuessa vanha tiedosto käytössä
         run: python hae_copernicus.py _site/data/meri.json
 
       - uses: actions/configure-pages@v6
